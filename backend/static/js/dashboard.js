@@ -76,33 +76,67 @@ const DashboardPage = {
   },
 
   renderChannelList(channels) {
-    const el = document.getElementById('channel-list');
-    if (!el) return;
-    if (channels.length === 0) {
-      el.innerHTML = '<div class="empty-state"><div class="icon">📡</div><p>暂无渠道数据<br>请先在 New-API 中添加渠道</p></div>';
-      return;
-    }
-    el.innerHTML = `<table>
-      <thead><tr><th>渠道名</th><th>类型</th><th>状态</th><th>健康</th><th>操作</th></tr></thead>
-      <tbody>${channels.map(ch => `
-        <tr>
-          <td>${ch.name || '-'}</td>
-          <td>${ch.type || '-'}</td>
-          <td>${ch.status === 1 ? '<span class="badge badge-healthy">启用</span>' : '<span class="badge badge-unknown">禁用</span>'}</td>
-          <td>${statusBadge(ch.health?.status || 'unknown')}</td>
-          <td><button class="btn" onclick="DashboardPage.checkChannel(${ch.id})">检测</button></td>
-        </tr>
-      `).join('')}</tbody>
-    </table>`;
+    // Target both dashboard (#channel-list) and channels page (#channel-list-channels)
+    const targets = document.querySelectorAll('#channel-list, #channel-list-channels');
+    if (targets.length === 0) return;
+
+    targets.forEach(el => {
+      // Determine if this is the detailed (channels page) view
+      const detailed = el.id === 'channel-list-channels';
+
+      if (channels.length === 0) {
+        el.innerHTML = '<div class="empty-state"><div class="icon">📡</div><p>暂无渠道数据<br>请先在 New-API 中添加渠道</p></div>';
+        return;
+      }
+
+      const cols = detailed
+        ? '<tr><th>渠道名</th><th>类型</th><th>状态</th><th>健康状态</th><th>延迟</th><th>操作</th></tr>'
+        : '<tr><th>渠道名</th><th>类型</th><th>状态</th><th>健康</th><th>操作</th></tr>';
+
+      el.innerHTML = `<table>
+        <thead>${cols}</thead>
+        <tbody>${channels.map(ch => {
+          if (detailed) {
+            return `<tr>
+              <td>${ch.name || '-'}</td>
+              <td>${ch.type || '-'}</td>
+              <td>${ch.status === 1 ? '<span class="badge badge-healthy">启用</span>' : '<span class="badge badge-unknown">禁用</span>'}</td>
+              <td>${statusBadge(ch.health?.status || 'unknown')}</td>
+              <td>${ch.health?.latency_ms != null ? ch.health.latency_ms + 'ms' : '-'}</td>
+              <td><button class="btn" onclick="DashboardPage.checkChannel(${ch.id})">检测</button></td>
+            </tr>`;
+          }
+          return `<tr>
+            <td>${ch.name || '-'}</td>
+            <td>${ch.type || '-'}</td>
+            <td>${ch.status === 1 ? '<span class="badge badge-healthy">启用</span>' : '<span class="badge badge-unknown">禁用</span>'}</td>
+            <td>${statusBadge(ch.health?.status || 'unknown')}</td>
+            <td><button class="btn" onclick="DashboardPage.checkChannel(${ch.id})">检测</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>`;
+    });
   },
 
   async checkChannel(id) {
     try {
       const result = await API.post(`/monitor/check/${id}`);
       showToast(`渠道 ${result.name}: ${result.status}`);
-      this.load(); // 刷新
+      this.load();
     } catch (e) {
       showToast('检测失败: ' + e.message);
+    }
+  },
+};
+
+/* 渠道管理页面 - 复用 DashboardPage 的数据加载，渲染到 channels 页面容器 */
+const ChannelsPage = {
+  async load() {
+    try {
+      const chData = await API.get('/dashboard/channels');
+      DashboardPage.renderChannelList(chData.channels || []);
+    } catch (e) {
+      console.error('Failed to load channels:', e);
     }
   },
 };

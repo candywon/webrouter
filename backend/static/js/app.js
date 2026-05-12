@@ -1,24 +1,8 @@
-/* 应用入口 */
-(function () {
-  // 注册路由
-  Router.register('/', DashboardPage);
-  Router.register('/channels', DashboardPage);
-  Router.register('/monitor', DashboardPage);
-  Router.register('/alerts', AlertPage);
-  Router.register('/billing', BillingPage);
-  Router.register('/team', TeamPage);
-  Router.register('/cli', CLIPage);
-  Router.register('/settings', SettingsPage);
-
-  // 启动路由
-  Router.init();
-})();
-
-/* 设置页面逻辑 */
+/* 设置页面逻辑 — 必须在路由注册前定义 */
 const SettingsPage = {
   async load() {
     try {
-      const data = await API.get('/settings');
+      const data = await API.get('/settings/');
       const el = document.getElementById('settings-content');
       if (!el) return;
       el.innerHTML = `
@@ -47,3 +31,16 @@ const SettingsPage = {
     } catch (e) { showToast('备份失败'); }
   },
 };
+
+/* 应用入口 */
+(function () {
+  Router.register('/', DashboardPage);
+  Router.register('/channels', ChannelsPage);
+  Router.register('/monitor', MonitorPage);
+  Router.register('/alerts', AlertPage);
+  Router.register('/billing', BillingPage);
+  Router.register('/team', TeamPage);
+  Router.register('/cli', CLIPage);
+  Router.register('/settings', SettingsPage);
+  Router.init();
+})();

@@ -1,32 +1,43 @@
 """仪表盘API"""
 from flask import Blueprint, jsonify
-from models.newapi_adapter import NewAPIAdapter
 from models.wr_models import ChannelHealth, CostRecord
 from extensions import db
 from sqlalchemy import func
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
+# 检测是否有New-API数据
+def _has_newapi_data():
+    """尝试读New-API，失败则返回False"""
+    try:
+        from models.newapi_adapter import NewAPIAdapter
+        channels = NewAPIAdapter.get_channels()
+        return len(channels) > 0
+    except Exception:
+        return False
+
 
 @dashboard_bp.route('/overview')
 def overview():
     """总览数据：可用Key数、今日调用量、错误率、月成本"""
+    if not _has_newapi_data():
+        from services.demo_data import get_demo_overview
+        return jsonify(get_demo_overview())
+
     try:
+        from models.newapi_adapter import NewAPIAdapter
         channels = NewAPIAdapter.get_channels()
     except Exception:
         channels = []
 
-    # 渠道统计
     total_channels = len(channels)
     active_channels = sum(1 for c in channels if c.get('status') == 1)
 
-    # 健康状态
     health_map = {}
     try:
         health_records = db.session.query(
             ChannelHealth.channel_id,
             ChannelHealth.status,
-            ChannelHealth.latency_ms
         ).distinct(ChannelHealth.channel_id).order_by(
             ChannelHealth.channel_id, ChannelHealth.checked_at.desc()
         ).all()
@@ -37,8 +48,8 @@ def overview():
 
     healthy_count = sum(1 for s in health_map.values() if s == 'healthy')
 
-    # 今日用量
     try:
+        from models.newapi_adapter import NewAPIAdapter
         usage = NewAPIAdapter.get_usage_stats(hours=24)
         today_requests = sum(u.get('request_count', 0) for u in usage)
         today_errors = sum(u.get('error_count', 0) for u in usage)
@@ -47,7 +58,6 @@ def overview():
         today_requests = 0
         error_rate = 0
 
-    # 月成本
     try:
         month_cost = db.session.query(
             func.sum(CostRecord.cost_cents)
@@ -80,7 +90,13 @@ def trends():
     from flask import request
     days = request.args.get('days', 7, type=int)
     days = min(days, 90)
+
+    if not _has_newapi_data():
+        from services.demo_data import get_demo_trends
+        return jsonify({'days': days, 'data': get_demo_trends(days)})
+
     try:
+        from models.newapi_adapter import NewAPIAdapter
         data = NewAPIAdapter.get_daily_usage(days=days)
     except Exception:
         data = []
@@ -90,12 +106,16 @@ def trends():
 @dashboard_bp.route('/channels')
 def channels():
     """渠道列表+健康状态"""
+    if not _has_newapi_data():
+        from services.demo_data import get_demo_channels
+        return jsonify({'channels': get_demo_channels()})
+
     try:
+        from models.newapi_adapter import NewAPIAdapter
         channel_list = NewAPIAdapter.get_channels()
     except Exception:
         channel_list = []
 
-    # 附加最新健康状态
     for ch in channel_list:
         latest = ChannelHealth.query.filter_by(
             channel_id=ch['id']
