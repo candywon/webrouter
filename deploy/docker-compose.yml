@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # New-API 网关核心
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: webrouter-newapi
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - TZ=Asia/Shanghai
+      - SQL_DSN=${DB_DSN:-}
+      - REDIS_CONN_STRING=redis://redis:6379
+      - SESSION_SECRET=${SESSION_SECRET:-changeme}
+    volumes:
+      - newapi_data:/data
+    depends_on:
+      - redis
+
+  # WebRouter 管理后台
+  webrouter:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile
+    container_name: webrouter-app
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - TZ=Asia/Shanghai
+      - FLASK_ENV=production
+      - DATABASE_URI=${DB_DSN:-sqlite:///data/webrouter.db}
+      - NEWAPI_URL=http://new-api:3000
+      - NEWAPI_ADMIN_TOKEN=${NEWAPI_ADMIN_TOKEN:-}
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - webrouter_data:/app/data
+    depends_on:
+      - new-api
+      - redis
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: webrouter-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: webrouter-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - webrouter
+      - new-api
+
+volumes:
+  newapi_data:
+  webrouter_data:
+  redis_data:

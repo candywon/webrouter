@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRouter - AI中转站管理</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <div class="sidebar-logo">⚡ WebRouter</div>
+      <ul class="sidebar-nav">
+        <li><a href="#/" class="active"><span class="icon">📊</span> 仪表盘</a></li>
+        <li><a href="#/channels"><span class="icon">📡</span> 渠道管理</a></li>
+        <li><a href="#/monitor"><span class="icon">💓</span> 健康监控</a></li>
+        <li><a href="#/alerts"><span class="icon">🔔</span> 告警规则</a></li>
+        <li><a href="#/billing"><span class="icon">💰</span> 计费统计</a></li>
+        <li><a href="#/team"><span class="icon">👥</span> 团队管理</a></li>
+        <li><a href="#/cli"><span class="icon">🔌</span> CLI 对接</a></li>
+        <li><a href="#/settings"><span class="icon">⚙️</span> 系统设置</a></li>
+      </ul>
+    </aside>
+
+    <!-- 主内容 -->
+    <main class="main-content">
+      <header class="header">
+        <span class="header-title" id="header-title">仪表盘</span>
+        <span style="color:var(--text-muted);font-size:13px">WebRouter v1.0</span>
+      </header>
+
+      <!-- 仪表盘 -->
+      <div class="page active" id="page-">
+        <div class="stats-grid" id="dashboard-stats"></div>
+        <div class="chart-container">
+          <div class="card-header"><span class="card-title">调用趋势</span></div>
+          <canvas id="trend-chart" height="200"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">渠道状态</span>
+          </div>
+          <div id="channel-list"></div>
+        </div>
+      </div>
+
+      <!-- 渠道管理（复用仪表盘渠道区） -->
+      <div class="page" id="page-channels">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">渠道列表</span>
+            <button class="btn btn-primary" onclick="DashboardPage.load()">刷新</button>
+          </div>
+          <div id="channel-list-channels"></div>
+        </div>
+      </div>
+
+      <!-- 健康监控 -->
+      <div class="page" id="page-monitor">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">渠道健康监控</span>
+            <button class="btn btn-primary" id="btn-check-all">全部检测</button>
+          </div>
+          <div id="monitor-content"></div>
+        </div>
+      </div>
+
+      <!-- 告警规则 -->
+      <div class="page" id="page-alerts">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">告警规则</span>
+            <button class="btn btn-primary" onclick="AlertPage.createRule()">+ 添加规则</button>
+          </div>
+          <div id="alert-rules"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">告警历史</span></div>
+          <div id="alert-history">
+            <div class="empty-state"><div class="icon">📋</div><p>暂无告警记录</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 计费统计 -->
+      <div class="page" id="page-billing">
+        <div class="card">
+          <div class="card-header"><span class="card-title">成本分析（近30天）</span></div>
+          <div id="billing-content">
+            <div class="empty-state"><div class="icon">💰</div><p>加载中...</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 团队管理 -->
+      <div class="page" id="page-team">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">团队成员</span>
+            <button class="btn btn-primary" id="btn-invite-member">+ 邀请成员</button>
+          </div>
+          <div id="team-content">
+            <div class="empty-state"><div class="icon">👥</div><p>加载中...</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CLI 对接 -->
+      <div class="page" id="page-cli">
+        <div id="cli-tools"></div>
+        <div id="cli-output"></div>
+      </div>
+
+      <!-- 系统设置 -->
+      <div class="page" id="page-settings">
+        <div id="settings-content">
+          <div class="empty-state"><div class="icon">⚙️</div><p>加载中...</p></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- JS 依赖 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/router.js"></script>
+  <script src="/static/js/dashboard.js"></script>
+  <script src="/static/js/alert.js"></script>
+  <script src="/static/js/billing.js"></script>
+  <script src="/static/js/team.js"></script>
+  <script src="/static/js/cli-export.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
