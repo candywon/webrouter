@@ -15,10 +15,11 @@ type Meter struct {
 }
 
 type minuteBucket struct {
-	count     int
-	tokens    int64
-	costCents int64
-	start     time.Time
+	count      int
+	validCount int   // 有效请求次数（status < 400 且非重试且无错误）
+	tokens     int64
+	costCents  int64
+	start      time.Time
 }
 
 var meter = &Meter{
@@ -46,15 +47,20 @@ func (m *Meter) RecordRequest(rlog *RequestLog) {
 	m.mu.Lock()
 	b, ok := m.providerMinute[rlog.ProviderID]
 	now := time.Now()
+	isValid := rlog.StatusCode < 400 && !rlog.IsRetry && rlog.ErrorMessage == ""
 	if !ok || now.Sub(b.start) >= time.Minute {
 		m.providerMinute[rlog.ProviderID] = &minuteBucket{
-			count:     1,
-			tokens:    rlog.InputTokens + rlog.OutputTokens,
-			costCents: rlog.CostCents,
-			start:     now,
+			count:      1,
+			validCount: boolToInt(isValid),
+			tokens:     rlog.InputTokens + rlog.OutputTokens,
+			costCents:  rlog.CostCents,
+			start:      now,
 		}
 	} else {
 		b.count++
+		if isValid {
+			b.validCount++
+		}
 		b.tokens += rlog.InputTokens + rlog.OutputTokens
 		b.costCents += rlog.CostCents
 	}
@@ -62,14 +68,14 @@ func (m *Meter) RecordRequest(rlog *RequestLog) {
 }
 
 // GetProviderMinuteStats 获取 Provider 当前分钟用量
-func (m *Meter) GetProviderMinuteStats(providerID int) (count int, tokens int64, cost int64) {
+func (m *Meter) GetProviderMinuteStats(providerID int) (count int, validCount int, tokens int64, cost int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, ok := m.providerMinute[providerID]
 	if !ok || time.Since(b.start) >= time.Minute {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
-	return b.count, b.tokens, b.costCents
+	return b.count, b.validCount, b.tokens, b.costCents
 }
 
 // BuildRequestLog 从代理结果构造 RequestLog

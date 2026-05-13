@@ -428,6 +428,7 @@ func GetDailyUsage(days int) ([]map[string]interface{}, error) {
 	rows, err := db.Query(`
 		SELECT DATE(created_at) as date,
 		       COUNT(*) as requests,
+		       SUM(CASE WHEN status_code < 400 AND is_retry = 0 AND error_message = '' THEN 1 ELSE 0 END) as valid_requests,
 		       COALESCE(SUM(input_tokens), 0) as input_tokens,
 		       COALESCE(SUM(output_tokens), 0) as output_tokens,
 		       COALESCE(SUM(cost_cents), 0) as cost_cents,
@@ -445,12 +446,12 @@ func GetDailyUsage(days int) ([]map[string]interface{}, error) {
 	var result []map[string]interface{}
 	for rows.Next() {
 		var date string
-		var requests, inputTok, outputTok, costCents, errors int64
-		if err := rows.Scan(&date, &requests, &inputTok, &outputTok, &costCents, &errors); err != nil {
+		var requests, validRequests, inputTok, outputTok, costCents, errors int64
+		if err := rows.Scan(&date, &requests, &validRequests, &inputTok, &outputTok, &costCents, &errors); err != nil {
 			continue
 		}
 		result = append(result, map[string]interface{}{
-			"date": date, "requests": requests,
+			"date": date, "requests": requests, "valid_requests": validRequests,
 			"input_tokens": inputTok, "output_tokens": outputTok,
 			"cost_cents": costCents, "errors": errors,
 		})
@@ -463,6 +464,7 @@ func GetModelUsage(hours int) ([]map[string]interface{}, error) {
 	rows, err := db.Query(`
 		SELECT model_name,
 		       COUNT(*) as requests,
+		       SUM(CASE WHEN status_code < 400 AND is_retry = 0 AND error_message = '' THEN 1 ELSE 0 END) as valid_requests,
 		       COALESCE(SUM(input_tokens), 0) as input_tokens,
 		       COALESCE(SUM(output_tokens), 0) as output_tokens,
 		       COALESCE(SUM(cost_cents), 0) as cost_cents,
@@ -481,13 +483,13 @@ func GetModelUsage(hours int) ([]map[string]interface{}, error) {
 	var result []map[string]interface{}
 	for rows.Next() {
 		var model string
-		var requests, inputTok, outputTok, costCents, errors int64
+		var requests, validRequests, inputTok, outputTok, costCents, errors int64
 		var avgLatency float64
-		if err := rows.Scan(&model, &requests, &inputTok, &outputTok, &costCents, &errors, &avgLatency); err != nil {
+		if err := rows.Scan(&model, &requests, &validRequests, &inputTok, &outputTok, &costCents, &errors, &avgLatency); err != nil {
 			continue
 		}
 		result = append(result, map[string]interface{}{
-			"model": model, "requests": requests,
+			"model": model, "requests": requests, "valid_requests": validRequests,
 			"input_tokens": inputTok, "output_tokens": outputTok,
 			"cost_cents": costCents, "avg_latency": avgLatency, "errors": errors,
 		})

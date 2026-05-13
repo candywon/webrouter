@@ -305,17 +305,18 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 	providers := router.GetProviders()
 	stats := make([]map[string]interface{}, 0, len(providers))
 	for _, p := range providers {
-		count, tokens, cost := meter.GetProviderMinuteStats(p.ID)
+		count, validCount, tokens, cost := meter.GetProviderMinuteStats(p.ID)
 		stats = append(stats, map[string]interface{}{
-			"provider_id":   p.ID,
-			"name":          p.Name,
-			"status":        p.Status,
-			"priority":      p.Priority,
-			"last_latency":  p.LastLatencyMs,
-			"quota_ratio":   p.QuotaRatio(),
-			"minute_count":  count,
-			"minute_tokens": tokens,
-			"minute_cost":   cost,
+			"provider_id":        p.ID,
+			"name":               p.Name,
+			"status":             p.Status,
+			"priority":           p.Priority,
+			"last_latency":       p.LastLatencyMs,
+			"quota_ratio":        p.QuotaRatio(),
+			"minute_count":       count,
+			"minute_valid_count": validCount,
+			"minute_tokens":      tokens,
+			"minute_cost":        cost,
 		})
 	}
 	writeJSON(w, 200, map[string]interface{}{
