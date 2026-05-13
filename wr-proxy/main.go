@@ -69,6 +69,15 @@ func main() {
 		}
 	}()
 
+	// 6.5 清理过期请求缓存（每10分钟）
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			reqCache.CleanStale()
+		}
+	}()
+
 	// 7. 启动 HTTP 服务
 	mux := http.NewServeMux()
 	RegisterHandlers(mux)

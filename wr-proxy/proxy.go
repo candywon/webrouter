@@ -37,17 +37,19 @@ func NewProxyService() *ProxyService {
 
 // ProxyResult 代理结果
 type ProxyResult struct {
-	StatusCode   int
-	InputTokens  int64
-	OutputTokens int64
-	IsStream     bool
-	LatencyMs    int
-	Error        string
+	StatusCode    int
+	InputTokens   int64
+	OutputTokens  int64
+	IsStream      bool
+	LatencyMs     int
+	Error         string
+	UpstreamError UpstreamErrorDetail // 上游语义错误详情（HTTP 200 但 body 含错误时填充）
+	StreamAborted bool                // 流式响应中途被错误中断
 }
 
 // Forward 转发请求到上游 Provider
 func (ps *ProxyService) Forward(provider *Provider, endpoint string,
-	req *http.Request, body []byte) (*http.Response, *ProxyResult) {
+	req *http.Request, body []byte, model string) (*http.Response, *ProxyResult) {
 
 	start := time.Now()
 	isStream := isStreamRequest(body)
@@ -110,10 +112,61 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 		provider.ConsecFails = 0
 	}
 
+	// 对错误响应（>= 400）进行语义分析，识别额度用完/限流/超时等
+	if resp.StatusCode >= 400 {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096)) // 只读前4KB分析错误
+		resp.Body.Close()
+		if readErr == nil && len(body) > 0 {
+			result.UpstreamError = DetectUpstreamError(resp.StatusCode, body)
+			if result.UpstreamError.Type != UpstreamErrNone {
+				LogInfo("Forward: %s → %s semantic error: type=%s code=%s msg=%s",
+					model, provider.Name, result.UpstreamError.Type,
+					result.UpstreamError.Code, result.UpstreamError.Message)
+				// 将错误信息写入 result.Error，确保上层 failover 逻辑能触发
+				if result.Error == "" {
+					result.Error = fmt.Sprintf("upstream semantic error: %s - %s",
+						result.UpstreamError.Type, result.UpstreamError.Message)
+				}
+			}
+		}
+		// 重新构造 body reader 供后续使用（已关闭，上层需处理）
+		// 注意：body 已被读取并关闭，上层不应再读取 resp.Body
+		// 对于错误响应，上层（handlers.go）不会尝试写入响应体给客户端
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, result
+	}
+
+	// 对 200 响应也做轻量检测（某些 API 200 但返回错误 JSON）
+	// 仅对非流式做此检测，流式在 StreamResponse 中逐 chunk 检测
+	if !isStream && resp.StatusCode == 200 {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr == nil && len(body) > 0 {
+			errDetail := DetectUpstreamError(200, body)
+			if errDetail.Type != UpstreamErrNone {
+				// 200 但含语义错误，这是最坑的情况
+				result.UpstreamError = errDetail
+				result.Error = fmt.Sprintf("upstream returned 200 but contains error: %s - %s",
+					errDetail.Type, errDetail.Message)
+				LogWarn("Forward: %s → %s 200-OK but semantic error: type=%s code=%s",
+					model, provider.Name, errDetail.Type, errDetail.Code)
+				// 还原 body 供上层使用
+				resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+				return resp, result
+			}
+		}
+		// 还原 body
+		if len(body) > 0 {
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
+	}
+
 	return resp, result
 }
 
 // StreamResponse 流式 SSE 响应写入器（包级函数）
+// 返回 result.StreamAborted=true 表示流中途被错误中断（需触发 failover）
 func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	reqID string, provider *Provider, token *Token,
 	model, endpoint, clientIP string) *ProxyResult {
@@ -150,6 +203,12 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 				break
 			}
 			result.Error = fmt.Sprintf("stream read: %v", err)
+			// 网络中断/超时，标记为 StreamAborted
+			result.StreamAborted = true
+			result.UpstreamError = UpstreamErrorDetail{
+				Type:    UpstreamErrTimeout,
+				Message: result.Error,
+			}
 			break
 		}
 
@@ -166,6 +225,21 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 			if data != "[DONE]" {
 				lastChunk.Reset()
 				lastChunk.WriteString(data)
+
+				// 检测流中的语义错误（如额度用完、限流等）
+				errDetail := DetectStreamError(data)
+				if errDetail.Type != UpstreamErrNone {
+					LogWarn("StreamResponse: detected error in stream: type=%s code=%s msg=%s",
+						errDetail.Type, errDetail.Code, errDetail.Message)
+					result.UpstreamError = errDetail
+					result.StreamAborted = true
+					if result.Error == "" {
+						result.Error = fmt.Sprintf("stream error: %s - %s",
+							errDetail.Type, errDetail.Message)
+					}
+					// 继续读取剩余数据（不中断流），但标记为 aborted
+					// 上层 handleProxy 会根据 StreamAborted 决定是否 failover
+				}
 			}
 		}
 	}

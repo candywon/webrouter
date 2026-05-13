@@ -112,54 +112,88 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		selectedProvider = provider
 
 		// 转发
-		resp, result := proxySvc.Forward(provider, endpoint, r, body)
+		resp, result := proxySvc.Forward(provider, endpoint, r, body, model)
 
-		// 失败且可重试（4xx 认证/权限错误也触发降级）
-		if result.StatusCode >= 400 || result.Error != "" {
+		// 使用智能重试引擎判断是否需要 failover
+		shouldFail, reason := ShouldFailover(result, token.ID, model, body)
+
+		if shouldFail {
 			lastResult = result
 			excludeIDs = append(excludeIDs, provider.ID)
-			LogInfo("Proxy: %s → %s failed (status=%d, err=%s), failover attempt %d",
-				model, provider.Name, result.StatusCode, result.Error, attempt+1)
+			LogInfo("Proxy: %s → %s failed (status=%d, err=%s, upstream=%s, reason=%s), failover attempt %d",
+				model, provider.Name, result.StatusCode, result.Error,
+				result.UpstreamError.Type, reason, attempt+1)
 
 			if resp != nil {
 				resp.Body.Close()
 			}
 
-			// 同 Provider 重试
-			for retry := 0; retry < provider.MaxRetries && retry < cfg.MaxRetryCount; retry++ {
-				resp, result = proxySvc.Forward(provider, endpoint, r, body)
-				if result.StatusCode < 400 && result.Error == "" {
-					// 重试成功
-					rlog := BuildRequestLog(reqID, token, provider, model, endpoint, clientIP, result, true)
-					meter.RecordRequest(rlog)
+			// 额度用完 → 跳过同 Provider 重试，直接降级
+			if result.UpstreamError.Type == UpstreamErrQuotaExhausted {
+				LogInfo("Proxy: skipping same-provider retry for %s (quota exhausted)", provider.Name)
+				continue
+			}
 
-					if result.IsStream {
-						StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
-					} else {
-						NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+			// 同 Provider 重试（仅限 rate_limited/timeout 等可恢复错误）
+			if ShouldRetrySameProvider(result.UpstreamError) {
+				for retry := 0; retry < provider.MaxRetries && retry < cfg.MaxRetryCount; retry++ {
+					// 限流场景：短暂等待后重试
+					if result.UpstreamError.Type == UpstreamErrRateLimited {
+						time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond) // 0.5s, 1s 递增
 					}
-					return
-				}
-				if resp != nil {
-					resp.Body.Close()
+					resp, result = proxySvc.Forward(provider, endpoint, r, body, model)
+					shouldRetry, _ := ShouldFailover(result, token.ID, model, body)
+					if !shouldRetry {
+						// 重试成功
+						reqCache.RecordRequestSuccess(token.ID, model, body)
+						rlog := BuildRequestLog(reqID, token, provider, model, endpoint, clientIP, result, true)
+						meter.RecordRequest(rlog)
+
+						if result.IsStream {
+							StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+						} else {
+							NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+						}
+						return
+					}
+					if resp != nil {
+						resp.Body.Close()
+					}
 				}
 			}
 
+			// 记录失败请求到 Hash 缓存
+			reqCache.RecordRequestFailure(token.ID, model, body)
 			continue // 降级到下一个 Provider
 		}
 
 		// 成功
+		reqCache.RecordRequestSuccess(token.ID, model, body)
 		rlog := BuildRequestLog(reqID, token, provider, model, endpoint, clientIP, result, false)
 		meter.RecordRequest(rlog)
 
 		if result.IsStream {
 			streamResult := StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
-			// 流式完成后补录 usage
-			if streamResult.InputTokens > 0 || streamResult.OutputTokens > 0 {
+			// 流式完成后检查是否中途被错误中断
+			if streamResult.StreamAborted {
+				LogWarn("Proxy: stream aborted for %s → %s, upstream=%s, err=%s",
+					model, provider.Name, streamResult.UpstreamError.Type, streamResult.Error)
+				// 流已开始写入客户端，无法 failover 重发
+				// 但可以补录日志和触发告警
 				rlog.InputTokens = streamResult.InputTokens
 				rlog.OutputTokens = streamResult.OutputTokens
 				rlog.LatencyMs = streamResult.LatencyMs
+				rlog.ErrorMessage = streamResult.Error
 				meter.RecordRequest(rlog)
+				reqCache.RecordRequestFailure(token.ID, model, body)
+			} else {
+				// 流式正常完成，补录 usage
+				if streamResult.InputTokens > 0 || streamResult.OutputTokens > 0 {
+					rlog.InputTokens = streamResult.InputTokens
+					rlog.OutputTokens = streamResult.OutputTokens
+					rlog.LatencyMs = streamResult.LatencyMs
+					meter.RecordRequest(rlog)
+				}
 			}
 		} else {
 			NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
