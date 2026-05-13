@@ -35,6 +35,7 @@ const SettingsPage = {
 /* 应用入口 */
 (function () {
   Router.register('/', DashboardPage);
+  Router.register('/providers', providersPage);
   Router.register('/channels', ChannelsPage);
   Router.register('/monitor', MonitorPage);
   Router.register('/alerts', AlertPage);

@@ -37,6 +37,7 @@ const Router = {
     // 更新标题
     const titles = {
       '/': '仪表盘',
+      '/providers': '数据源管理',
       '/channels': '渠道管理',
       '/monitor': '健康监控',
       '/alerts': '告警规则',

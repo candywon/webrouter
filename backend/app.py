@@ -22,6 +22,7 @@ def create_app(config_class=None):
 
     # 注册路由蓝图
     from routes.dashboard import dashboard_bp
+    from routes.providers import providers_bp
     from routes.monitor import monitor_bp
     from routes.alert import alert_bp
     from routes.billing import billing_bp
@@ -30,6 +31,7 @@ def create_app(config_class=None):
     from routes.settings import settings_bp
 
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
+    app.register_blueprint(providers_bp, url_prefix='/api/providers')
     app.register_blueprint(monitor_bp, url_prefix='/api/monitor')
     app.register_blueprint(alert_bp, url_prefix='/api/alerts')
     app.register_blueprint(billing_bp, url_prefix='/api/billing')
@@ -50,6 +52,7 @@ def create_app(config_class=None):
     # 初始化数据库
     with app.app_context():
         from models.wr_models import AlertRule, AlertHistory, ChannelHealth, TeamQuota, CostRecord  # noqa: F401
+        from models.provider import Provider  # noqa: F401
         db.create_all()
 
     # 启动定时任务（仅非Debug模式或环境变量启用时）
@@ -109,13 +112,13 @@ def _init_schedulers(app):
 
 
 def _scheduled_health_check(app):
-    """定时健康检测任务"""
+    """定时健康检测任务 — 检测所有已启用的 Provider"""
     with app.app_context():
         try:
             from services.health_checker import HealthChecker
             checker = HealthChecker()
-            results = checker.check_all_sync()
-            app.logger.info(f'健康检测完成: {len(results)}个渠道')
+            results = checker.check_all_providers()
+            app.logger.info(f'Provider健康检测完成: {len(results)}个数据源')
         except Exception as e:
             app.logger.error(f'健康检测失败: {e}')
 
@@ -190,5 +193,7 @@ def _scheduled_alert_evaluate(app):
 
 
 if __name__ == '__main__':
+    import os
     app = create_app()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('WR_PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

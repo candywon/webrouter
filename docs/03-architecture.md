@@ -5,46 +5,64 @@
 ### 1.1 系统架构图
 
 ```
-                    ┌─────────────┐
-                    │   Nginx     │
-                    │  :80/:443   │
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-        ┌─────▼─────┐ ┌───▼────┐ ┌────▼─────┐
-        │ WebRouter  │ │New-API │ │  静态资源  │
-        │ (Flask)    │ │ (Go)   │ │  (前端)   │
-        │ :5000      │ │ :3000  │ │          │
-        └─────┬──────┘ └───┬────┘ └──────────┘
-              │            │
-        ┌─────▼────────────▼─────┐
-        │     MySQL / SQLite     │
-        │     共享数据库           │
-        └───────────┬────────────┘
-                    │
-              ┌─────▼─────┐
-              │   Redis    │
-              │   :6379    │
-              └───────────┘
+                    ┌─────────────────────────────────┐
+                    │         终端工具 / IDE           │
+                    │  Claude Code · Codex · Hermes   │
+                    └───────────────┬─────────────────┘
+                                    │
+                    ┌───────────────▼─────────────────┐
+                    │            Nginx                 │
+                    │           :80/:443               │
+                    └───────────────┬─────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+        ┌─────▼─────┐   ┌──────────▼──────────┐   ┌─────▼─────┐
+        │ WebRouter  │   │    静态资源 (前端)    │   │  任意      │
+        │ (Flask)    │   │                     │   │  Provider  │
+        │ :5000      │   │                     │   │  实例       │
+        └─────┬──────┘   └─────────────────────┘   └─────┬─────┘
+              │                                          │
+        ┌─────▼──────────────────────────────────────────▼──┐
+        │              Provider 抽象层                       │
+        │                                                   │
+        │  direct · aggregate · newapi · oneapi · litellm · custom  │
+        │                                                   │
+        │  ┌────────┐ ┌────────┐ ┌─────────┐ ┌─────────┐  │
+        │  │官方直连 │ │聚合平台 │ │New-API  │ │LiteLLM  │  │
+        │  │(HTTP)  │ │(HTTP)  │ │(DB+HTTP)│ │(HTTP)   │  │
+        │  └────────┘ └────────┘ └────┬────┘ └─────────┘  │
+        └─────────────────────────────┼───────────────────┘
+                                      │
+                              ┌───────▼───────┐
+                              │  MySQL/SQLite  │
+                              │  (New-API DB)  │
+                              └───────┬───────┘
+                                      │
+                              ┌───────▼───────┐
+                              │    Redis       │
+                              │    :6379       │
+                              └───────────────┘
 ```
 
 ### 1.2 职责分工
 
-| 组件 | 职责 | 技术 |
+|| 组件 | 职责 | 技术 |
 |------|------|------|
 | Nginx | 反向代理、SSL、静态资源 | Nginx |
-| New-API | API网关核心：渠道管理、Key轮换、格式转换、负载均衡 | Go + React |
-| WebRouter | 管理增强：监控、告警、计费、团队、对接 | Python Flask |
+| WebRouter | 管理增强：Provider 管理、统一监控、告警、计费、团队、对接 | Python Flask |
+| Provider 层 | API 源抽象：统一注册、统一检测、统一调度 | 可插拔适配器 |
+| New-API | API网关核心（作为 newapi 类型 Provider）：渠道管理、Key轮换、格式转换、负载均衡 | Go + React |
 | MySQL/SQLite | 共享数据存储 | 兼容New-API表结构 |
 | Redis | 缓存、会话、实时统计 | Redis |
 
 ### 1.3 核心原则
 
-1. **不修改New-API源码** — 通过数据库共享 + 管理API集成
-2. **数据层复用** — 直读New-API数据库，不重复存储
-3. **侧车模式** — WebRouter与New-API独立部署，互不影响
-4. **故障隔离** — WebRouter挂了不影响API转发，New-API挂了WebRouter仍可展示历史数据
+1. **Provider 抽象优先** — 所有 API 源（直连、聚合、自建）统一为 Provider 概念，New-API 只是其中一种
+2. **不修改上游源码** — 通过数据库共享 + 管理API + HTTP检测集成，不碰任何上游代码
+3. **数据能力分级** — 不同 Provider 类型获取不同深度的数据，但健康检测是基线能力
+4. **故障隔离** — 单个 Provider 挂了不影响其他 Provider 的监控和告警
+5. **渐进式接入** — 用户可以先只注册直连 Provider（最简模式），再逐步添加自建网关
 
 ---
 
@@ -59,13 +77,15 @@ backend/
 ├── extensions.py          # Flask扩展初始化
 ├── models/
 │   ├── __init__.py
-│   ├── newapi_adapter.py  # New-API数据库适配器
-│   ├── monitor.py         # 监控数据模型
-│   ├── alert.py           # 告警规则模型
-│   └── billing.py         # 计费模型
+│   ├── provider.py        # Provider数据模型 ★
+│   ├── newapi_adapter.py  # New-API数据库适配器(newapi类型Provider)
+│   ├── oneapi_adapter.py  # One-API数据库适配器(oneapi类型Provider) ★
+│   ├── wr_models.py       # WebRouter自有表模型
+│   └── provider_factory.py # Provider适配器工厂 ★
 ├── routes/
 │   ├── __init__.py
 │   ├── dashboard.py       # 仪表盘API
+│   ├── providers.py       # Provider管理API ★
 │   ├── monitor.py         # 监控API
 │   ├── alert.py           # 告警API
 │   ├── billing.py         # 计费API
@@ -74,18 +94,179 @@ backend/
 │   └── settings.py        # 设置API
 ├── services/
 │   ├── __init__.py
-│   ├── health_checker.py  # Key健康检测
+│   ├── provider_manager.py # Provider生命周期管理 ★
+│   ├── health_checker.py  # 统一健康检测(支持多Provider类型)
 │   ├── alert_engine.py    # 告警引擎
 │   ├── stats_collector.py # 统计采集
 │   ├── cli_generator.py   # CLI配置生成
-│   └── deploy_helper.py   # 部署辅助
+│   └── demo_data.py       # 演示数据
 ├── static/                # 前端静态文件
-└── templates/             # Flask模板（如需SSR）
+│   ├── js/
+│   │   ├── providers.js   # Provider管理页面JS ★
+│   │   └── ...
+│   └── ...
+└── data/                  # SQLite数据目录
 ```
 
-### 2.2 New-API数据库适配
+### 2.2 Provider 数据模型
 
-WebRouter直读New-API数据库，关键表映射：
+#### 2.2.1 wr_providers 表（核心新增）
+
+```sql
+CREATE TABLE wr_providers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(100) NOT NULL,           -- 数据源名称
+    type VARCHAR(20) NOT NULL,            -- direct/aggregate/newapi/oneapi/litellm/custom
+    base_url VARCHAR(500) NOT NULL,       -- API Base URL
+    api_key VARCHAR(500),                 -- API Key (AES加密存储)
+    api_key_masked VARCHAR(50),           -- 脱敏显示 sk-xxx...xxxx
+    
+    -- newapi/oneapi 专有
+    admin_token VARCHAR(500),             -- 管理令牌(AES加密)
+    db_uri VARCHAR(500),                  -- 数据库连接串(可选，直读模式)
+    
+    -- litellm 专有
+    master_key VARCHAR(500),              -- LiteLLM Master Key
+    
+    -- custom 专有
+    health_endpoint VARCHAR(500),         -- 自定义健康检测端点
+    
+    -- 通用配置
+    models TEXT,                          -- JSON: 支持的模型列表
+    tags TEXT,                            -- JSON: 标签 ["主力","备用"]
+    weight INTEGER DEFAULT 100,           -- 调度权重 (0-100)
+    priority INTEGER DEFAULT 0,           -- 优先级 (越高越优先)
+    check_interval INTEGER DEFAULT 300,   -- 健康检测间隔(秒)
+    enabled BOOLEAN DEFAULT TRUE,
+    
+    -- 状态(由系统自动维护)
+    status VARCHAR(20) DEFAULT 'unchecked', -- healthy/warning/dead/disabled/unchecked
+    last_check_at DATETIME,
+    last_latency_ms INTEGER,
+    last_error TEXT,
+    
+    -- 元数据
+    notes TEXT,                           -- 备注
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### 2.2.2 Provider 适配器基类
+
+```python
+# models/provider_factory.py
+
+class BaseProviderAdapter:
+    """Provider 适配器基类 — 所有类型必须实现"""
+    
+    PROVIDER_TYPE = None  # 子类覆盖
+    
+    def __init__(self, provider: dict):
+        self.provider = provider
+        self.base_url = provider['base_url']
+        self.api_key = provider.get('api_key', '')
+    
+    def check_health(self) -> dict:
+        """健康检测 — 所有类型必须实现"""
+        raise NotImplementedError
+    
+    def get_models(self) -> list:
+        """获取支持的模型列表 — 可选"""
+        return self.provider.get('models', [])
+    
+    def get_channels(self) -> list:
+        """获取渠道列表 — 仅 newapi/oneapi"""
+        return []
+    
+    def get_usage_stats(self, hours=24) -> list:
+        """获取用量统计 — 仅 newapi/oneapi"""
+        return []
+    
+    def get_users(self) -> list:
+        """获取用户列表 — 仅 newapi/oneapi"""
+        return []
+
+
+class DirectProviderAdapter(BaseProviderAdapter):
+    """直连官方 API"""
+    PROVIDER_TYPE = 'direct'
+    
+    def check_health(self) -> dict:
+        # 根据 base_url 识别厂商，发送对应格式的测试请求
+        ...
+
+
+class AggregateProviderAdapter(BaseProviderAdapter):
+    """聚合平台"""
+    PROVIDER_TYPE = 'aggregate'
+    
+    def check_health(self) -> dict:
+        # 聚合平台通常兼容 OpenAI 格式，走 /v1/chat/completions
+        ...
+
+
+class NewAPIProviderAdapter(BaseProviderAdapter):
+    """自建 New-API — 功能最丰富"""
+    PROVIDER_TYPE = 'newapi'
+    
+    def __init__(self, provider: dict):
+        super().__init__(provider)
+        self.admin_token = provider.get('admin_token', '')
+        self.db_uri = provider.get('db_uri', '')
+        self._db_adapter = None
+    
+    def _get_db_adapter(self):
+        """懒加载 New-API 数据库适配器"""
+        if self._db_adapter is None and self.db_uri:
+            self._db_adapter = NewAPIAdapter(self.db_uri)
+        return self._db_adapter
+    
+    def check_health(self) -> dict:
+        # HTTP 检测 + 可选 DB 渠道状态
+        ...
+    
+    def get_channels(self) -> list:
+        return self._get_db_adapter().get_channels()
+    
+    def get_usage_stats(self, hours=24) -> list:
+        return self._get_db_adapter().get_usage_stats(hours)
+    
+    def get_users(self) -> list:
+        return self._get_db_adapter().get_users()
+
+
+class LiteLLMProviderAdapter(BaseProviderAdapter):
+    """LiteLLM 代理"""
+    PROVIDER_TYPE = 'litellm'
+    
+    def get_models(self) -> list:
+        # GET /v1/models 自动发现
+        ...
+
+
+class ProviderFactory:
+    """Provider 适配器工厂"""
+    
+    _adapters = {
+        'direct': DirectProviderAdapter,
+        'aggregate': AggregateProviderAdapter,
+        'newapi': NewAPIProviderAdapter,
+        'oneapi': OneAPIProviderAdapter,
+        'litellm': LiteLLMProviderAdapter,
+        'custom': CustomProviderAdapter,
+    }
+    
+    @classmethod
+    def create(cls, provider: dict) -> BaseProviderAdapter:
+        provider_type = provider.get('type', 'custom')
+        adapter_class = cls._adapters.get(provider_type, CustomProviderAdapter)
+        return adapter_class(provider)
+```
+
+### 2.3 New-API数据库适配（newapi 类型 Provider）
+
+New-API 类型 Provider 仍直读 New-API 数据库，关键表映射不变：
 
 | New-API表 | 用途 | WebRouter读取方式 |
 |-----------|------|------------------|
@@ -131,49 +312,43 @@ class NewAPIAdapter:
         return pd.read_sql(sql, self.engine)
 ```
 
-### 2.3 监控服务设计
+### 2.4 统一健康检测（支持多 Provider 类型）
 
 ```python
 # services/health_checker.py
 class HealthChecker:
-    """渠道健康检测引擎"""
+    """统一健康检测引擎 — 支持所有 Provider 类型"""
 
-    CHECK_INTERVAL = 300  # 5分钟检测一次
+    CHECK_INTERVAL = 300  # 默认5分钟
 
-    # 每种渠道类型的测试提示词
-    TEST_PROMPTS = {
-        "openai": {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
-        "anthropic": {"model": "claude-3-haiku", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
-        "gemini": {"model": "gemini-2.0-flash", "contents": [{"parts": [{"text": "hi"}]}]},
-    }
+    def check_provider(self, provider: dict) -> dict:
+        """检测单个 Provider — 根据类型自动选择检测策略"""
+        from models.provider_factory import ProviderFactory
+        adapter = ProviderFactory.create(provider)
+        return adapter.check_health()
 
-    async def check_channel(self, channel: dict) -> dict:
-        """检测单个渠道健康状态"""
-        result = {
-            "channel_id": channel["id"],
-            "timestamp": datetime.utcnow(),
-            "status": "unknown",
-            "latency_ms": 0,
-            "error": None
-        }
-        try:
-            start = time.monotonic()
-            response = await self._send_test_request(channel)
-            result["latency_ms"] = (time.monotonic() - start) * 1000
-            if response.status_code == 200:
-                result["status"] = "healthy"
-            elif response.status_code == 429:
-                result["status"] = "rate_limited"
-            elif response.status_code == 401:
-                result["status"] = "auth_failed"
-            else:
-                result["status"] = "unhealthy"
-                result["error"] = f"HTTP {response.status_code}"
-        except Exception as e:
-            result["status"] = "dead"
-            result["error"] = str(e)
-
-        return result
+    def check_all_providers(self) -> list:
+        """检测所有已启用的 Provider"""
+        providers = Provider.query.filter_by(enabled=True).all()
+        results = []
+        for p in providers:
+            result = self.check_provider(p.to_dict())
+            # 更新 Provider 状态
+            p.status = result['status']
+            p.last_check_at = datetime.utcnow()
+            p.last_latency_ms = result.get('latency_ms')
+            p.last_error = result.get('error')
+            # 写入健康历史
+            health = ChannelHealth(
+                provider_id=p.id,
+                status=result['status'],
+                latency_ms=result.get('latency_ms'),
+                error_message=result.get('error'),
+            )
+            db.session.add(health)
+            results.append(result)
+        db.session.commit()
+        return results
 ```
 
 ### 2.4 告警引擎设计
@@ -233,48 +408,59 @@ class WebhookAlertChannel:
             await session.post(self.url, json={"content": message})
 ```
 
-### 2.5 API路由设计
+### 2.6 API路由设计
 
 ```
+# Provider 管理（核心新增）
+GET    /api/providers                    # Provider列表
+POST   /api/providers                    # 注册新Provider
+GET    /api/providers/:id                # Provider详情
+PUT    /api/providers/:id                # 更新Provider配置
+DELETE /api/providers/:id                # 删除Provider
+POST   /api/providers/:id/check          # 手动触发单个Provider健康检测
+POST   /api/providers/check_all          # 手动触发全量检测
+GET    /api/providers/:id/channels       # Provider下的渠道列表(仅newapi/oneapi)
+GET    /api/providers/:id/models         # Provider支持的模型列表
+GET    /api/providers/types              # 获取支持的Provider类型定义
+
 # 仪表盘
-GET  /api/dashboard/overview        # 总览数据
-GET  /api/dashboard/trends          # 趋势数据(7天/30天)
-GET  /api/dashboard/channels        # 渠道列表+状态
+GET  /api/dashboard/overview              # 总览数据(跨所有Provider聚合)
+GET  /api/dashboard/trends                # 趋势数据(7天/30天)
+GET  /api/dashboard/providers             # Provider列表+状态
 
 # 监控
-GET  /api/monitor/channels          # 渠道健康状态
-POST /api/monitor/check/:id         # 手动触发检测
-GET  /api/monitor/history/:id       # 检测历史
+GET  /api/monitor/providers               # 所有Provider健康状态
+GET  /api/monitor/history/:provider_id    # 检测历史
 
 # 告警
-GET  /api/alerts/rules              # 告警规则列表
-POST /api/alerts/rules              # 创建告警规则
-PUT  /api/alerts/rules/:id          # 更新规则
-DELETE /api/alerts/rules/:id        # 删除规则
-GET  /api/alerts/history            # 告警历史
-PUT  /api/alerts/channels           # 配置告警通道
+GET  /api/alerts/rules                    # 告警规则列表
+POST /api/alerts/rules                    # 创建告警规则
+PUT  /api/alerts/rules/:id                # 更新规则
+DELETE /api/alerts/rules/:id              # 删除规则
+GET  /api/alerts/history                  # 告警历史
+PUT  /api/alerts/channels                 # 配置告警通道
 
 # 计费
-GET  /api/billing/usage             # 用量统计
-GET  /api/billing/cost              # 成本分析
-GET  /api/billing/daily             # 每日明细
+GET  /api/billing/usage                   # 用量统计(跨Provider聚合)
+GET  /api/billing/cost                    # 成本分析
+GET  /api/billing/daily                   # 每日明细
 
 # 团队
-GET  /api/team/members              # 成员列表
-POST /api/team/members              # 邀请成员
-PUT  /api/team/members/:id          # 更新成员额度
-DELETE /api/team/members/:id        # 移除成员
-GET  /api/team/members/:id/usage    # 成员用量
+GET  /api/team/members                    # 成员列表
+POST /api/team/members                    # 邀请成员
+PUT  /api/team/members/:id                # 更新成员额度
+DELETE /api/team/members/:id              # 移除成员
+GET  /api/team/members/:id/usage          # 成员用量
 
 # CLI对接
-GET  /api/cli/export/:tool          # 导出配置(claude-code/codex/openclaw/hermes)
-POST /api/cli/test                  # 测试连接
+GET  /api/cli/export/:tool                # 导出配置(claude-code/codex/openclaw/hermes)
+POST /api/cli/test                        # 测试连接
 
 # 设置
-GET  /api/settings                  # 系统设置
-PUT  /api/settings                  # 更新设置
-POST /api/settings/backup           # 创建备份
-POST /api/settings/restore          # 恢复备份
+GET  /api/settings                        # 系统设置
+PUT  /api/settings                        # 更新设置
+POST /api/settings/backup                 # 创建备份
+POST /api/settings/restore                # 恢复备份
 ```
 
 ---
@@ -310,7 +496,8 @@ frontend/
 
 ```
 #/                  → 仪表盘总览
-#/channels          → 渠道管理
+#/providers         → 数据源管理 ★
+#/channels          → 渠道管理(已注册Provider下的渠道)
 #/monitor           → 健康监控
 #/alerts            → 告警规则
 #/billing           → 计费统计
@@ -558,6 +745,33 @@ echo "=================="
 ### 5.1 WebRouter自有表(追加到New-API数据库)
 
 ```sql
+-- ★ 核心新增：Provider 数据源
+CREATE TABLE wr_providers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(100) NOT NULL,           -- 数据源名称
+    type VARCHAR(20) NOT NULL,            -- direct/aggregate/newapi/oneapi/litellm/custom
+    base_url VARCHAR(500) NOT NULL,       -- API Base URL
+    api_key VARCHAR(500),                 -- API Key (AES加密存储)
+    api_key_masked VARCHAR(50),           -- 脱敏显示 sk-xxx...xxxx
+    admin_token VARCHAR(500),             -- 管理令牌(newapi/oneapi, AES加密)
+    db_uri VARCHAR(500),                  -- 数据库连接串(newapi/oneapi)
+    master_key VARCHAR(500),              -- Master Key(litellm, AES加密)
+    health_endpoint VARCHAR(500),         -- 自定义健康端点(custom)
+    models TEXT,                          -- JSON: 支持的模型列表
+    tags TEXT,                            -- JSON: 标签 ["主力","备用"]
+    weight INTEGER DEFAULT 100,           -- 调度权重(0-100)
+    priority INTEGER DEFAULT 0,           -- 优先级
+    check_interval INTEGER DEFAULT 300,   -- 健康检测间隔(秒)
+    enabled BOOLEAN DEFAULT TRUE,
+    status VARCHAR(20) DEFAULT 'unchecked', -- healthy/warning/dead/disabled/unchecked
+    last_check_at DATETIME,
+    last_latency_ms INTEGER,
+    last_error TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 告警规则
 CREATE TABLE wr_alert_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -585,11 +799,13 @@ CREATE TABLE wr_alert_history (
 -- 渠道健康记录
 CREATE TABLE wr_channel_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel_id INTEGER NOT NULL,
+    provider_id INTEGER,                    -- 关联 Provider ID ★
+    channel_id INTEGER,                     -- New-API渠道ID(仅newapi/oneapi类型)
     status VARCHAR(20) NOT NULL,            -- healthy/warning/dead/disabled
     latency_ms INTEGER,
     error_message TEXT,
     checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_provider_time (provider_id, checked_at),
     INDEX idx_channel_time (channel_id, checked_at)
 );
 

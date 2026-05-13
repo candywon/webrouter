@@ -13,12 +13,13 @@
       <div class="sidebar-logo">⚡ WebRouter</div>
       <ul class="sidebar-nav">
         <li><a href="#/" class="active"><span class="icon">📊</span> 仪表盘</a></li>
+        <li><a href="#/providers"><span class="icon">🔌</span> 数据源管理</a></li>
         <li><a href="#/channels"><span class="icon">📡</span> 渠道管理</a></li>
         <li><a href="#/monitor"><span class="icon">💓</span> 健康监控</a></li>
         <li><a href="#/alerts"><span class="icon">🔔</span> 告警规则</a></li>
         <li><a href="#/billing"><span class="icon">💰</span> 计费统计</a></li>
         <li><a href="#/team"><span class="icon">👥</span> 团队管理</a></li>
-        <li><a href="#/cli"><span class="icon">🔌</span> CLI 对接</a></li>
+        <li><a href="#/cli"><span class="icon">⌨️</span> CLI 对接</a></li>
         <li><a href="#/settings"><span class="icon">⚙️</span> 系统设置</a></li>
       </ul>
     </aside>
@@ -45,7 +46,12 @@
         </div>
       </div>
 
-      <!-- 渠道管理（复用仪表盘渠道区） -->
+      <!-- 数据源管理 -->
+      <div class="page" id="page-providers">
+        <div id="page-content"></div>
+      </div>
+
+      <!-- 渠道管理 -->
       <div class="page" id="page-channels">
         <div class="card">
           <div class="card-header">
@@ -128,6 +134,7 @@
   <script src="/static/js/api.js"></script>
   <script src="/static/js/router.js"></script>
   <script src="/static/js/dashboard.js"></script>
+  <script src="/static/js/providers.js"></script>
   <script src="/static/js/monitor.js"></script>
   <script src="/static/js/alert.js"></script>
   <script src="/static/js/billing.js"></script>

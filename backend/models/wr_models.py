@@ -58,11 +58,12 @@ class AlertHistory(db.Model):
 
 
 class ChannelHealth(db.Model):
-    """渠道健康记录"""
+    """渠道/Provider 健康记录"""
     __tablename__ = 'wr_channel_health'
 
     id = db.Column(db.Integer, primary_key=True)
-    channel_id = db.Column(db.Integer, nullable=False, index=True)
+    provider_id = db.Column(db.Integer, index=True)       # 关联 Provider ID
+    channel_id = db.Column(db.Integer, index=True)        # New-API 渠道 ID（仅 newapi/oneapi）
     status = db.Column(db.String(20), nullable=False)  # healthy/warning/dead/rate_limited/disabled
     latency_ms = db.Column(db.Integer)
     error_message = db.Column(db.Text)

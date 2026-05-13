@@ -1,126 +1,86 @@
-"""渠道健康检测服务"""
+"""统一健康检测服务 — 支持所有 Provider 类型"""
 import time
 import logging
-import requests as http
+from datetime import datetime
 from extensions import db
+from models.provider import Provider
 from models.wr_models import ChannelHealth
-from models.newapi_adapter import NewAPIAdapter
 
 logger = logging.getLogger(__name__)
 
-# 每种渠道类型的测试请求模板
-TEST_REQUESTS = {
-    1: {  # OpenAI
-        'endpoint': '/v1/chat/completions',
-        'body': {
-            'model': 'gpt-4o-mini',
-            'messages': [{'role': 'user', 'content': 'hi'}],
-            'max_tokens': 1,
-        },
-    },
-    14: {  # Anthropic
-        'endpoint': '/v1/messages',
-        'body': {
-            'model': 'claude-3-haiku-20240307',
-            'messages': [{'role': 'user', 'content': 'hi'}],
-            'max_tokens': 1,
-        },
-        'headers_extra': {'anthropic-version': '2023-06-01'},
-    },
-    24: {  # Gemini
-        'endpoint': '/v1/chat/completions',
-        'body': {
-            'model': 'gemini-2.0-flash',
-            'messages': [{'role': 'user', 'content': 'hi'}],
-            'max_tokens': 1,
-        },
-    },
-}
-
 
 class HealthChecker:
-    """渠道健康检测引擎"""
+    """统一健康检测引擎 — 检测所有已注册的 Provider"""
 
-    def check_channel_sync(self, channel: dict) -> dict:
-        """同步检测单个渠道"""
-        result = {
-            'channel_id': channel.get('id'),
-            'name': channel.get('name', ''),
-            'status': 'unknown',
-            'latency_ms': 0,
-            'error': None,
-        }
+    def check_provider(self, provider_dict: dict) -> dict:
+        """检测单个 Provider — 根据类型自动选择检测策略"""
+        from models.provider_factory import ProviderFactory
+        adapter = ProviderFactory.create(provider_dict)
+        return adapter.check_health()
 
-        base_url = channel.get('base_url', '')
-        if not base_url:
-            result['status'] = 'dead'
-            result['error'] = 'No base_url configured'
-            return result
-
-        channel_type = channel.get('type', 1)
-        test_conf = TEST_REQUESTS.get(channel_type, TEST_REQUESTS[1])
-
-        # 从channel的other字段提取key
-        other = channel.get('other') or ''
-        api_key = other.split('\n')[0] if other else ''
-
-        try:
-            start = time.monotonic()
-            headers = {
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json',
-            }
-            if 'headers_extra' in test_conf:
-                headers.update(test_conf['headers_extra'])
-
-            resp = http.post(
-                f"{base_url.rstrip('/')}{test_conf['endpoint']}",
-                json=test_conf['body'],
-                headers=headers,
-                timeout=15,
-            )
-            result['latency_ms'] = int((time.monotonic() - start) * 1000)
-
-            if resp.status_code == 200:
-                result['status'] = 'healthy'
-            elif resp.status_code == 429:
-                result['status'] = 'rate_limited'
-            elif resp.status_code in (401, 403):
-                result['status'] = 'auth_failed'
-            else:
-                result['status'] = 'unhealthy'
-                result['error'] = f'HTTP {resp.status_code}'
-
-        except http.Timeout:
-            result['status'] = 'timeout'
-            result['error'] = 'Request timeout (15s)'
-        except Exception as e:
-            result['status'] = 'dead'
-            result['error'] = str(e)[:200]
-
-        return result
-
-    def check_all_sync(self):
-        """同步检测所有渠道"""
-        try:
-            channels = NewAPIAdapter.get_channels()
-        except Exception as e:
-            logger.error(f"Failed to get channels: {e}")
-            return []
-
+    def check_all_providers(self) -> list:
+        """检测所有已启用的 Provider"""
+        providers = Provider.query.filter_by(enabled=True).all()
         results = []
-        for ch in channels:
-            result = self.check_channel_sync(ch)
 
-            # 保存检测结果
-            health = ChannelHealth(
-                channel_id=ch['id'],
-                status=result['status'],
-                latency_ms=result.get('latency_ms'),
-                error_message=result.get('error'),
-            )
-            db.session.add(health)
-            results.append(result)
+        for p in providers:
+            try:
+                result = self.check_provider(p.to_dict(include_secrets=True))
+
+                # 更新 Provider 状态
+                p.status = result.get('status', 'unknown')
+                p.last_check_at = datetime.utcnow()
+                p.last_latency_ms = result.get('latency_ms')
+                p.last_error = result.get('error')
+                p.updated_at = datetime.utcnow()
+
+                # 写入健康历史
+                health = ChannelHealth(
+                    provider_id=p.id,
+                    status=result.get('status', 'unknown'),
+                    latency_ms=result.get('latency_ms'),
+                    error_message=result.get('error'),
+                )
+                db.session.add(health)
+
+                result['provider_id'] = p.id
+                result['name'] = p.name
+                result['type'] = p.type
+                results.append(result)
+
+            except Exception as e:
+                logger.error(f"Provider {p.name} (id={p.id}) health check failed: {e}")
+                p.status = 'dead'
+                p.last_error = str(e)[:200]
+                p.last_check_at = datetime.utcnow()
+                results.append({
+                    'provider_id': p.id,
+                    'name': p.name,
+                    'type': p.type,
+                    'status': 'dead',
+                    'latency_ms': 0,
+                    'error': str(e)[:200],
+                })
 
         db.session.commit()
         return results
+
+    # ============ 以下为兼容旧接口的方法 ============
+
+    def check_channel_sync(self, channel: dict) -> dict:
+        """兼容旧接口：检测单个渠道（映射为 Provider 检测）"""
+        from models.provider_factory import ProviderFactory
+        # 将旧的 channel 格式转换为 provider 格式
+        provider_dict = {
+            'id': channel.get('id'),
+            'name': channel.get('name', ''),
+            'type': 'newapi',  # 旧接口都是 New-API 渠道
+            'base_url': channel.get('base_url', ''),
+            'api_key': (channel.get('other') or '').split('\n')[0],
+        }
+        adapter = ProviderFactory.create(provider_dict)
+        return adapter.check_health()
+
+    def check_all_sync(self):
+        """兼容旧接口：检测所有渠道"""
+        return self.check_all_providers()
