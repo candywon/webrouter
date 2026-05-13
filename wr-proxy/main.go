@@ -45,6 +45,11 @@ func main() {
 		LogWarn("Load pricing failed: %v (using defaults)", err)
 	}
 
+	// 3.6 展开 Channel 为独立调度项
+	providers = LoadChannels(providers)
+	router.RefreshProviders(providers)
+	LogInfo("After channel expansion: %d providers", len(providers))
+
 	// 4. 初始化代理服务
 	proxySvc = NewProxyService()
 

@@ -190,6 +190,137 @@ func LoadProviders() ([]*Provider, error) {
 	return providers, nil
 }
 
+// LoadChannels 从 DB 加载 Channel 并展开为 Provider 调度项
+// 每个 Channel 会创建一个独立的 Provider 对象（ID 编码为 channelID*100000+providerID）
+// 无 Channel 的 Provider 仍作为默认调度项参与
+func LoadChannels(providers []*Provider) []*Provider {
+	// 收集有 Channel 的 Provider ID
+	hasChannel := make(map[int]bool)
+
+	rows, err := db.Query(`
+		SELECT c.id, c.provider_id, c.name,
+		       COALESCE(c.base_url, '') as base_url,
+		       COALESCE(c.api_key, '') as api_key,
+		       COALESCE(c.models, '') as models,
+		       COALESCE(c.priority, 0) as priority,
+		       COALESCE(c.weight, 0) as weight,
+		       COALESCE(c.rate_limit_rpm, 0) as rate_limit_rpm,
+		       COALESCE(c.cost_multiplier, 0) as cost_multiplier,
+		       c.enabled,
+		       COALESCE(c.status, 'unchecked') as status,
+		       COALESCE(c.last_latency_ms, 0) as last_latency_ms,
+		       COALESCE(c.last_error, '') as last_error
+		FROM wr_provider_channels c
+		WHERE c.enabled = 1
+		ORDER BY c.provider_id, COALESCE(c.priority, 0) DESC
+	`)
+	if err != nil {
+		LogWarn("load channels: %v", err)
+		return providers
+	}
+	defer rows.Close()
+
+	// 构建 Provider ID → Provider 的映射
+	providerMap := make(map[int]*Provider)
+	for _, p := range providers {
+		providerMap[p.ID] = p
+	}
+
+	var channelProviders []*Provider
+	for rows.Next() {
+		var chID, providerID, priority, weight, rateLimitRPM, lastLatencyMs int
+		var name, baseURL, apiKey, models, status, lastErr string
+		var costMultiplier float64
+		var enabled bool
+
+		if err := rows.Scan(&chID, &providerID, &name, &baseURL, &apiKey, &models,
+			&priority, &weight, &rateLimitRPM, &costMultiplier,
+			&enabled, &status, &lastLatencyMs, &lastErr); err != nil {
+			LogWarn("scan channel: %v", err)
+			continue
+		}
+
+		parent, ok := providerMap[providerID]
+		if !ok {
+			continue // 父 Provider 不存在或未启用
+		}
+
+		hasChannel[providerID] = true
+
+		// 继承逻辑：Channel 字段为空则用 Provider 的
+		resolvedBaseURL := baseURL
+		if resolvedBaseURL == "" {
+			resolvedBaseURL = parent.BaseURL
+		}
+		resolvedAPIKey := apiKey
+		if resolvedAPIKey == "" {
+			resolvedAPIKey = parent.APIKey
+		}
+		resolvedModels := models
+		if resolvedModels == "" {
+			resolvedModels = parent.Models
+		}
+		resolvedPriority := priority
+		if resolvedPriority == 0 {
+			resolvedPriority = parent.Priority
+		}
+		resolvedWeight := weight
+		if resolvedWeight == 0 {
+			resolvedWeight = parent.Weight
+		}
+		resolvedRPM := rateLimitRPM
+		if resolvedRPM == 0 {
+			resolvedRPM = parent.RateLimitRPM
+		}
+		resolvedCostMul := costMultiplier
+		if resolvedCostMul == 0 {
+			resolvedCostMul = parent.CostMultiplier
+		}
+
+		// 编码 ID: channelID*100000 + providerID，确保唯一
+		encodedID := chID*100000 + providerID
+
+		cp := &Provider{
+			ID:             encodedID,
+			Name:           fmt.Sprintf("%s/%s", parent.Name, name),
+			Type:           parent.Type,
+			BaseURL:        resolvedBaseURL,
+			APIKey:         resolvedAPIKey,
+			Models:         resolvedModels,
+			Tags:           parent.Tags,
+			Priority:       resolvedPriority,
+			Weight:         resolvedWeight,
+			ProxyEnabled:   parent.ProxyEnabled,
+			RateLimitRPM:   resolvedRPM,
+			TimeoutSeconds: parent.TimeoutSeconds,
+			MaxRetries:     parent.MaxRetries,
+			CostMultiplier: resolvedCostMul,
+			Enabled:        enabled,
+			Status:         status,
+			LastLatencyMs:  lastLatencyMs,
+			LastError:      lastErr,
+			QuotaTotal:     parent.QuotaTotal,
+			QuotaUsed:      parent.QuotaUsed,
+			QuotaSource:    parent.QuotaSource,
+		}
+		channelProviders = append(channelProviders, cp)
+	}
+
+	// 合并：无 Channel 的 Provider 保留原样，有 Channel 的 Provider 只保留 Channel 展开项
+	var result []*Provider
+	for _, p := range providers {
+		if !hasChannel[p.ID] {
+			result = append(result, p)
+		}
+	}
+	result = append(result, channelProviders...)
+
+	LogInfo("LoadChannels: %d providers, %d have channels, %d expanded",
+		len(providers), len(hasChannel), len(channelProviders))
+
+	return result
+}
+
 // UpdateProviderStatus 更新 Provider 健康状态
 func UpdateProviderStatus(id int, status string, latencyMs int, errMsg string) {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")

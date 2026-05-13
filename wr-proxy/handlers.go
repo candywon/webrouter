@@ -346,6 +346,8 @@ func reloadProviders() error {
 	if err != nil {
 		return err
 	}
+	// 展开 Channel 为独立调度项
+	providers = LoadChannels(providers)
 	router.RefreshProviders(providers)
 	return nil
 }
