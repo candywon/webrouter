@@ -64,23 +64,3 @@ class HealthChecker:
 
         db.session.commit()
         return results
-
-    # ============ 以下为兼容旧接口的方法 ============
-
-    def check_channel_sync(self, channel: dict) -> dict:
-        """兼容旧接口：检测单个渠道（映射为 Provider 检测）"""
-        from models.provider_factory import ProviderFactory
-        # 将旧的 channel 格式转换为 provider 格式
-        provider_dict = {
-            'id': channel.get('id'),
-            'name': channel.get('name', ''),
-            'type': 'newapi',  # 旧接口都是 New-API 渠道
-            'base_url': channel.get('base_url', ''),
-            'api_key': (channel.get('other') or '').split('\n')[0],
-        }
-        adapter = ProviderFactory.create(provider_dict)
-        return adapter.check_health()
-
-    def check_all_sync(self):
-        """兼容旧接口：检测所有渠道"""
-        return self.check_all_providers()

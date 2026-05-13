@@ -1,97 +1,57 @@
-"""监控API"""
+"""监控API — 基于 WebRouter 自有的 Provider 健康状态"""
 from flask import Blueprint, jsonify, request
 from models.wr_models import ChannelHealth
+from models.provider import Provider
 from extensions import db
 
 monitor_bp = Blueprint('monitor', __name__)
 
-DEMO_CHANNELS = None  # 延迟导入
-
-
-def _get_demo_channels():
-    global DEMO_CHANNELS
-    if DEMO_CHANNELS is None:
-        from services.demo_data import get_demo_channels
-        DEMO_CHANNELS = get_demo_channels()
-    return DEMO_CHANNELS
-
-
-def _has_newapi():
-    try:
-        from models.newapi_adapter import NewAPIAdapter
-        return len(NewAPIAdapter.get_channels()) > 0
-    except Exception:
-        return False
-
 
 @monitor_bp.route('/channels')
 def channel_status():
-    """所有渠道健康状态"""
-    if not _has_newapi():
-        from services.demo_data import get_demo_channels
-        demo = get_demo_channels()
-        result = [{
-            'channel_id': ch['id'],
-            'name': ch['name'],
-            'type': ch.get('type', ''),
-            'status': ch.get('status'),
-            'health': ch.get('health', {'status': 'unchecked'}),
-        } for ch in demo]
-        return jsonify({'channels': result})
-
-    try:
-        from models.newapi_adapter import NewAPIAdapter
-        channels = NewAPIAdapter.get_channels()
-    except Exception:
-        channels = []
-
+    """所有 Provider 渠道健康状态"""
+    providers = Provider.query.filter_by(enabled=True).all()
     result = []
-    for ch in channels:
+    for p in providers:
         latest = ChannelHealth.query.filter_by(
-            channel_id=ch['id']
+            provider_id=p.id
         ).order_by(ChannelHealth.checked_at.desc()).first()
         result.append({
-            'channel_id': ch['id'],
-            'name': ch.get('name', ''),
-            'type': ch.get('type', ''),
-            'status': ch.get('status'),
+            'provider_id': p.id,
+            'name': p.name,
+            'type': p.type,
+            'status': p.status or 'unknown',
+            'priority': p.priority,
             'health': latest.to_dict() if latest else {'status': 'unchecked'},
         })
-
     return jsonify({'channels': result})
 
 
-@monitor_bp.route('/check/<int:channel_id>', methods=['POST'])
-def check_channel(channel_id):
-    """手动触发单个渠道检测"""
-    if not _has_newapi():
-        # Demo模式：模拟检测
-        from services.demo_data import DEMO_HEALTH
-        health = DEMO_HEALTH.get(channel_id, {'status': 'unknown', 'latency_ms': 0, 'error_message': None})
-        return jsonify({
-            'channel_id': channel_id,
-            'status': health['status'],
-            'latency_ms': health.get('latency_ms', 0),
-            'error': health.get('error_message'),
-            'name': f'Channel-{channel_id}',
-        })
+@monitor_bp.route('/check/<int:provider_id>', methods=['POST'])
+def check_channel(provider_id):
+    """手动触发单个 Provider 检测"""
+    provider = Provider.query.get(provider_id)
+    if not provider:
+        return jsonify({'error': 'Provider not found'}), 404
 
     from services.health_checker import HealthChecker
-    from models.newapi_adapter import NewAPIAdapter
     checker = HealthChecker()
     try:
-        channel = NewAPIAdapter.get_channel_by_id(channel_id)
-        if not channel:
-            return jsonify({'error': 'Channel not found'}), 404
-        result = checker.check_channel_sync(channel)
+        result = checker.check_provider(provider.to_dict(include_secrets=True))
         health = ChannelHealth(
-            channel_id=channel_id,
-            status=result['status'],
+            provider_id=provider_id,
+            status=result.get('status', 'unknown'),
             latency_ms=result.get('latency_ms'),
             error_message=result.get('error'),
         )
         db.session.add(health)
+        # 更新 Provider 状态
+        provider.status = result.get('status', 'unknown')
+        provider.last_latency_ms = result.get('latency_ms')
+        provider.last_error = result.get('error')
         db.session.commit()
+        result['provider_id'] = provider_id
+        result['name'] = provider.name
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -100,63 +60,20 @@ def check_channel(channel_id):
 @monitor_bp.route('/check_all', methods=['POST'])
 def check_all():
     """手动触发全量检测"""
-    if not _has_newapi():
-        from services.demo_data import get_demo_channels, DEMO_HEALTH
-        results = []
-        for ch in get_demo_channels():
-            h = DEMO_HEALTH.get(ch['id'], {'status': 'unknown', 'latency_ms': 0})
-            results.append({
-                'channel_id': ch['id'],
-                'status': h['status'],
-                'latency_ms': h.get('latency_ms', 0),
-                'error': h.get('error_message'),
-            })
-        return jsonify({'results': results})
-
     from services.health_checker import HealthChecker
-    from models.newapi_adapter import NewAPIAdapter
     checker = HealthChecker()
     try:
-        channels = NewAPIAdapter.get_channels()
-        results = []
-        for ch in channels:
-            result = checker.check_channel_sync(ch)
-            health = ChannelHealth(
-                channel_id=ch['id'],
-                status=result['status'],
-                latency_ms=result.get('latency_ms'),
-                error_message=result.get('error'),
-            )
-            db.session.add(health)
-            results.append(result)
-        db.session.commit()
+        results = checker.check_all_providers()
         return jsonify({'results': results})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
-@monitor_bp.route('/history/<int:channel_id>')
-def channel_history(channel_id):
-    """渠道检测历史"""
+@monitor_bp.route('/history/<int:provider_id>')
+def channel_history(provider_id):
+    """Provider 检测历史"""
     limit = request.args.get('limit', 50, type=int)
     records = ChannelHealth.query.filter_by(
-        channel_id=channel_id
+        provider_id=provider_id
     ).order_by(ChannelHealth.checked_at.desc()).limit(limit).all()
-
-    if not records and not _has_newapi():
-        # Demo: 返回模拟历史
-        from datetime import datetime, timedelta
-        from services.demo_data import DEMO_HEALTH
-        h = DEMO_HEALTH.get(channel_id, {'status': 'unknown', 'latency_ms': 0, 'error_message': None})
-        history = []
-        for i in range(5):
-            history.append({
-                'channel_id': channel_id,
-                'status': h['status'] if i == 0 else 'healthy',
-                'latency_ms': h.get('latency_ms', 200) + i * 50 if i > 0 else h.get('latency_ms'),
-                'error_message': h.get('error_message') if i == 0 else None,
-                'checked_at': (datetime.utcnow() - timedelta(minutes=5 * i)).isoformat(),
-            })
-        return jsonify({'history': history})
-
     return jsonify({'history': [r.to_dict() for r in records]})

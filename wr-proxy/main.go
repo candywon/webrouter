@@ -40,6 +40,11 @@ func main() {
 	router.RefreshProviders(providers)
 	LogInfo("Loaded %d providers", len(providers))
 
+	// 3.5 加载定价表
+	if err := RefreshPricing(); err != nil {
+		LogWarn("Load pricing failed: %v (using defaults)", err)
+	}
+
 	// 4. 初始化代理服务
 	proxySvc = NewProxyService()
 

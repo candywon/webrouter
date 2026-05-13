@@ -27,6 +27,7 @@ func RegisterHandlers(mux *http.ServeMux) {
 
 	// 管理接口（Flask 调用）
 	mux.HandleFunc("/admin/reload", handleReload)
+	mux.HandleFunc("/admin/reload_pricing", handleReloadPricing)
 	mux.HandleFunc("/admin/stats", handleStats)
 }
 
@@ -91,6 +92,14 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 选 Provider
 		provider := router.SelectProvider(model, token, excludeIDs)
 		if provider == nil {
+			// 所有 Provider 已排除，记录最终失败日志
+			if lastResult != nil {
+				rlog := BuildRequestLog(reqID, token, selectedProvider, model, endpoint, clientIP, lastResult, true)
+				rlog.StatusCode = lastResult.StatusCode
+				rlog.ErrorMessage = lastResult.Error
+				meter.RecordRequest(rlog)
+			}
+
 			writeJSON(w, 503, map[string]interface{}{
 				"error": map[string]string{
 					"message": "No available provider for model " + model,
@@ -105,8 +114,8 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		// 转发
 		resp, result := proxySvc.Forward(provider, endpoint, r, body)
 
-		// 失败且可重试
-		if result.StatusCode >= 500 || result.StatusCode == 429 || result.Error != "" {
+		// 失败且可重试（4xx 认证/权限错误也触发降级）
+		if result.StatusCode >= 400 || result.Error != "" {
 			lastResult = result
 			excludeIDs = append(excludeIDs, provider.ID)
 			LogInfo("Proxy: %s → %s failed (status=%d, err=%s), failover attempt %d",
@@ -232,6 +241,27 @@ func handleReload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
 		"message":   "Providers reloaded",
 		"count":     len(router.GetProviders()),
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+// handleReloadPricing 管理接口：刷新定价缓存
+func handleReloadPricing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+	if err := RefreshPricing(); err != nil {
+		writeJSON(w, 500, map[string]interface{}{
+			"error":     err.Error(),
+			"timestamp": time.Now().UTC(),
+		})
+		return
+	}
+	pricing := GetAllPricing()
+	writeJSON(w, 200, map[string]interface{}{
+		"message":   "Pricing reloaded",
+		"count":     len(pricing),
 		"timestamp": time.Now().UTC(),
 	})
 }

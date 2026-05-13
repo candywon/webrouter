@@ -117,14 +117,9 @@ class Provider(db.Model):
 
         if include_secrets:
             d['api_key'] = self.api_key
-            d['admin_token'] = self.admin_token
-            d['db_uri'] = self.db_uri
             d['master_key'] = self.master_key
 
         # 类型特定字段
-        if self.type in (self.TYPE_NEWAPI, self.TYPE_ONEAPI):
-            d['admin_token_set'] = bool(self.admin_token)
-            d['db_uri_set'] = bool(self.db_uri)
         if self.type == self.TYPE_LITELLM:
             d['master_key_set'] = bool(self.master_key)
         if self.type == self.TYPE_CUSTOM:
@@ -149,21 +144,6 @@ class Provider(db.Model):
                 'icon': '🔀',
                 'fields': ['name', 'base_url', 'api_key', 'models'],
                 'data_capabilities': ['health', 'latency', 'manual_cost'],
-            },
-            cls.TYPE_NEWAPI: {
-                'label': '自建 New-API',
-                'description': '自建 New-API 实例，支持完整数据读取',
-                'icon': '🏗️',
-                'fields': ['name', 'base_url', 'api_key', 'admin_token', 'db_uri'],
-                'data_capabilities': ['health', 'latency', 'channels', 'users',
-                                      'logs', 'costs', 'balance'],
-            },
-            cls.TYPE_ONEAPI: {
-                'label': '自建 One-API',
-                'description': '自建 One-API 实例，支持完整数据读取',
-                'icon': '🏗️',
-                'fields': ['name', 'base_url', 'api_key', 'admin_token', 'db_uri'],
-                'data_capabilities': ['health', 'latency', 'channels', 'users', 'logs'],
             },
             cls.TYPE_LITELLM: {
                 'label': 'LiteLLM 代理',

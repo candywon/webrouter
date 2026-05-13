@@ -29,7 +29,8 @@ def create_app(config_class=None):
     from routes.team import team_bp
     from routes.cli_export import cli_bp
     from routes.settings import settings_bp
-    from routes.tokens import tokens_bp       # 新增：Token 管理
+    from routes.tokens import tokens_bp       # Token 管理
+    from routes.pricing import pricing_bp     # 模型定价管理
 
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(providers_bp, url_prefix='/api/providers')
@@ -39,7 +40,8 @@ def create_app(config_class=None):
     app.register_blueprint(team_bp, url_prefix='/api/team')
     app.register_blueprint(cli_bp, url_prefix='/api/cli')
     app.register_blueprint(settings_bp, url_prefix='/api/settings')
-    app.register_blueprint(tokens_bp, url_prefix='/api/tokens')   # 新增
+    app.register_blueprint(tokens_bp, url_prefix='/api/tokens')
+    app.register_blueprint(pricing_bp, url_prefix='/api/pricing')
 
     # 根路径返回前端页面
     @app.route('/')
@@ -59,6 +61,12 @@ def create_app(config_class=None):
         )
         from models.provider import Provider  # noqa: F401
         db.create_all()
+
+        # 初始化种子数据（仅首次建表）
+        from models.wr_models import ModelPricing
+        count = ModelPricing.seed_defaults()
+        if count:
+            app.logger.info(f'定价种子数据已初始化: {count} 条')
 
     # 启动定时任务
     _init_schedulers(app)

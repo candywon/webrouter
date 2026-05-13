@@ -11,11 +11,11 @@ def get_settings():
     """获取系统设置"""
     app = current_app._get_current_object()
     return jsonify({
-        'newapi_url': app.config.get('NEWAPI_URL', ''),
+        'proxy_url': f"http://localhost:{app.config.get('PROXY_PORT', 5051)}",
         'health_check_interval': app.config.get('HEALTH_CHECK_INTERVAL', 300),
         'alert_cooldown': app.config.get('ALERT_COOLDOWN', 300),
         'timezone': app.config.get('TZ', 'Asia/Shanghai'),
-        'demo_mode': True,  # TODO: 检测实际状态
+        'proxy_enabled': True,
     })
 
 
@@ -44,7 +44,7 @@ def create_backup():
             shutil.copy2(db_path, backup_path)
             return jsonify({'backup': backup_path})
 
-    return jsonify({'message': '备份功能仅支持SQLite', 'demo_mode': True})
+    return jsonify({'message': '备份功能仅支持SQLite'})
 
 
 @settings_bp.route('/restore', methods=['POST'])

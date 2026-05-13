@@ -7,6 +7,43 @@ from sqlalchemy import func
 billing_bp = Blueprint('billing', __name__)
 
 
+@billing_bp.route('/summary')
+def summary():
+    """账单概览 — 本月/本周/今日汇总"""
+    from datetime import datetime, timedelta
+
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=now.weekday())
+    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    periods = {
+        'month': month_start,
+        'week': week_start,
+        'today': today_start,
+    }
+
+    result = {}
+    for label, start in periods.items():
+        row = db.session.query(
+            func.count(RequestLog.id).label('requests'),
+            func.coalesce(func.sum(RequestLog.input_tokens), 0).label('input_tokens'),
+            func.coalesce(func.sum(RequestLog.output_tokens), 0).label('output_tokens'),
+            func.coalesce(func.sum(RequestLog.cost_cents), 0).label('cost_cents'),
+        ).filter(RequestLog.created_at >= start).first()
+
+        result[label] = {
+            'requests': row.requests or 0,
+            'input_tokens': row.input_tokens or 0,
+            'output_tokens': row.output_tokens or 0,
+            'cost_cents': row.cost_cents or 0,
+            'cost_yuan': round((row.cost_cents or 0) / 100, 2),
+        }
+
+    return jsonify(result)
+
+
 @billing_bp.route('/usage')
 def usage():
     """用量统计 — 按模型聚合"""

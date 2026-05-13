@@ -133,9 +133,14 @@ func migrate() error {
 // LoadProviders 从 DB 加载所有 Provider（主表 + 扩展表 JOIN）
 func LoadProviders() ([]*Provider, error) {
 	rows, err := db.Query(`
-		SELECT p.id, p.name, p.type, p.base_url, p.api_key,
-		       p.models, p.tags, p.enabled, p.status,
-		       p.last_latency_ms, p.last_error,
+		SELECT p.id, p.name, p.type, p.base_url,
+		       COALESCE(p.api_key, '') as api_key,
+		       COALESCE(p.models, '') as models,
+		       COALESCE(p.tags, '') as tags,
+		       p.enabled,
+		       COALESCE(p.status, 'unchecked') as status,
+		       COALESCE(p.last_latency_ms, 0) as last_latency_ms,
+		       p.last_error,
 		       COALESCE(e.priority, 50) as priority,
 		       COALESCE(e.weight, 100) as weight,
 		       COALESCE(e.proxy_enabled, 1) as proxy_enabled,
@@ -265,6 +270,8 @@ func DeductTokenQuota(tokenID int, costCents int64) bool {
 
 // InsertRequestLog 写入请求日志
 func InsertRequestLog(log *RequestLog) error {
+	LogInfo("InsertRequestLog: reqID=%s token=%d provider=%d model=%s status=%d latency=%d",
+		log.RequestID, log.TokenID, log.ProviderID, log.ModelName, log.StatusCode, log.LatencyMs)
 	_, err := db.Exec(`
 		INSERT INTO wr_request_logs 
 		(request_id, token_id, token_name, provider_id, provider_name,
@@ -278,7 +285,9 @@ func InsertRequestLog(log *RequestLog) error {
 		log.ErrorMessage, log.ClientIP, time.Now().UTC(),
 	)
 	if err != nil {
-		LogWarn("insert request log: %v", err)
+		LogError("insert request log FAILED: %v", err)
+	} else {
+		LogInfo("insert request log OK: reqID=%s", log.RequestID)
 	}
 	return err
 }

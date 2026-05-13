@@ -170,7 +170,7 @@ class RequestLog(db.Model):
     """请求日志 — wr-proxy 写入，Flask 读取"""
     __tablename__ = 'wr_request_logs'
 
-    id = db.Column(db.BigInteger, primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     request_id = db.Column(db.String(36), nullable=False)
     token_id = db.Column(db.Integer, nullable=False, index=True)
     token_name = db.Column(db.String(100), default='')
@@ -317,3 +317,82 @@ class TeamQuota(db.Model):
             'period': self.period,
             'reset_at': self.reset_at.isoformat() if self.reset_at else None,
         }
+
+
+# ============================================================
+#  Model Pricing — 模型定价表（DB 存储，可热更新）
+# ============================================================
+
+class ModelPricing(db.Model):
+    """模型定价 — 单位：分/千token (1元=100分)"""
+    __tablename__ = 'wr_model_pricing'
+
+    id = db.Column(db.Integer, primary_key=True)
+    model = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    input_price = db.Column(db.Float, nullable=False, default=0)   # 输入价格(分/千token)
+    output_price = db.Column(db.Float, nullable=False, default=0)  # 输出价格(分/千token)
+    vendor = db.Column(db.String(50), default='')                  # 厂商: openai/anthropic/google/deepseek/qwen/zhipu/moonshot/other
+    is_default = db.Column(db.Boolean, default=False)              # 是否为未知模型的默认定价
+    notes = db.Column(db.Text, default='')                         # 备注
+    effective_at = db.Column(db.DateTime, default=datetime.utcnow) # 生效时间
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'model': self.model,
+            'input_price': self.input_price,
+            'output_price': self.output_price,
+            'vendor': self.vendor,
+            'is_default': self.is_default,
+            'notes': self.notes,
+            'effective_at': self.effective_at.isoformat() if self.effective_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def seed_defaults(cls):
+        """初始化种子定价数据（仅首次建表时）"""
+        if cls.query.count() > 0:
+            return 0
+
+        seeds = [
+            # OpenAI
+            cls(model='gpt-4o', input_price=0.18, output_price=0.54, vendor='openai'),
+            cls(model='gpt-4o-mini', input_price=0.012, output_price=0.048, vendor='openai'),
+            cls(model='gpt-4-turbo', input_price=0.60, output_price=1.80, vendor='openai'),
+            cls(model='gpt-4', input_price=2.10, output_price=6.30, vendor='openai'),
+            cls(model='gpt-3.5-turbo', input_price=0.003, output_price=0.006, vendor='openai'),
+            cls(model='o1-preview', input_price=1.05, output_price=4.20, vendor='openai'),
+            cls(model='o1-mini', input_price=0.21, output_price=0.84, vendor='openai'),
+            # Anthropic
+            cls(model='claude-3.5-sonnet', input_price=0.21, output_price=1.05, vendor='anthropic'),
+            cls(model='claude-3.5-haiku', input_price=0.007, output_price=0.035, vendor='anthropic'),
+            cls(model='claude-3-opus', input_price=1.05, output_price=5.25, vendor='anthropic'),
+            cls(model='claude-3-sonnet', input_price=0.21, output_price=1.05, vendor='anthropic'),
+            cls(model='claude-3-haiku', input_price=0.018, output_price=0.09, vendor='anthropic'),
+            # Google
+            cls(model='gemini-1.5-pro', input_price=0.16, output_price=0.48, vendor='google'),
+            cls(model='gemini-1.5-flash', input_price=0.005, output_price=0.015, vendor='google'),
+            cls(model='gemini-2.0-flash', input_price=0.005, output_price=0.015, vendor='google'),
+            # DeepSeek
+            cls(model='deepseek-chat', input_price=0.009, output_price=0.027, vendor='deepseek'),
+            cls(model='deepseek-reasoner', input_price=0.42, output_price=1.26, vendor='deepseek'),
+            # 通义千问
+            cls(model='qwen-turbo', input_price=0.015, output_price=0.045, vendor='qwen'),
+            cls(model='qwen-plus', input_price=0.03, output_price=0.09, vendor='qwen'),
+            cls(model='qwen-max', input_price=0.15, output_price=0.45, vendor='qwen'),
+            # 智谱
+            cls(model='glm-4', input_price=0.09, output_price=0.09, vendor='zhipu'),
+            cls(model='glm-4-flash', input_price=0.009, output_price=0.009, vendor='zhipu'),
+            # 月之暗面
+            cls(model='moonshot-v1-8k', input_price=0.09, output_price=0.09, vendor='moonshot'),
+            cls(model='moonshot-v1-32k', input_price=0.18, output_price=0.18, vendor='moonshot'),
+            # 默认定价（未知模型用）
+            cls(model='__default__', input_price=0.015, output_price=0.06, vendor='other', is_default=True, notes='未知模型默认价格（gpt-4o-mini级别）'),
+        ]
+        db.session.add_all(seeds)
+        db.session.commit()
+        return len(seeds)

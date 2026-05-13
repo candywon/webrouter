@@ -1,7 +1,6 @@
-"""CLI配置导出API"""
+"""CLI配置导出API — 导出 WR Token 给各种 CLI 工具"""
 import json
 from flask import Blueprint, jsonify
-from models.newapi_adapter import NewAPIAdapter
 
 cli_bp = Blueprint('cli_export', __name__)
 
@@ -14,7 +13,7 @@ CLI_TOOLS = {
             'ANTHROPIC_API_KEY': '{api_key}',
             'ANTHROPIC_BASE_URL': '{base_url}/v1',
         },
-        'shell_export': 'export ANTHROPIC_API_KEY="{api_key}"\nexport ANTHROPIC_BASE_URL="{base_url}/v1"',
+        'shell_export': 'export ANTHROPIC_API_KEY="***"\nexport ANTHROPIC_BASE_URL="{base_url}/v1"',
     },
     'codex': {
         'name': 'OpenAI Codex',
@@ -23,7 +22,7 @@ CLI_TOOLS = {
             'OPENAI_API_KEY': '{api_key}',
             'OPENAI_BASE_URL': '{base_url}/v1',
         },
-        'shell_export': 'export OPENAI_API_KEY="{api_key}"\nexport OPENAI_BASE_URL="{base_url}/v1"',
+        'shell_export': 'export OPENAI_API_KEY="***"\nexport OPENAI_BASE_URL="{base_url}/v1"',
     },
     'openclaw': {
         'name': 'OpenClaw',
@@ -32,7 +31,7 @@ CLI_TOOLS = {
             'OPENAI_API_KEY': '{api_key}',
             'OPENAI_BASE_URL': '{base_url}/v1',
         },
-        'shell_export': 'export OPENAI_API_KEY="{api_key}"\nexport OPENAI_BASE_URL="{base_url}/v1"',
+        'shell_export': 'export OPENAI_API_KEY="***"\nexport OPENAI_BASE_URL="{base_url}/v1"',
     },
     'hermes': {
         'name': 'Hermes Agent',
@@ -88,7 +87,7 @@ def export_config(tool_id):
 
     tool = CLI_TOOLS[tool_id]
     base_url = request.host_url.rstrip('/')
-    api_key = request.args.get('api_key', 'sk-your-api-key-here')
+    api_key = request.args.get('api_key', 'sk-you...here')
 
     result = {
         'tool': tool_id,
