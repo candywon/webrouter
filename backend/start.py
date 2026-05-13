@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WebRouter 进程管理器 — 启动/停止/重启/状态查询
-管理 WebRouter (Flask) + New-API (sidecar) 双进程
+管理 WebRouter (Flask) + wr-proxy (Go sidecar) 双进程
 
 用法:
   python3 start.py start     启动所有服务
@@ -16,7 +16,6 @@ import sys
 import signal
 import subprocess
 import time
-import json
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -28,22 +27,20 @@ DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"
 PID_DIR = LOGS_DIR
 BACKEND_DIR = BASE_DIR / "backend"
+PROXY_DIR = BASE_DIR / "wr-proxy"
 
 # 默认配置
-WEBROUTER_PORT = int(os.environ.get("WEBROUTER_PORT", "5000"))
-NEWAPI_PORT = int(os.environ.get("NEWAPI_PORT", "3000"))
-NEWAPI_URL = os.environ.get("NEWAPI_URL", f"http://localhost:{NEWAPI_PORT}")
+WEBROUTER_PORT = int(os.environ.get("WEBROUTER_PORT", "5050"))
+PROXY_PORT = int(os.environ.get("WR_PROXY_PORT", "5051"))
 FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0")
 
 
 def ensure_dirs():
-    """确保必要目录存在"""
     for d in [DATA_DIR, LOGS_DIR, BIN_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 
 def load_env():
-    """加载 .env 文件"""
     env_file = BASE_DIR / ".env"
     if env_file.exists():
         with open(env_file) as f:
@@ -57,7 +54,6 @@ def load_env():
 
 
 def read_pid(name):
-    """读取 PID 文件"""
     pid_file = PID_DIR / f"{name}.pid"
     if pid_file.exists():
         try:
@@ -68,19 +64,14 @@ def read_pid(name):
 
 
 def write_pid(name, pid):
-    """写入 PID 文件"""
-    pid_file = PID_DIR / f"{name}.pid"
-    pid_file.write_text(str(pid))
+    (PID_DIR / f"{name}.pid").write_text(str(pid))
 
 
 def remove_pid(name):
-    """删除 PID 文件"""
-    pid_file = PID_DIR / f"{name}.pid"
-    pid_file.unlink(missing_ok=True)
+    (PID_DIR / f"{name}.pid").unlink(missing_ok=True)
 
 
 def is_alive(pid):
-    """检查进程是否存活"""
     if pid is None:
         return False
     try:
@@ -91,67 +82,69 @@ def is_alive(pid):
 
 
 def check_port(port, timeout=3):
-    """检查端口是否有服务响应"""
     try:
-        req = urllib.request.Request(f"http://localhost:{port}/")
+        req = urllib.request.Request(f"http://localhost:{port}/health")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status == 200
     except Exception:
         return False
 
 
-def find_newapi_binary():
-    """查找 New-API 二进制文件"""
-    # 优先查 bin/new-api
-    for name in ["new-api", "new-api.exe"]:
+def find_proxy_binary():
+    """查找 wr-proxy 二进制"""
+    # 优先查项目目录
+    for name in ["wr-proxy", "wr-proxy.exe"]:
+        path = PROXY_DIR / name
+        if path.exists():
+            return str(path)
+    # 查 bin 目录
+    for name in ["wr-proxy", "wr-proxy-linux-amd64"]:
         path = BIN_DIR / name
         if path.exists():
             return str(path)
     # 查系统 PATH
     import shutil
-    found = shutil.which("new-api")
-    return found
+    return shutil.which("wr-proxy")
 
 
-def start_newapi():
-    """启动 New-API sidecar"""
-    pid = read_pid("newapi")
+def start_proxy():
+    """启动 wr-proxy Go sidecar"""
+    pid = read_pid("wr-proxy")
     if pid and is_alive(pid):
-        print(f"  New-API 已在运行 (PID {pid})")
+        print(f"  wr-proxy 已在运行 (PID {pid})")
         return True
 
-    binary = find_newapi_binary()
+    binary = find_proxy_binary()
     if not binary:
-        print("  New-API 二进制未找到，跳过 (使用 Docker 模式请手动启动)")
-        print(f"  如需 Docker: docker run -d -p {NEWAPI_PORT}:3000 calciumion/new-api:latest")
+        print("  wr-proxy 二进制未找到，跳过")
+        print(f"  编译: cd wr-proxy && go build -o wr-proxy .")
         return True  # 不阻断 WebRouter 启动
 
-    log_file = open(LOGS_DIR / "newapi.log", "a")
+    log_file = open(LOGS_DIR / "wr-proxy.log", "a")
     env = os.environ.copy()
-    env.setdefault("SQL_DSN", str(DATA_DIR / "newapi.db"))
-    env.setdefault("PORT", str(NEWAPI_PORT))
+    env.setdefault("WR_DB_PATH", str(DATA_DIR / "webrouter.db"))
+    env.setdefault("WR_PROXY_PORT", str(PROXY_PORT))
 
     proc = subprocess.Popen(
         [binary],
         stdout=log_file,
         stderr=log_file,
         env=env,
-        cwd=str(BASE_DIR),
+        cwd=str(PROXY_DIR),
     )
-    write_pid("newapi", proc.pid)
-    print(f"  New-API 启动中... (PID {proc.pid}, 端口 {NEWAPI_PORT})")
+    write_pid("wr-proxy", proc.pid)
+    print(f"  wr-proxy 启动中... (PID {proc.pid}, 端口 {PROXY_PORT})")
 
-    # 等待就绪
     for i in range(15):
         time.sleep(1)
-        if check_port(NEWAPI_PORT):
-            print(f"  New-API 就绪 ✓")
+        if check_port(PROXY_PORT):
+            print(f"  wr-proxy 就绪 ✓")
             return True
         if not is_alive(proc.pid):
-            print(f"  New-API 启动失败！查看日志: {LOGS_DIR / 'newapi.log'}")
+            print(f"  wr-proxy 启动失败！查看日志: {LOGS_DIR / 'wr-proxy.log'}")
             return False
 
-    print(f"  New-API 等待超时（进程存活但端口未响应）")
+    print(f"  wr-proxy 等待超时（进程存活但端口未响应）")
     return True
 
 
@@ -164,11 +157,9 @@ def start_webrouter():
 
     db_uri = os.environ.get("DATABASE_URI", f"sqlite:///{DATA_DIR / 'webrouter.db'}")
     os.environ["DATABASE_URI"] = db_uri
-    os.environ["NEWAPI_URL"] = NEWAPI_URL
 
     log_file = open(LOGS_DIR / "webrouter.log", "a")
 
-    # 用同一 Python 解释器启动 Flask
     cmd = [
         sys.executable, "-c",
         "from app import create_app; app = create_app(); "
@@ -185,7 +176,6 @@ def start_webrouter():
     write_pid("webrouter", proc.pid)
     print(f"  WebRouter 启动中... (PID {proc.pid}, 端口 {WEBROUTER_PORT})")
 
-    # 等待就绪
     for i in range(15):
         time.sleep(1)
         if check_port(WEBROUTER_PORT):
@@ -199,21 +189,20 @@ def start_webrouter():
     return True
 
 
-def stop_newapi():
-    """停止 New-API"""
-    pid = read_pid("newapi")
+def stop_proxy():
+    """停止 wr-proxy"""
+    pid = read_pid("wr-proxy")
     if not pid or not is_alive(pid):
-        remove_pid("newapi")
-        print("  New-API 未在运行")
+        remove_pid("wr-proxy")
+        print("  wr-proxy 未在运行")
         return
 
-    print(f"  停止 New-API (PID {pid})...")
+    print(f"  停止 wr-proxy (PID {pid})...")
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
 
-    # 等待退出
     for _ in range(10):
         if not is_alive(pid):
             break
@@ -224,8 +213,8 @@ def stop_newapi():
         except ProcessLookupError:
             pass
 
-    remove_pid("newapi")
-    print("  New-API 已停止 ✓")
+    remove_pid("wr-proxy")
+    print("  wr-proxy 已停止 ✓")
 
 
 def stop_webrouter():
@@ -257,15 +246,14 @@ def stop_webrouter():
 
 
 def show_status():
-    """显示运行状态"""
     print("")
     print("=" * 50)
     print("  WebRouter 服务状态")
     print("=" * 50)
 
     for name, port, label in [
-        ("newapi", NEWAPI_PORT, "New-API"),
-        ("webrouter", WEBROUTER_PORT, "WebRouter"),
+        ("wr-proxy", PROXY_PORT, "wr-proxy (Go)"),
+        ("webrouter", WEBROUTER_PORT, "WebRouter (Flask)"),
     ]:
         pid = read_pid(name)
         alive = is_alive(pid) if pid else False
@@ -279,23 +267,21 @@ def show_status():
 
     print("")
     print(f"  管理后台: http://localhost:{WEBROUTER_PORT}")
-    print(f"  New-API:  http://localhost:{NEWAPI_PORT}")
+    print(f"  API 代理: http://localhost:{PROXY_PORT}/v1/chat/completions")
     print(f"  日志目录: {LOGS_DIR}")
     print("")
 
 
 def tail_logs():
-    """查看实时日志"""
     import shutil
     tail = shutil.which("tail")
     if tail:
         log_files = [str(LOGS_DIR / "webrouter.log")]
-        if (LOGS_DIR / "newapi.log").exists():
-            log_files.append(str(LOGS_DIR / "newapi.log"))
+        if (LOGS_DIR / "wr-proxy.log").exists():
+            log_files.append(str(LOGS_DIR / "wr-proxy.log"))
         os.execvp(tail, ["tail", "-f"] + log_files)
     else:
-        # fallback: 读取最后 50 行
-        for name in ["webrouter", "newapi"]:
+        for name in ["webrouter", "wr-proxy"]:
             log = LOGS_DIR / f"{name}.log"
             if log.exists():
                 print(f"--- {name}.log (最后50行) ---")
@@ -315,12 +301,12 @@ def main():
 
     if cmd == "start":
         print("\n启动 WebRouter 服务...")
-        ok1 = start_newapi()
+        ok1 = start_proxy()
         ok2 = start_webrouter()
         if ok1 and ok2:
             print(f"\n✓ 全部启动成功！")
             print(f"  管理后台: http://localhost:{WEBROUTER_PORT}")
-            print(f"  New-API:  http://localhost:{NEWAPI_PORT}")
+            print(f"  API 代理: http://localhost:{PROXY_PORT}/v1/chat/completions")
         else:
             print("\n⚠ 部分服务启动失败，请检查日志")
             sys.exit(1)
@@ -328,15 +314,15 @@ def main():
     elif cmd == "stop":
         print("\n停止 WebRouter 服务...")
         stop_webrouter()
-        stop_newapi()
+        stop_proxy()
         print("\n✓ 全部已停止")
 
     elif cmd == "restart":
         print("\n重启 WebRouter 服务...")
         stop_webrouter()
-        stop_newapi()
+        stop_proxy()
         time.sleep(1)
-        ok1 = start_newapi()
+        ok1 = start_proxy()
         ok2 = start_webrouter()
         if ok1 and ok2:
             print("\n✓ 重启完成！")

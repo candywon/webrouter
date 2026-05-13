@@ -11,13 +11,10 @@ class Provider(db.Model):
     # 支持的 Provider 类型
     TYPE_DIRECT = 'direct'
     TYPE_AGGREGATE = 'aggregate'
-    TYPE_NEWAPI = 'newapi'
-    TYPE_ONEAPI = 'oneapi'
     TYPE_LITELLM = 'litellm'
     TYPE_CUSTOM = 'custom'
 
-    VALID_TYPES = [TYPE_DIRECT, TYPE_AGGREGATE, TYPE_NEWAPI,
-                   TYPE_ONEAPI, TYPE_LITELLM, TYPE_CUSTOM]
+    VALID_TYPES = [TYPE_DIRECT, TYPE_AGGREGATE, TYPE_LITELLM, TYPE_CUSTOM]
 
     # 健康状态
     STATUS_UNCHECKED = 'unchecked'
@@ -32,13 +29,9 @@ class Provider(db.Model):
     type = db.Column(db.String(20), nullable=False, default=TYPE_CUSTOM)
     base_url = db.Column(db.String(500), nullable=False)
 
-    # 认证信息（敏感字段，应加密存储）
+    # 认证信息
     api_key = db.Column(db.String(500))
-    api_key_masked = db.Column(db.String(50))     # 脱敏显示 sk-xxx...xxxx
-
-    # newapi/oneapi 专有
-    admin_token = db.Column(db.String(500))
-    db_uri = db.Column(db.String(500))
+    api_key_masked = db.Column(db.String(50))     # 脱敏显示
 
     # litellm 专有
     master_key = db.Column(db.String(500))
