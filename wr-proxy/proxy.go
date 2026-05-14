@@ -45,6 +45,7 @@ type ProxyResult struct {
 	Error         string
 	UpstreamError UpstreamErrorDetail // 上游语义错误详情（HTTP 200 但 body 含错误时填充）
 	StreamAborted bool                // 流式响应中途被错误中断
+	Truncated     bool                // 响应被截断（finish_reason=length 或 JSON 不完整）
 }
 
 // Forward 转发请求到上游 Provider
@@ -200,6 +201,7 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	defer resp.Body.Close()
 
 	var lastChunk strings.Builder
+	var lastFinishReason string // 跟踪最后一个 finish_reason
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -230,6 +232,11 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 				lastChunk.Reset()
 				lastChunk.WriteString(data)
 
+				// 提取 finish_reason（流式）
+				if fr := extractFinishReason(data); fr != "" {
+					lastFinishReason = fr
+				}
+
 				// 检测流中的语义错误（如额度用完、限流等）
 				errDetail := DetectStreamError(data)
 				if errDetail.Type != UpstreamErrNone {
@@ -255,6 +262,14 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	result.InputTokens = usage.InputTokens
 	result.OutputTokens = usage.OutputTokens
 
+	// 检测流式截断
+	if lastFinishReason == "length" {
+		result.Truncated = true
+		LogInfo("StreamResponse: finish_reason=length detected for %s → %s", model, provider.Name)
+	}
+	// 没收到 [DONE] 也算截断（连接中断）—— 此时 lastChunk 为空或不含 [DONE]
+	// 注意：StreamAborted 已经在循环内处理了 io.Err 的情况
+
 	return result
 }
 
@@ -274,6 +289,7 @@ func NonStreamResponse(w http.ResponseWriter, resp *http.Response,
 	resp.Body.Close()
 	if err != nil {
 		result.Error = fmt.Sprintf("read upstream body: %v", err)
+		result.Truncated = true // 读取失败 = 截断
 		result.LatencyMs = int(time.Since(start).Milliseconds())
 		return result
 	}
@@ -282,6 +298,18 @@ func NonStreamResponse(w http.ResponseWriter, resp *http.Response,
 	usage := parseNonStreamUsage(body)
 	result.InputTokens = usage.InputTokens
 	result.OutputTokens = usage.OutputTokens
+
+	// 检测 finish_reason=length（非流式）
+	if resp.StatusCode == 200 {
+		if checkFinishReasonLength(body) {
+			result.Truncated = true
+			LogInfo("NonStreamResponse: finish_reason=length detected for %s → %s", model, provider.Name)
+		} else if !json.Valid(body) {
+			// JSON 不完整（被截断）
+			result.Truncated = true
+			LogInfo("NonStreamResponse: invalid JSON (truncated) for %s → %s", model, provider.Name)
+		}
+	}
 
 	// 复制响应头
 	for k, vv := range resp.Header {
@@ -296,6 +324,43 @@ func NonStreamResponse(w http.ResponseWriter, resp *http.Response,
 
 	result.LatencyMs = int(time.Since(start).Milliseconds())
 	return result
+}
+
+// checkFinishReasonLength 检测非流式响应中 finish_reason 是否为 "length"
+func checkFinishReasonLength(body []byte) bool {
+	var resp struct {
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return false
+	}
+	for _, c := range resp.Choices {
+		if c.FinishReason == "length" {
+			return true
+		}
+	}
+	return false
+}
+
+// extractFinishReason 从 SSE chunk 的 data 中提取 finish_reason
+// SSE chunk 格式: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+func extractFinishReason(data string) string {
+	var chunk struct {
+		Choices []struct {
+			FinishReason *string `json:"finish_reason"` // nullable
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return ""
+	}
+	for _, c := range chunk.Choices {
+		if c.FinishReason != nil && *c.FinishReason != "" {
+			return *c.FinishReason
+		}
+	}
+	return ""
 }
 
 // --- Usage 解析 ---

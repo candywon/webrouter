@@ -17,10 +17,11 @@ import (
 type UpstreamErrorType string
 
 const (
-	UpstreamErrNone          UpstreamErrorType = ""                // 无错误
+	UpstreamErrNone           UpstreamErrorType = ""                // 无错误
 	UpstreamErrQuotaExhausted UpstreamErrorType = "quota_exhausted" // 额度用完
 	UpstreamErrRateLimited    UpstreamErrorType = "rate_limited"    // 频率/时间限制
 	UpstreamErrTimeout        UpstreamErrorType = "timeout"         // 网络超时/中断
+	UpstreamErrTruncated      UpstreamErrorType = "truncated"       // 响应被截断（finish_reason=length 或 JSON 不完整）
 	UpstreamErrUnknown        UpstreamErrorType = "unknown"         // 未分类错误
 )
 
@@ -403,6 +404,12 @@ func ShouldFailover(result *ProxyResult, tokenID int, model string, body []byte)
 		}
 	}
 
+	// 3.5 截断检测（finish_reason=length 或 JSON 不完整）
+	// 截断不算传统意义上的 failover，但需要触发重试逻辑
+	if result.Truncated {
+		return true, "response_truncated"
+	}
+
 	// 4. 检查请求缓存：同一请求是否已失败过
 	if reqCache.IsSameRequestFailed(tokenID, model, body) {
 		// 同一请求体之前已失败，但这次 status 是正常的？
@@ -435,9 +442,58 @@ func ShouldRetrySameProvider(errDetail UpstreamErrorDetail) bool {
 	case UpstreamErrTimeout:
 		// 超时可能是偶发的，可以重试
 		return true
+	case UpstreamErrTruncated:
+		// 截断可以同 Provider 重试（增大 max_tokens）
+		return true
 	default:
 		return false
 	}
+}
+
+// IsTruncatedRetry 判断是否为截断重试场景
+func IsTruncatedRetry(reason string) bool {
+	return reason == "response_truncated"
+}
+
+// IncreaseMaxTokens 在截断重试时增大请求体中的 max_tokens
+// 策略：如果原来有 max_tokens，则翻倍（上限 32768）；如果没有则设为 16384
+func IncreaseMaxTokens(body []byte) []byte {
+	var req map[string]interface{}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body
+	}
+
+	currentMaxTokens, hasField := req["max_tokens"]
+	if !hasField {
+		// 没设 max_tokens，默认给 16384
+		req["max_tokens"] = float64(16384)
+	} else {
+		// 有 max_tokens，翻倍（上限 32768）
+		var current float64
+		switch v := currentMaxTokens.(type) {
+		case float64:
+			current = v
+		case int:
+			current = float64(v)
+		case json.Number:
+			if n, err := v.Float64(); err == nil {
+				current = n
+			}
+		default:
+			return body
+		}
+		newMax := current * 2
+		if newMax > 32768 {
+			newMax = 32768
+		}
+		req["max_tokens"] = newMax
+	}
+
+	newBody, err := json.Marshal(req)
+	if err != nil {
+		return body
+	}
+	return newBody
 }
 
 // ExtractRetryAfter 从错误消息中提取等待秒数

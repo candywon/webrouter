@@ -157,6 +157,35 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 				resp.Body.Close()
 			}
 
+			// 截断特殊处理：同Provider重试 + 增大max_tokens
+			if IsTruncatedRetry(reason) {
+				// 增大 max_tokens
+				retryBody := IncreaseMaxTokens(body)
+				LogInfo("Proxy: truncated response, retrying with increased max_tokens for %s → %s",
+					model, provider.Name)
+				resp, result = proxySvc.Forward(provider, endpoint, r, retryBody, model)
+				if !result.Truncated && result.Error == "" {
+					// 重试成功
+					reqCache.RecordRequestSuccess(token.ID, model, body)
+					rlog := BuildRequestLog(reqID, token, provider, model, endpoint, clientIP, result, false)
+					rlog.IsRetry = true // 标记为重试
+					meter.RecordRequest(rlog)
+					if result.IsStream {
+						StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+					} else {
+						NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+					}
+					return
+				}
+				// 增大max_tokens后仍截断，可能是模型本身上下文限制，换Provider
+				if resp != nil {
+					resp.Body.Close()
+				}
+				LogInfo("Proxy: still truncated after increasing max_tokens for %s → %s, failover to next provider",
+					model, provider.Name)
+				continue
+			}
+
 			// 冷却机制：长时限流/额度用完 → 标记 Provider 冷却
 			if result.UpstreamError.Type == UpstreamErrQuotaExhausted {
 				// 额度用完 → 冷却30分钟（等用户充值或换Key）

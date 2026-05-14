@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -287,5 +288,85 @@ func TestShouldRetrySameProvider(t *testing.T) {
 				t.Errorf("ShouldRetrySameProvider(%q) = %v, want %v", tt.errType, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- IncreaseMaxTokens 测试 ---
+
+func TestIncreaseMaxTokens(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantMax  float64
+	}{
+		{
+			name:     "无 max_tokens 字段 → 设为 16384",
+			body:     `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`,
+			wantMax:  16384,
+		},
+		{
+			name:     "有 max_tokens=1024 → 翻倍到 2048",
+			body:     `{"model":"gpt-4","max_tokens":1024,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMax:  2048,
+		},
+		{
+			name:     "max_tokens=20000 → 翻倍超限 → 上限 32768",
+			body:     `{"model":"gpt-4","max_tokens":20000,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMax:  32768,
+		},
+		{
+			name:     "max_tokens=16384 → 翻倍到 32768",
+			body:     `{"model":"gpt-4","max_tokens":16384,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMax:  32768,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IncreaseMaxTokens([]byte(tt.body))
+			var req map[string]interface{}
+			if err := json.Unmarshal(result, &req); err != nil {
+				t.Fatalf("result is not valid JSON: %v", err)
+			}
+			gotMax, ok := req["max_tokens"].(float64)
+			if !ok {
+				t.Fatalf("max_tokens not found or not a number")
+			}
+			if gotMax != tt.wantMax {
+				t.Errorf("max_tokens = %v, want %v", gotMax, tt.wantMax)
+			}
+		})
+	}
+}
+
+// --- 截断相关 ShouldFailover 测试 ---
+
+func TestShouldFailoverTruncated(t *testing.T) {
+	result := &ProxyResult{
+		StatusCode: 200,
+		Truncated:  true,
+	}
+	shouldFail, reason := ShouldFailover(result, 1, "gpt-4", []byte(`{}`))
+	if !shouldFail {
+		t.Error("ShouldFailover(Truncated) = false, want true")
+	}
+	if reason != "response_truncated" {
+		t.Errorf("reason = %q, want %q", reason, "response_truncated")
+	}
+}
+
+func TestIsTruncatedRetry(t *testing.T) {
+	if !IsTruncatedRetry("response_truncated") {
+		t.Error("IsTruncatedRetry('response_truncated') = false, want true")
+	}
+	if IsTruncatedRetry("quota_exhausted") {
+		t.Error("IsTruncatedRetry('quota_exhausted') = true, want false")
+	}
+}
+
+func TestShouldRetrySameProviderTruncated(t *testing.T) {
+	errDetail := UpstreamErrorDetail{Type: UpstreamErrTruncated}
+	if !ShouldRetrySameProvider(errDetail) {
+		t.Error("ShouldRetrySameProvider(truncated) = false, want true")
 	}
 }
