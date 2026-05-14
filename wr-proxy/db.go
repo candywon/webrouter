@@ -432,7 +432,7 @@ func InsertRequestLog(log *RequestLog) error {
 		log.RequestID, log.TokenID, log.TokenName, log.ProviderID, log.ProviderName,
 		log.ModelName, log.Endpoint, log.InputTokens, log.OutputTokens,
 		log.StatusCode, log.LatencyMs, log.CostCents, boolToInt(log.IsStream), boolToInt(log.IsRetry),
-		log.ErrorMessage, log.ErrorType, log.ClientIP, time.Now().UTC(),
+		log.ErrorMessage, log.ErrorType, log.ClientIP, time.Now().UTC().Format("2006-01-02 15:04:05"),
 	)
 	if err != nil {
 		LogError("insert request log FAILED: %v", err)
