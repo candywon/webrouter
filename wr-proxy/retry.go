@@ -392,20 +392,104 @@ func ShouldFailover(result *ProxyResult, tokenID int, model string, body []byte)
 }
 
 // ShouldRetrySameProvider 判断是否应该在同一 Provider 重试（而不是立即降级）
-// 仅 rate_limited 且是短期限制时值得等一下重试
+// 仅短时限流（<60s）和超时值得等一下重试
+// 长时限流（5小时额度用完等）直接标记冷却，不浪费时间重试
 func ShouldRetrySameProvider(errDetail UpstreamErrorDetail) bool {
 	switch errDetail.Type {
 	case UpstreamErrQuotaExhausted:
-		// 额度用完，重试无意义，直接切换
+		// 额度用完，重试无意义
 		return false
 	case UpstreamErrRateLimited:
-		// 频率限制，可以稍等重试一次
+		// 短时限流可以重试，长时限流不行
+		waitSec := ExtractRetryAfter(errDetail.Message)
+		if waitSec > 60 {
+			// 超过60秒的限流 = 长时限流，不重试
+			return false
+		}
 		return true
 	case UpstreamErrTimeout:
 		// 超时可能是偶发的，可以重试
 		return true
 	default:
-		// 其他错误，保守策略：不重试同一 Provider
 		return false
 	}
+}
+
+// ExtractRetryAfter 从错误消息中提取等待秒数
+// 支持："Expected available in 18000 seconds", "retry after 300s", "5-hour limit" 等
+func ExtractRetryAfter(msg string) int {
+	lower := strings.ToLower(msg)
+
+	// "available in N seconds/minute/hour"
+	if idx := strings.Index(lower, "available in "); idx >= 0 {
+		rest := lower[idx+13:]
+		if n := extractLeadingNumber(rest); n > 0 {
+			if strings.Contains(rest, "hour") {
+				return n * 3600
+			}
+			if strings.Contains(rest, "minute") {
+				return n * 60
+			}
+			return n // seconds
+		}
+	}
+
+	// "retry after Ns/Nsec/N seconds/N minutes"
+	if idx := strings.Index(lower, "retry after "); idx >= 0 {
+		rest := lower[idx+12:]
+		if n := extractLeadingNumber(rest); n > 0 {
+			if strings.Contains(rest, "hour") {
+				return n * 3600
+			}
+			if strings.Contains(rest, "min") {
+				return n * 60
+			}
+			return n
+		}
+	}
+
+	// "N-hour limit", "5-hour", "5 hour"
+	if idx := strings.Index(lower, "hour"); idx >= 0 {
+		prefix := lower[:idx]
+		if n := extractTrailingNumber(prefix); n > 0 {
+			return n * 3600
+		}
+	}
+
+	// "N-minute limit"
+	if idx := strings.Index(lower, "minute"); idx >= 0 {
+		prefix := lower[:idx]
+		if n := extractTrailingNumber(prefix); n > 0 {
+			return n * 60
+		}
+	}
+
+	return 0 // 无法提取
+}
+
+func extractLeadingNumber(s string) int {
+	n := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		} else if n > 0 {
+			break
+		}
+	}
+	return n
+}
+
+func extractTrailingNumber(s string) int {
+	n := 0
+	multiplier := 1
+	for i := len(s) - 1; i >= 0; i-- {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			n += int(c-'0') * multiplier
+			multiplier *= 10
+		} else if n > 0 {
+			break
+		}
+	}
+	return n
 }

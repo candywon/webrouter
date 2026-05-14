@@ -157,10 +157,25 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 				resp.Body.Close()
 			}
 
-			// 额度用完 → 跳过同 Provider 重试，直接降级
+			// 冷却机制：长时限流/额度用完 → 标记 Provider 冷却
 			if result.UpstreamError.Type == UpstreamErrQuotaExhausted {
-				LogInfo("Proxy: skipping same-provider retry for %s (quota exhausted)", provider.Name)
+				// 额度用完 → 冷却30分钟（等用户充值或换Key）
+				cooldown := time.Now().Add(30 * time.Minute)
+				provider.CooldownUntil = &cooldown
+				LogInfo("Proxy: %s set cooldown 30min (quota exhausted)", provider.Name)
 				continue
+			}
+			if result.UpstreamError.Type == UpstreamErrRateLimited {
+				waitSec := ExtractRetryAfter(result.UpstreamError.Message)
+				if waitSec > 60 {
+					// 长时限流 → 冷却到预计恢复时间（上限2小时）
+					cooldownDuration := time.Duration(min(waitSec, 7200)) * time.Second
+					cooldown := time.Now().Add(cooldownDuration)
+					provider.CooldownUntil = &cooldown
+					LogInfo("Proxy: %s set cooldown %dmin (long rate limit: %ds)",
+						provider.Name, int(cooldownDuration.Minutes()), waitSec)
+					continue
+				}
 			}
 
 			// 同 Provider 重试（仅限 rate_limited/timeout 等可恢复错误）
@@ -340,7 +355,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 	stats := make([]map[string]interface{}, 0, len(providers))
 	for _, p := range providers {
 		count, validCount, tokens, cost := meter.GetProviderMinuteStats(p.ID)
-		stats = append(stats, map[string]interface{}{
+		stat := map[string]interface{}{
 			"provider_id":        p.ID,
 			"name":               p.Name,
 			"status":             p.Status,
@@ -352,7 +367,13 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			"minute_valid_count": validCount,
 			"minute_tokens":      tokens,
 			"minute_cost":        cost,
-		})
+		}
+		// 显示冷却状态
+		if p.CooldownUntil != nil && time.Now().Before(*p.CooldownUntil) {
+			remaining := time.Until(*p.CooldownUntil)
+			stat["cooldown_remaining_sec"] = int(remaining.Seconds())
+		}
+		stats = append(stats, stat)
 	}
 	writeJSON(w, 200, map[string]interface{}{
 		"providers": stats,

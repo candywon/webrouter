@@ -36,8 +36,9 @@ type Provider struct {
 	SupportsTools bool `json:"supports_tools"` // 是否支持 function calling / tools
 
 	// 运行时状态（不持久化）
-	HealthStatus  string  `json:"-"` // 缓存的健康状态
-	ConsecFails   int     `json:"-"` // 连续失败次数
+	HealthStatus  string     `json:"-"` // 缓存的健康状态
+	ConsecFails   int        `json:"-"` // 连续失败次数
+	CooldownUntil *time.Time `json:"-"` // 冷却截止时间（长时限流/额度用完时设置）
 }
 
 // IsAvailable 判断 Provider 是否可参与调度
@@ -46,6 +47,10 @@ func (p *Provider) IsAvailable(model string) bool {
 		return false
 	}
 	if p.Status == "dead" || p.Status == "disabled" || p.Status == "auth_failed" {
+		return false
+	}
+	// 冷却期内跳过（长时限流/额度用完，等也没用）
+	if p.CooldownUntil != nil && time.Now().Before(*p.CooldownUntil) {
 		return false
 	}
 	if p.Priority == 0 {
