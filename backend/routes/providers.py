@@ -46,6 +46,7 @@ def _provider_full_dict(provider, include_secrets=False):
             'cost_multiplier': 1.0,
             'priority': 50,
             'weight': 100,
+            'supports_tools': True,
         })
 
     # 额度信息
@@ -219,6 +220,8 @@ def create_provider():
     if 'weight' in data:
         ext.weight = int(data['weight'])
         provider.weight = ext.weight
+    if 'supports_tools' in data:
+        ext.supports_tools = bool(data['supports_tools'])
     db.session.add(ext)
 
     # 创建额度记录（可选）
@@ -292,6 +295,8 @@ def update_provider(provider_id):
     if 'weight' in data:
         ext.weight = int(data['weight'])
         provider.weight = ext.weight
+    if 'supports_tools' in data:
+        ext.supports_tools = bool(data['supports_tools'])
 
     # 额度字段
     if 'quota_total' in data or 'quota_used' in data or 'quota_source' in data:

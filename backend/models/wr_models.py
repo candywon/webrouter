@@ -110,6 +110,7 @@ class ProviderExt(db.Model):
     cost_multiplier = db.Column(db.Float, default=1.0)        # 成本倍率
     priority = db.Column(db.Integer, default=50)              # 0-100: 90+主力, 50-89热备, 1-49冷备
     weight = db.Column(db.Integer, default=100)               # 调度权重
+    supports_tools = db.Column(db.Boolean, default=True)      # 是否支持 function calling / tools
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
@@ -122,6 +123,7 @@ class ProviderExt(db.Model):
             'cost_multiplier': self.cost_multiplier,
             'priority': self.priority,
             'weight': self.weight,
+            'supports_tools': self.supports_tools,
         }
 
 

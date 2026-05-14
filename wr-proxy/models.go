@@ -32,6 +32,9 @@ type Provider struct {
 	QuotaUsed     int64   `json:"quota_used"`      // 已用额度(分)
 	QuotaSource   string  `json:"quota_source"`    // manual/api/unknown
 
+	// 能力标记
+	SupportsTools bool `json:"supports_tools"` // 是否支持 function calling / tools
+
 	// 运行时状态（不持久化）
 	HealthStatus  string  `json:"-"` // 缓存的健康状态
 	ConsecFails   int     `json:"-"` // 连续失败次数

@@ -111,8 +111,27 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		selectedProvider = provider
 
-		// 转发
-		resp, result := proxySvc.Forward(provider, endpoint, r, body, model)
+		// 请求格式校验、补全和清洗（根据 Provider 能力）
+		sanitizeResult := SanitizeRequest(provider, endpoint, body)
+		if !sanitizeResult.Valid {
+			writeJSON(w, 400, map[string]interface{}{
+				"error": map[string]string{
+					"message": sanitizeResult.RejectReason,
+					"type":    "invalid_request_error",
+				},
+			})
+			return
+		}
+
+		// 记录清洗动作
+		if sanitizeResult.Modified {
+			LogInfo("Proxy: request sanitized for %s: stripped=%v warnings=%v",
+				provider.Name, sanitizeResult.Stripped, sanitizeResult.Warnings)
+		}
+
+		// 转发（使用清洗后的 body）
+		forwardBody := sanitizeResult.Body
+		resp, result := proxySvc.Forward(provider, endpoint, r, forwardBody, model)
 
 		// 使用智能重试引擎判断是否需要 failover
 		shouldFail, reason := ShouldFailover(result, token.ID, model, body)
@@ -141,7 +160,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 					if result.UpstreamError.Type == UpstreamErrRateLimited {
 						time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond) // 0.5s, 1s 递增
 					}
-					resp, result = proxySvc.Forward(provider, endpoint, r, body, model)
+					resp, result = proxySvc.Forward(provider, endpoint, r, forwardBody, model)
 					shouldRetry, _ := ShouldFailover(result, token.ID, model, body)
 					if !shouldRetry {
 						// 重试成功
@@ -313,6 +332,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			"priority":           p.Priority,
 			"last_latency":       p.LastLatencyMs,
 			"quota_ratio":        p.QuotaRatio(),
+			"supports_tools":     p.SupportsTools,
 			"minute_count":       count,
 			"minute_valid_count": validCount,
 			"minute_tokens":      tokens,

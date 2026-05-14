@@ -114,6 +114,7 @@ func migrate() error {
 			cost_multiplier REAL DEFAULT 1.0,
 			priority INTEGER DEFAULT 50,
 			weight INTEGER DEFAULT 100,
+			supports_tools INTEGER DEFAULT 1,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 	}
@@ -125,6 +126,20 @@ func migrate() error {
 			}
 		}
 	}
+
+	// 增量迁移：为已有表添加新列（SQLite ALTER TABLE 只支持 ADD COLUMN）
+	alterMigrations := []string{
+		`ALTER TABLE wr_provider_ext ADD COLUMN supports_tools INTEGER DEFAULT 1`,
+	}
+	for _, m := range alterMigrations {
+		if _, err := db.Exec(m); err != nil {
+			// 列已存在是正常情况，忽略
+			if !strings.Contains(err.Error(), "duplicate column") {
+				LogWarn("alter migration: %v", err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -150,7 +165,8 @@ func LoadProviders() ([]*Provider, error) {
 		       COALESCE(e.cost_multiplier, 1.0) as cost_multiplier,
 		       COALESCE(q.quota_total, 0) as quota_total,
 		       COALESCE(q.quota_used, 0) as quota_used,
-		       COALESCE(q.quota_source, 'unknown') as quota_source
+		       COALESCE(q.quota_source, 'unknown') as quota_source,
+		       COALESCE(e.supports_tools, 1) as supports_tools
 		FROM wr_providers p
 		LEFT JOIN wr_provider_ext e ON p.id = e.provider_id
 		LEFT JOIN wr_provider_quota q ON p.id = q.provider_id
@@ -175,6 +191,7 @@ func LoadProviders() ([]*Provider, error) {
 			&p.Priority, &p.Weight, &p.ProxyEnabled,
 			&p.RateLimitRPM, &p.TimeoutSeconds, &p.MaxRetries, &p.CostMultiplier,
 			&p.QuotaTotal, &p.QuotaUsed, &p.QuotaSource,
+			&p.SupportsTools,
 		); err != nil {
 			LogWarn("scan provider: %v", err)
 			continue
@@ -302,6 +319,7 @@ func LoadChannels(providers []*Provider) []*Provider {
 			QuotaTotal:     parent.QuotaTotal,
 			QuotaUsed:      parent.QuotaUsed,
 			QuotaSource:    parent.QuotaSource,
+			SupportsTools:  parent.SupportsTools,
 		}
 		channelProviders = append(channelProviders, cp)
 	}
