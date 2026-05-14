@@ -52,6 +52,9 @@ var quotaExhaustedPatterns = []string{
 	"usage limit reached",
 	"account_limit_exceeded",
 	"quota_exceeded",
+	"DataInsufficient",       // DashScope 额度不足
+	"InvalidApiKey",          // DashScope Key无效
+	"Forbidden",              // DashScope 禁止访问
 	"额度",
 	"余额不足",
 	"已用完",
@@ -71,6 +74,10 @@ var rateLimitPatterns = []string{
 	"daily limit",
 	"hour limit",
 	"minute limit",
+	"Throttling",             // DashScope 限流错误码
+	"throttling",
+	"Request was throttled",  // DashScope 限流消息
+	"rate_limit_exceeded",    // 通用限流码
 	"频率限制",
 	"请求过多",
 	"并发",
