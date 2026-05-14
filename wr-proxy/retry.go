@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -52,9 +53,10 @@ var quotaExhaustedPatterns = []string{
 	"usage limit reached",
 	"account_limit_exceeded",
 	"quota_exceeded",
-	"DataInsufficient",       // DashScope 额度不足
-	"InvalidApiKey",          // DashScope Key无效
-	"Forbidden",              // DashScope 禁止访问
+	"AccountQuotaExceeded",    // DashScope 5小时额度超额
+	"DataInsufficient",        // DashScope 额度不足
+	"InvalidApiKey",           // DashScope Key无效
+	"Forbidden",               // DashScope 禁止访问
 	"额度",
 	"余额不足",
 	"已用完",
@@ -98,20 +100,32 @@ var timeoutPatterns = []string{
 }
 
 // DetectUpstreamError 检测上游响应中的语义错误
-// 用于两种场景：
-// 1. HTTP 200 但 body 含错误 JSON（如 OpenAI 返回 200 + error 对象）
-// 2. HTTP 4xx/5xx 响应 body 含错误信息
+// 三层防御策略：
+// 1. HTTP状态码优先：429=限流, 402=额度, 403=鉴权, 503=服务不可用
+// 2. JSON结构通用提取：从任意层级提取 code+type+message，拼接后做模糊语义匹配
+// 3. 兜底：非JSON纯文本匹配 / 有错误信息但未分类→unknown
 func DetectUpstreamError(statusCode int, body []byte) UpstreamErrorDetail {
 	if len(body) == 0 {
+		// 无body时仅靠状态码
+		switch {
+		case statusCode == 429:
+			return UpstreamErrorDetail{Type: UpstreamErrRateLimited, Message: "HTTP 429 Too Many Requests"}
+		case statusCode == 402:
+			return UpstreamErrorDetail{Type: UpstreamErrQuotaExhausted, Message: "HTTP 402 Payment Required"}
+		case statusCode == 403:
+			return UpstreamErrorDetail{Type: UpstreamErrQuotaExhausted, Message: "HTTP 403 Forbidden"}
+		case statusCode == 503:
+			return UpstreamErrorDetail{Type: UpstreamErrTimeout, Message: "HTTP 503 Service Unavailable"}
+		}
 		return UpstreamErrorDetail{}
 	}
 
-	// 尝试从 JSON 提取错误消息
-	msg, code := extractErrorMessage(body)
-	combined := strings.ToLower(msg + " " + code)
+	// 从 JSON 提取错误消息和代码
+	msg, code, errType := extractErrorMessage(body)
+	combined := strings.ToLower(msg + " " + code + " " + errType)
 
-	// 如果有错误内容，按优先级匹配（额度 > 频率 > 超时）
-	if combined != " " && combined != "" {
+	// 有提取内容时按优先级匹配（额度 > 频率 > 超时）
+	if combined != "  " && combined != "" {
 		if matchPatterns(combined, quotaExhaustedPatterns) {
 			return UpstreamErrorDetail{
 				Type:    UpstreamErrQuotaExhausted,
@@ -135,13 +149,17 @@ func DetectUpstreamError(statusCode int, body []byte) UpstreamErrorDetail {
 		}
 	}
 
-	// 即使没有匹配到模式，429 总是 rate_limited
-	if statusCode == 429 {
-		return UpstreamErrorDetail{
-			Type:    UpstreamErrRateLimited,
-			Message: msg,
-			Code:    code,
-			}
+	// 状态码兜底（即使body匹配不到，状态码也蕴含语义）
+	switch {
+	case statusCode == 429:
+		return UpstreamErrorDetail{Type: UpstreamErrRateLimited, Message: msg, Code: code}
+	case statusCode == 402:
+		return UpstreamErrorDetail{Type: UpstreamErrQuotaExhausted, Message: msg, Code: code}
+	case statusCode == 403:
+		// 403可能是鉴权失败也可能是额度问题，如果有msg则保留，否则归为额度
+		return UpstreamErrorDetail{Type: UpstreamErrQuotaExhausted, Message: msg, Code: code}
+	case statusCode == 503 || statusCode == 502:
+		return UpstreamErrorDetail{Type: UpstreamErrTimeout, Message: msg, Code: code}
 	}
 
 	// 有错误消息但未分类
@@ -165,10 +183,11 @@ func DetectStreamError(data string) UpstreamErrorDetail {
 	return DetectUpstreamError(0, []byte(data))
 }
 
-// extractErrorMessage 从响应 body 中提取错误消息和代码
-// 支持 OpenAI 标准格式: {"error": {"message": "...", "code": "..."}}
+// extractErrorMessage 从响应 body 中提取错误消息、代码和类型
+// 支持 OpenAI 标准格式: {"error": {"message": "...", "code": "...", "type": "..."}}
+// 以及 DashScope 格式: {"code": "...", "message": "...", "type": "..."}
 // 以及简化格式: {"error": "...", "message": "..."}
-func extractErrorMessage(body []byte) (msg, code string) {
+func extractErrorMessage(body []byte) (msg, code, errType string) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		// 非 JSON，直接当纯文本匹配
@@ -176,12 +195,12 @@ func extractErrorMessage(body []byte) (msg, code string) {
 		if matchPatterns(text, quotaExhaustedPatterns) ||
 			matchPatterns(text, rateLimitPatterns) ||
 			matchPatterns(text, timeoutPatterns) {
-			return string(body), ""
+			return string(body), "", ""
 		}
-		return "", ""
+		return "", "", ""
 	}
 
-	// 标准格式: {"error": {"message": "...", "code": "..."}}
+	// 标准格式: {"error": {"message": "...", "code": "...", "type": "..."}}
 	if errRaw, ok := raw["error"]; ok {
 		// 先尝试嵌套对象
 		var errObj map[string]json.RawMessage
@@ -192,28 +211,34 @@ func extractErrorMessage(body []byte) (msg, code string) {
 			if c, ok := errObj["code"]; ok {
 				code = strings.Trim(string(c), `"`)
 			}
-			// OpenAI 格式: error.type
-			if t, ok := errObj["type"]; ok && code == "" {
-				code = strings.Trim(string(t), `"`)
+			if t, ok := errObj["type"]; ok {
+				errType = strings.Trim(string(t), `"`)
 			}
-			return msg, code
+			// OpenAI 格式: error.type 作为 code 补充
+			if code == "" && errType != "" {
+				code = errType
+			}
+			return msg, code, errType
 		}
 		// 简化格式: {"error": "some string"}
 		var errStr string
 		if err := json.Unmarshal(errRaw, &errStr); err == nil {
-			return errStr, ""
+			return errStr, "", ""
 		}
 	}
 
-	// 直接在顶层查找
+	// 直接在顶层查找 (DashScope 等格式)
 	if m, ok := raw["message"]; ok {
 		msg = strings.Trim(string(m), `"`)
 	}
 	if c, ok := raw["code"]; ok {
 		code = strings.Trim(string(c), `"`)
 	}
+	if t, ok := raw["type"]; ok {
+		errType = strings.Trim(string(t), `"`)
+	}
 
-	return msg, code
+	return msg, code, errType
 }
 
 // matchPatterns 检查文本是否匹配任一模式（不区分大小写）
@@ -416,11 +441,23 @@ func ShouldRetrySameProvider(errDetail UpstreamErrorDetail) bool {
 }
 
 // ExtractRetryAfter 从错误消息中提取等待秒数
-// 支持："Expected available in 18000 seconds", "retry after 300s", "5-hour limit" 等
+// 支持多种格式：
+//   - "It will reset at 2026-05-14 12:35:20 +0800 CST"（精确时间）
+//   - "Expected available in 18000 seconds"
+//   - "retry after 300s"
+//   - "5-hour limit"
 func ExtractRetryAfter(msg string) int {
+	// 1. 优先匹配精确重置时间: "reset at 2026-05-14 12:35:20 +0800 CST"
+	if resetTime := parseResetAtTime(msg); !resetTime.IsZero() {
+		wait := time.Until(resetTime)
+		if wait > 0 {
+			return int(wait.Seconds())
+		}
+	}
+
 	lower := strings.ToLower(msg)
 
-	// "available in N seconds/minute/hour"
+	// 2. "available in N seconds/minute/hour"
 	if idx := strings.Index(lower, "available in "); idx >= 0 {
 		rest := lower[idx+13:]
 		if n := extractLeadingNumber(rest); n > 0 {
@@ -434,7 +471,7 @@ func ExtractRetryAfter(msg string) int {
 		}
 	}
 
-	// "retry after Ns/Nsec/N seconds/N minutes"
+	// 3. "retry after Ns/Nsec/N seconds/N minutes"
 	if idx := strings.Index(lower, "retry after "); idx >= 0 {
 		rest := lower[idx+12:]
 		if n := extractLeadingNumber(rest); n > 0 {
@@ -448,7 +485,7 @@ func ExtractRetryAfter(msg string) int {
 		}
 	}
 
-	// "N-hour limit", "5-hour", "5 hour"
+	// 4. "N-hour limit", "5-hour", "5 hour"
 	if idx := strings.Index(lower, "hour"); idx >= 0 {
 		prefix := lower[:idx]
 		if n := extractTrailingNumber(prefix); n > 0 {
@@ -456,7 +493,7 @@ func ExtractRetryAfter(msg string) int {
 		}
 	}
 
-	// "N-minute limit"
+	// 5. "N-minute limit"
 	if idx := strings.Index(lower, "minute"); idx >= 0 {
 		prefix := lower[:idx]
 		if n := extractTrailingNumber(prefix); n > 0 {
@@ -465,6 +502,53 @@ func ExtractRetryAfter(msg string) int {
 	}
 
 	return 0 // 无法提取
+}
+
+// parseResetAtTime 从消息中解析 "reset at YYYY-MM-DD HH:MM:SS +0800 CST" 格式
+func parseResetAtTime(msg string) time.Time {
+	// 匹配 "reset at 2026-05-14 12:35:20 +0800 CST"
+	idx := strings.Index(strings.ToLower(msg), "reset at ")
+	if idx < 0 {
+		return time.Time{}
+	}
+	timeStr := msg[idx+9:] // "2026-05-14 12:35:20 +0800 CST"
+
+	// 尝试多种时间格式
+	formats := []string{
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05 MST",
+		"2006-01-02 15:04:05 +0800 CST",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02 15:04:05",
+	}
+	for _, fmt := range formats {
+		if t, err := time.Parse(fmt, timeStr); err == nil {
+			return t
+		}
+		// 只解析前 len(format) 需要的字符
+		if len(timeStr) > len(fmt)+5 {
+			if t, err := time.Parse(fmt, timeStr[:len(fmt)+5]); err == nil {
+				return t
+			}
+		}
+	}
+
+	// 兜底：用正则提取日期时间部分
+	// "2026-05-14 12:35:20"
+	re := regexp.MustCompile(`(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
+	m := re.FindStringSubmatch(msg)
+	if len(m) > 1 {
+		if t, err := time.ParseInLocation("2006-01-02 15:04:05", m[1], time.FixedZone("CST", 8*3600)); err == nil {
+			return t
+		}
+		if t, err := time.Parse("2006-01-02 15:04:05", m[1]); err == nil {
+			return t
+		}
+	}
+
+	return time.Time{}
 }
 
 func extractLeadingNumber(s string) int {
