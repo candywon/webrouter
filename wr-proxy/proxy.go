@@ -54,8 +54,12 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 	start := time.Now()
 	isStream := isStreamRequest(body)
 
-	// 构造上游 URL
+	// 构造上游 URL — 智能处理 /v1 重复问题
+	// 如果 BaseURL 已包含 /v1（如 DashScope compatible-mode/v1），则 endpoint 去掉 /v1 前缀
 	upstreamURL := provider.BaseURL + endpoint
+	if strings.HasSuffix(provider.BaseURL, "/v1") && strings.HasPrefix(endpoint, "/v1/") {
+		upstreamURL = provider.BaseURL + endpoint[3:] // 去掉 endpoint 的 /v1 前缀
+	}
 
 	// 构造上游请求
 	upstreamReq, err := http.NewRequest(req.Method, upstreamURL, bytes.NewReader(body))
