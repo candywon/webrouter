@@ -100,6 +100,9 @@ def update_channel(provider_id, channel_id):
     for field in ['name', 'base_url', 'api_key', 'notes']:
         if field in data:
             setattr(ch, field, data[field])
+    # 更新 Key 后重置状态
+    if 'api_key' in data and ch.status in ('auth_failed', 'dead'):
+        ch.status = 'unchecked'
     if 'models' in data:
         m = data['models']
         ch.models = json.dumps(m) if isinstance(m, list) else m

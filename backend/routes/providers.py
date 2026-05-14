@@ -264,6 +264,9 @@ def update_provider(provider_id):
         api_key = data['api_key'].strip()
         provider.api_key = api_key
         provider.api_key_masked = provider.mask_api_key(api_key)
+        # 更新 Key 后重置状态，允许下次健康检测重新验证
+        if provider.status in ('auth_failed', 'dead'):
+            provider.status = 'unchecked'
     if 'models' in data:
         models = data['models']
         provider.models = json.dumps(models) if isinstance(models, list) else models

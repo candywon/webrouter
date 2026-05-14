@@ -45,7 +45,7 @@ func (p *Provider) IsAvailable(model string) bool {
 	if !p.Enabled || !p.ProxyEnabled {
 		return false
 	}
-	if p.Status == "dead" || p.Status == "disabled" {
+	if p.Status == "dead" || p.Status == "disabled" || p.Status == "auth_failed" {
 		return false
 	}
 	if p.Priority == 0 {
