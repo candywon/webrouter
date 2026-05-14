@@ -36,7 +36,11 @@ const SettingsPage = {
 (function () {
   Router.register('/', DashboardPage);
   Router.register('/providers', providersPage);
-  Router.register('/channels', ChannelsPage);
+  Router.register('/channels', channelPage);
+  Router.register('/provider-channels', channelPage);
+  Router.register('/tokens', tokensPage);
+  Router.register('/pricing', pricingPage);
+  Router.register('/desensitize', desensitizePage);
   Router.register('/monitor', MonitorPage);
   Router.register('/alerts', AlertPage);
   Router.register('/billing', BillingPage);

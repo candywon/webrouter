@@ -12,9 +12,12 @@
     <aside class="sidebar">
       <div class="sidebar-logo">⚡ WebRouter</div>
       <ul class="sidebar-nav">
-        <li><a href="#/" class="active"><span class="icon">📊</span> 仪表盘</a></li>
+        <li><a href="#/"><span class="icon">📊</span> 仪表盘</a></li>
         <li><a href="#/providers"><span class="icon">🔌</span> 数据源管理</a></li>
         <li><a href="#/channels"><span class="icon">📡</span> 渠道管理</a></li>
+        <li><a href="#/tokens"><span class="icon">🔑</span> 令牌管理</a></li>
+        <li><a href="#/pricing"><span class="icon">💲</span> 模型定价</a></li>
+        <li><a href="#/desensitize"><span class="icon">🛡️</span> 脱敏规则</a></li>
         <li><a href="#/monitor"><span class="icon">💓</span> 健康监控</a></li>
         <li><a href="#/alerts"><span class="icon">🔔</span> 告警规则</a></li>
         <li><a href="#/billing"><span class="icon">💰</span> 计费统计</a></li>
@@ -53,12 +56,215 @@
 
       <!-- 渠道管理 -->
       <div class="page" id="page-channels">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">渠道列表</span>
-            <button class="btn btn-primary" onclick="DashboardPage.load()">刷新</button>
+        <div id="page-content-channels">
+          <div class="page-header">
+            <h2>📡 渠道管理</h2>
+            <p class="text-muted">请从数据源管理页面点击某数据源的"渠道"按钮进入</p>
           </div>
-          <div id="channel-list-channels"></div>
+          <div class="card">
+            <div class="empty-state">
+              <div class="icon">📡</div>
+              <p>选择一个数据源查看其渠道</p>
+              <p class="hint">在数据源管理页面，点击数据源卡片上的"渠道"按钮</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 令牌管理 -->
+      <div class="page" id="page-tokens">
+        <div id="tokens-page-content"></div>
+      </div>
+
+      <!-- 模型定价 -->
+      <div class="page" id="page-pricing">
+        <div id="pricing-page-content">
+          <div class="page-header">
+            <h2>💲 模型定价管理</h2>
+            <div>
+              <select id="vendor-filter" onchange="pricingPage.onVendorFilter()" style="padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:13px;">
+                <option value="">全部厂商</option>
+              </select>
+              <button class="btn-primary" onclick="pricingPage.showAddForm()">+ 添加定价</button>
+              <button class="btn-secondary" onclick="pricingPage.showBatchForm()">批量更新</button>
+              <button class="btn-secondary" onclick="pricingPage.reloadCache()">🔄 刷新缓存</button>
+            </div>
+          </div>
+          <div class="card">
+            <div id="pricing-content">
+              <div class="empty-state"><div class="icon">💲</div><p>加载中...</p></div>
+            </div>
+          </div>
+
+          <!-- 定价表单 -->
+          <div id="pricing-form-modal" class="modal" style="display:none">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3 id="pricing-form-title">添加模型定价</h3>
+                <button class="modal-close" onclick="pricingPage.hideForm()">&times;</button>
+              </div>
+              <div class="modal-body">
+                <form id="pricing-form">
+                  <div class="form-group">
+                    <label>模型名称 *</label>
+                    <input type="text" id="pf-model" required placeholder="如: gpt-4o, qwen-plus">
+                  </div>
+                  <div class="form-group">
+                    <label>输入价格（元/百万token）</label>
+                    <input type="number" id="pf-input-price" step="0.01" min="0" value="0">
+                  </div>
+                  <div class="form-group">
+                    <label>输出价格（元/百万token）</label>
+                    <input type="number" id="pf-output-price" step="0.01" min="0" value="0">
+                  </div>
+                  <div class="form-group">
+                    <label>厂商</label>
+                    <select id="pf-vendor">
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google</option>
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="qwen">通义千问</option>
+                      <option value="zhipu">智谱</option>
+                      <option value="moonshot">Moonshot</option>
+                      <option value="other">其他</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label><input type="checkbox" id="pf-is-default"> 设为未知模型默认定价</label>
+                  </div>
+                  <div class="form-group">
+                    <label>备注</label>
+                    <textarea id="pf-notes" rows="2" placeholder="可选"></textarea>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" class="btn-primary">保存</button>
+                    <button type="button" class="btn-secondary" onclick="pricingPage.hideForm()">取消</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+
+          <!-- 批量更新表单 -->
+          <div id="batch-form-modal" class="modal" style="display:none">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h3>批量更新定价</h3>
+                <button class="modal-close" onclick="pricingPage.hideBatchForm()">&times;</button>
+              </div>
+              <div class="modal-body">
+                <div class="form-group">
+                  <label>JSON 数组</label>
+                  <textarea id="batch-json" rows="10" style="font-family:monospace;font-size:12px;"></textarea>
+                </div>
+                <div class="form-actions">
+                  <button class="btn-primary" onclick="pricingPage.submitBatch()">提交</button>
+                  <button class="btn-secondary" onclick="pricingPage.hideBatchForm()">取消</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 脱敏规则 -->
+      <div class="page" id="page-desensitize">
+        <div class="page-header">
+          <h2>🛡️ 脱敏规则管理</h2>
+          <div>
+            <button class="btn-primary" onclick="desensitizePage.showAddForm()">+ 添加规则</button>
+            <button class="btn-secondary" onclick="desensitizePage.showTestPanel()">🧪 测试规则</button>
+          </div>
+        </div>
+        <div class="desensitize-layout">
+          <div class="card">
+            <div class="card-header"><span class="card-title">内置规则（只读）</span></div>
+            <div id="desensitize-builtin"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">自定义规则</span></div>
+            <div id="desensitize-custom"></div>
+          </div>
+        </div>
+
+        <!-- 规则表单 -->
+        <div id="rule-form-modal" class="modal" style="display:none">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3 id="rule-form-title">添加脱敏规则</h3>
+              <button class="modal-close" onclick="desensitizePage.hideForm()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <form id="rule-form">
+                <div class="form-group">
+                  <label>规则名称 *</label>
+                  <input type="text" id="rule-name" required placeholder="如: 内部IP地址">
+                </div>
+                <div class="form-group">
+                  <label>类型</label>
+                  <select id="rule-type">
+                    <option value="regex">正则匹配</option>
+                    <option value="exact">精确匹配</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Pattern *</label>
+                  <textarea id="rule-pattern" rows="2" required placeholder="正则表达式或精确文本"></textarea>
+                </div>
+                <div class="form-group">
+                  <label>分类</label>
+                  <select id="rule-category">
+                    <option value="CUSTOM">⚙️ 自定义</option>
+                    <option value="PHONE">📱 手机号</option>
+                    <option value="IDCARD">🪪 身份证</option>
+                    <option value="EMAIL">✉️ 邮箱</option>
+                    <option value="BANKCARD">💳 银行卡</option>
+                    <option value="IP">🌐 IP地址</option>
+                    <option value="APIKEY">🔑 API密钥</option>
+                    <option value="NAME">👤 姓名</option>
+                    <option value="COMPANY">🏢 公司</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>级别</label>
+                  <select id="rule-level">
+                    <option value="standard">standard（标准）</option>
+                    <option value="strict">strict（严格）</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>排序（越小越先执行）</label>
+                  <input type="number" id="rule-sort-order" value="0" min="0">
+                </div>
+                <div class="form-group">
+                  <label><input type="checkbox" id="rule-enabled" checked> 启用</label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn-primary">保存</button>
+                  <button type="button" class="btn-secondary" onclick="desensitizePage.hideForm()">取消</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- 规则测试 -->
+        <div id="test-panel-modal" class="modal" style="display:none">
+          <div class="modal-content" style="max-width:640px">
+            <div class="modal-header">
+              <h3>🧪 脱敏规则测试</h3>
+              <button class="modal-close" onclick="desensitizePage.hideTestPanel()">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label>测试文本</label>
+                <textarea id="test-text" rows="4" placeholder="输入包含敏感信息的文本，如：张三 13812345678 zhang@example.com"></textarea>
+              </div>
+              <button class="btn-primary" onclick="desensitizePage.runTest()" style="margin-bottom:16px">运行测试</button>
+              <div id="test-result"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -135,6 +341,10 @@
   <script src="/static/js/router.js"></script>
   <script src="/static/js/dashboard.js"></script>
   <script src="/static/js/providers.js"></script>
+  <script src="/static/js/channel.js"></script>
+  <script src="/static/js/tokens.js"></script>
+  <script src="/static/js/pricing.js"></script>
+  <script src="/static/js/desensitize.js"></script>
   <script src="/static/js/monitor.js"></script>
   <script src="/static/js/alert.js"></script>
   <script src="/static/js/billing.js"></script>

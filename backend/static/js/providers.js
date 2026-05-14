@@ -108,6 +108,7 @@ class ProvidersPage {
                     ${p.last_error ? `<div class="provider-error">错误: ${this.escHtml(p.last_error)}</div>` : ''}
                     <div class="provider-actions">
                         <button class="btn-sm" onclick="providersPage.checkOne(${p.id})">🔍 检测</button>
+                        <button class="btn-sm" onclick="Router.navigate('/providers/${p.id}/channels')">📡 渠道</button>
                         <button class="btn-sm" onclick="providersPage.editProvider(${p.id})">✏️ 编辑</button>
                         <button class="btn-sm btn-danger" onclick="providersPage.deleteProvider(${p.id})">🗑️ 删除</button>
                     </div>

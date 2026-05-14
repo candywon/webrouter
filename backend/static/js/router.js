@@ -17,7 +17,13 @@ const Router = {
   },
 
   resolve() {
-    const path = window.location.hash.slice(1) || '/';
+    let path = window.location.hash.slice(1) || '/';
+
+    // 支持 /providers/:id/channels 子路由
+    if (path.match(/^\/providers\/\d+\/channels/)) {
+      path = '/provider-channels';
+    }
+
     const handler = this.routes[path];
     if (!handler) {
       this.navigate('/');
@@ -26,12 +32,19 @@ const Router = {
 
     // 隐藏所有页面，显示当前
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    const pageEl = document.getElementById('page-' + path.slice(1) || 'page-dashboard');
+    // 映射路由到页面容器
+    let pageId = 'page-' + path.slice(1);
+    if (pageId === 'page-provider-channels') pageId = 'page-channels';
+    const pageEl = document.getElementById(pageId);
     if (pageEl) pageEl.classList.add('active');
 
     // 更新侧边栏高亮
     document.querySelectorAll('.sidebar-nav a').forEach(a => {
-      a.classList.toggle('active', a.getAttribute('href') === '#' + path);
+      const href = a.getAttribute('href').slice(1);
+      // /providers/:id/channels 子路由高亮 /channels
+      let activePath = path;
+      if (activePath === '/provider-channels') activePath = '/channels';
+      a.classList.toggle('active', href === activePath);
     });
 
     // 更新标题
@@ -39,6 +52,10 @@ const Router = {
       '/': '仪表盘',
       '/providers': '数据源管理',
       '/channels': '渠道管理',
+      '/provider-channels': '渠道管理',
+      '/tokens': '令牌管理',
+      '/pricing': '模型定价',
+      '/desensitize': '脱敏规则',
       '/monitor': '健康监控',
       '/alerts': '告警规则',
       '/billing': '计费统计',
