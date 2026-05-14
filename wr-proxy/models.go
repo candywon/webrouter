@@ -98,19 +98,20 @@ func (p *Provider) QuotaRemaining() int64 {
 
 // Token 对外 API Key
 type Token struct {
-	ID              int       `json:"id"`
-	Name            string    `json:"name"`
-	Key             string    `json:"key"`               // sk-wr-xxxxxxxxxxxx
-	UserID          int       `json:"user_id"`
-	Models          string    `json:"models"`            // JSON array: ["gpt-4o"], 空=全部
-	ProviderIDs     string    `json:"provider_ids"`      // JSON array: [1,3], 空=全部
-	QuotaTotal      int64     `json:"quota_total"`       // 总额度(分), 0=不限
-	QuotaUsed       int64     `json:"quota_used"`        // 已用额度(分)
-	RateLimitRPM    int       `json:"rate_limit_rpm"`    // 每分钟限速, 0=不限
-	SubnetWhitelist string    `json:"subnet_whitelist"`  // JSON array: ["10.0.0.0/8"]
-	Enabled         bool      `json:"enabled"`
+	ID              int        `json:"id"`
+	Name            string     `json:"name"`
+	Key             string     `json:"key"`               // sk-wr-...xxxx
+	UserID          int        `json:"user_id"`
+	Models          string     `json:"models"`            // JSON array: ["gpt-4o"], 空=全部
+	ProviderIDs     string     `json:"provider_ids"`      // JSON array: [1,3], 空=全部
+	QuotaTotal      int64      `json:"quota_total"`       // 总额度(分), 0=不限
+	QuotaUsed       int64      `json:"quota_used"`        // 已用额度(分)
+	RateLimitRPM    int        `json:"rate_limit_rpm"`    // 每分钟限速, 0=不限
+	SubnetWhitelist string     `json:"subnet_whitelist"`  // JSON array: ["10.0.0.0/8"]
+	SmartDowngrade  bool       `json:"smart_downgrade"`   // 允许自动降级（强模型→便宜模型）
+	Enabled         bool       `json:"enabled"`
 	ExpiresAt       *time.Time `json:"expires_at"`
-	CreatedAt       time.Time `json:"created_at"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // IsExpired 检查 Token 是否过期

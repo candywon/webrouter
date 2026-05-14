@@ -68,7 +68,12 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Token 模型白名单
+	// 3.5 智能模型选择（auto别名 / 自动降级）
+	originalModel := model
+	smartResult := SmartModelSelect(model, body, token)
+	model = smartResult.ResolvedModel
+
+	// Token 模型白名单（用解析后的模型检查）
 	if !token.CanUseModel(model) {
 		writeJSON(w, 403, map[string]interface{}{
 			"error": map[string]string{
@@ -83,6 +88,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Path
 	clientIP := extractClientIP(r)
 	reqID := uuid.New().String()
+
+	// 如果智能选择替换了模型，需要更新 body 中的 model 字段
+	if smartResult.Downgraded {
+		body = replaceModelInBody(body, originalModel, model)
+	}
 
 	var excludeIDs []int
 	var lastResult *ProxyResult
@@ -270,6 +280,11 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 			"owned_by": "webrouter",
 		})
 	}
+	// 添加智能模型别名
+	models = append(models,
+		map[string]string{"id": "auto", "object": "model", "owned_by": "webrouter"},
+		map[string]string{"id": "smart", "object": "model", "owned_by": "webrouter"},
+	)
 
 	writeJSON(w, 200, map[string]interface{}{
 		"object": "list",

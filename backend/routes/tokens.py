@@ -49,6 +49,8 @@ def create_token():
     if 'subnet_whitelist' in data:
         sw = data['subnet_whitelist']
         token.subnet_whitelist = json.dumps(sw) if isinstance(sw, list) else sw
+    if 'smart_downgrade' in data:
+        token.smart_downgrade = bool(data['smart_downgrade'])
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data and data['expires_at']:
@@ -137,6 +139,8 @@ def update_token(token_id):
     if 'subnet_whitelist' in data:
         sw = data['subnet_whitelist']
         token.subnet_whitelist = json.dumps(sw) if isinstance(sw, list) else sw
+    if 'smart_downgrade' in data:
+        token.smart_downgrade = bool(data['smart_downgrade'])
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data:

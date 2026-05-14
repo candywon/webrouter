@@ -23,6 +23,7 @@ class WRToken(db.Model):
     quota_used = db.Column(db.BigInteger, default=0)         # 已用额度(分)
     rate_limit_rpm = db.Column(db.Integer, default=0)        # 每分钟限速, 0=不限
     subnet_whitelist = db.Column(db.Text, default='')         # JSON: ["10.0.0.0/8"]
+    smart_downgrade = db.Column(db.Boolean, default=False)   # 允许智能降级（强模型→便宜模型）
     enabled = db.Column(db.Boolean, default=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -83,6 +84,7 @@ class WRToken(db.Model):
             'quota_ratio': round(self.quota_ratio, 3),
             'rate_limit_rpm': self.rate_limit_rpm,
             'subnet_whitelist': json.loads(self.subnet_whitelist) if self.subnet_whitelist and self.subnet_whitelist != '[]' else [],
+            'smart_downgrade': self.smart_downgrade,
             'enabled': self.enabled,
             'is_expired': self.is_expired,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,

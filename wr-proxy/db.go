@@ -131,6 +131,7 @@ func migrate() error {
 	alterMigrations := []string{
 		`ALTER TABLE wr_provider_ext ADD COLUMN supports_tools INTEGER DEFAULT 1`,
 		`ALTER TABLE wr_request_logs ADD COLUMN error_type TEXT DEFAULT ''`,
+		`ALTER TABLE wr_tokens ADD COLUMN smart_downgrade INTEGER DEFAULT 0`,
 	}
 	for _, m := range alterMigrations {
 		if _, err := db.Exec(m); err != nil {
@@ -378,11 +379,11 @@ func LoadTokenByKey(key string) (*Token, error) {
 	err := db.QueryRow(`
 		SELECT id, name, key, user_id, models, provider_ids,
 		       quota_total, quota_used, rate_limit_rpm,
-		       subnet_whitelist, enabled, expires_at, created_at
+		       subnet_whitelist, COALESCE(smart_downgrade, 0), enabled, expires_at, created_at
 		FROM wr_tokens WHERE key = ?`, key,
 	).Scan(&t.ID, &t.Name, &t.Key, &t.UserID, &t.Models, &t.ProviderIDs,
 		&t.QuotaTotal, &t.QuotaUsed, &t.RateLimitRPM,
-		&t.SubnetWhitelist, &t.Enabled, &expiresAt, &t.CreatedAt,
+		&t.SubnetWhitelist, &t.SmartDowngrade, &t.Enabled, &expiresAt, &t.CreatedAt,
 	)
 
 	if err == sql.ErrNoRows {
