@@ -132,6 +132,8 @@ func migrate() error {
 		`ALTER TABLE wr_provider_ext ADD COLUMN supports_tools INTEGER DEFAULT 1`,
 		`ALTER TABLE wr_request_logs ADD COLUMN error_type TEXT DEFAULT ''`,
 		`ALTER TABLE wr_tokens ADD COLUMN smart_downgrade INTEGER DEFAULT 0`,
+		`ALTER TABLE wr_tokens ADD COLUMN desensitize_enabled INTEGER DEFAULT 0`,
+		`ALTER TABLE wr_tokens ADD COLUMN desensitize_level TEXT DEFAULT 'standard'`,
 	}
 	for _, m := range alterMigrations {
 		if _, err := db.Exec(m); err != nil {
@@ -139,6 +141,25 @@ func migrate() error {
 			if !strings.Contains(err.Error(), "duplicate column") {
 				LogWarn("alter migration: %v", err)
 			}
+		}
+	}
+
+	// 脱敏规则表
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS wr_desensitize_rules (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			type TEXT NOT NULL DEFAULT 'regex',
+			pattern TEXT NOT NULL,
+			category TEXT NOT NULL DEFAULT 'CUSTOM',
+			level TEXT NOT NULL DEFAULT 'standard',
+			enabled INTEGER DEFAULT 1,
+			sort_order INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`); err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			return fmt.Errorf("create desensitize_rules: %w", err)
 		}
 	}
 
@@ -379,11 +400,15 @@ func LoadTokenByKey(key string) (*Token, error) {
 	err := db.QueryRow(`
 		SELECT id, name, key, user_id, models, provider_ids,
 		       quota_total, quota_used, rate_limit_rpm,
-		       subnet_whitelist, COALESCE(smart_downgrade, 0), enabled, expires_at, created_at
+		       subnet_whitelist, COALESCE(smart_downgrade, 0),
+		       COALESCE(desensitize_enabled, 0), COALESCE(desensitize_level, 'standard'),
+		       enabled, expires_at, created_at
 		FROM wr_tokens WHERE key = ?`, key,
 	).Scan(&t.ID, &t.Name, &t.Key, &t.UserID, &t.Models, &t.ProviderIDs,
 		&t.QuotaTotal, &t.QuotaUsed, &t.RateLimitRPM,
-		&t.SubnetWhitelist, &t.SmartDowngrade, &t.Enabled, &expiresAt, &t.CreatedAt,
+		&t.SubnetWhitelist, &t.SmartDowngrade,
+		&t.DesensitizeEnabled, &t.DesensitizeLevel,
+		&t.Enabled, &expiresAt, &t.CreatedAt,
 	)
 
 	if err == sql.ErrNoRows {

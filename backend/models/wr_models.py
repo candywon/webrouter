@@ -24,6 +24,8 @@ class WRToken(db.Model):
     rate_limit_rpm = db.Column(db.Integer, default=0)        # 每分钟限速, 0=不限
     subnet_whitelist = db.Column(db.Text, default='')         # JSON: ["10.0.0.0/8"]
     smart_downgrade = db.Column(db.Boolean, default=False)   # 允许智能降级（强模型→便宜模型）
+    desensitize_enabled = db.Column(db.Boolean, default=False)  # 是否启用脱敏
+    desensitize_level = db.Column(db.String(20), default='standard')  # 脱敏级别：off/standard/strict
     enabled = db.Column(db.Boolean, default=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -85,6 +87,8 @@ class WRToken(db.Model):
             'rate_limit_rpm': self.rate_limit_rpm,
             'subnet_whitelist': json.loads(self.subnet_whitelist) if self.subnet_whitelist and self.subnet_whitelist != '[]' else [],
             'smart_downgrade': self.smart_downgrade,
+            'desensitize_enabled': self.desensitize_enabled,
+            'desensitize_level': self.desensitize_level,
             'enabled': self.enabled,
             'is_expired': self.is_expired,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
@@ -399,6 +403,37 @@ class ModelPricing(db.Model):
             # 默认定价（未知模型用）
             cls(model='__default__', input_price=0.015, output_price=0.06, vendor='other', is_default=True, notes='未知模型默认价格（gpt-4o-mini级别）'),
         ]
-        db.session.add_all(seeds)
-        db.session.commit()
-        return len(seeds)
+
+
+# ============================================================
+#  Desensitize Rule — 脱敏规则
+# ============================================================
+
+class DesensitizeRule(db.Model):
+    """脱敏规则 — 内置规则 + 自定义规则"""
+    __tablename__ = 'wr_desensitize_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)          # 规则名称
+    type = db.Column(db.String(20), nullable=False, default='regex')  # builtin/exact/regex
+    pattern = db.Column(db.Text, nullable=False)               # exact=精确文本, regex=正则表达式
+    category = db.Column(db.String(20), nullable=False, default='CUSTOM')  # PHONE/IDCARD/EMAIL/BANKCARD/IP/APIKEY/CUSTOM
+    level = db.Column(db.String(20), nullable=False, default='standard')  # standard/strict
+    enabled = db.Column(db.Boolean, default=True)
+    sort_order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'type': self.type,
+            'pattern': self.pattern,
+            'category': self.category,
+            'level': self.level,
+            'enabled': self.enabled,
+            'sort_order': self.sort_order,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

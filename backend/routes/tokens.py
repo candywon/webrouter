@@ -51,6 +51,13 @@ def create_token():
         token.subnet_whitelist = json.dumps(sw) if isinstance(sw, list) else sw
     if 'smart_downgrade' in data:
         token.smart_downgrade = bool(data['smart_downgrade'])
+    if 'desensitize_enabled' in data:
+        token.desensitize_enabled = bool(data['desensitize_enabled'])
+    if 'desensitize_level' in data:
+        level = data['desensitize_level']
+        if level not in ('off', 'standard', 'strict'):
+            return jsonify({'error': 'desensitize_level 必须为 off/standard/strict'}), 400
+        token.desensitize_level = level
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data and data['expires_at']:
@@ -141,6 +148,13 @@ def update_token(token_id):
         token.subnet_whitelist = json.dumps(sw) if isinstance(sw, list) else sw
     if 'smart_downgrade' in data:
         token.smart_downgrade = bool(data['smart_downgrade'])
+    if 'desensitize_enabled' in data:
+        token.desensitize_enabled = bool(data['desensitize_enabled'])
+    if 'desensitize_level' in data:
+        level = data['desensitize_level']
+        if level not in ('off', 'standard', 'strict'):
+            return jsonify({'error': 'desensitize_level 必须为 off/standard/strict'}), 400
+        token.desensitize_level = level
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data:

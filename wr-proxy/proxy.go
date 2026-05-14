@@ -174,7 +174,7 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 // 返回 result.StreamAborted=true 表示流中途被错误中断（需触发 failover）
 func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	reqID string, provider *Provider, token *Token,
-	model, endpoint, clientIP string) *ProxyResult {
+	model, endpoint, clientIP string, desensitizeMapping *ReplacementMap) *ProxyResult {
 
 	start := time.Now()
 	result := &ProxyResult{
@@ -218,8 +218,12 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 			break
 		}
 
-		// 写入客户端
-		w.Write(line)
+		// 写入客户端（还原脱敏标记）
+		outLine := line
+		if desensitizeMapping != nil {
+			outLine = []byte(desensitizeMapping.Restore(string(line)))
+		}
+		w.Write(outLine)
 		if canFlush {
 			flusher.Flush()
 		}
@@ -276,7 +280,7 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 // NonStreamResponse 非流式响应写入器（包级函数）
 func NonStreamResponse(w http.ResponseWriter, resp *http.Response,
 	reqID string, provider *Provider, token *Token,
-	model, endpoint, clientIP string) *ProxyResult {
+	model, endpoint, clientIP string, desensitizeMapping *ReplacementMap) *ProxyResult {
 
 	start := time.Now()
 	result := &ProxyResult{
@@ -311,13 +315,17 @@ func NonStreamResponse(w http.ResponseWriter, resp *http.Response,
 		}
 	}
 
+	// 还原脱敏标记
+	if desensitizeMapping != nil {
+		restored := desensitizeMapping.Restore(string(body))
+		body = []byte(restored)
+	}
 	// 复制响应头
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			w.Header().Add(k, v)
 		}
 	}
-
 	// 写入客户端
 	w.WriteHeader(resp.StatusCode)
 	w.Write(body)

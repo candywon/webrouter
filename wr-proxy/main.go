@@ -53,6 +53,12 @@ func main() {
 	// 4. 初始化代理服务
 	proxySvc = NewProxyService()
 
+	// 4.5 初始化脱敏引擎
+	InitBuiltinPatterns()
+	if err := LoadDesensitizeRules(); err != nil {
+		LogWarn("Failed to load desensitize rules: %v", err)
+	}
+
 	// 5. 启动健康检测
 	healthChecker := NewHealthChecker(cfg.HealthCheckInterval, cfg.HealthTimeout)
 	healthChecker.Start()

@@ -32,6 +32,7 @@ def create_app(config_class=None):
     from routes.tokens import tokens_bp       # Token 管理
     from routes.pricing import pricing_bp     # 模型定价管理
     from routes.channel import channel_bp    # Provider 渠道管理
+    from routes.desensitize import desensitize_bp  # 脱敏规则管理
 
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(providers_bp, url_prefix='/api/providers')
@@ -44,6 +45,7 @@ def create_app(config_class=None):
     app.register_blueprint(tokens_bp, url_prefix='/api/tokens')
     app.register_blueprint(pricing_bp, url_prefix='/api/pricing')
     app.register_blueprint(channel_bp, url_prefix='/api/providers')
+    app.register_blueprint(desensitize_bp, url_prefix='/api/desensitize')
 
     # 根路径返回前端页面
     @app.route('/')

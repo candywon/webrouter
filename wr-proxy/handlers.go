@@ -84,6 +84,13 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3.8 脱敏处理（在 sanitize 之前，确保敏感信息不发送到上游）
+	desensitizeResult := DesensitizeRequest(token, body)
+	if desensitizeResult.Modified {
+		body = desensitizeResult.Body
+		LogInfo("Proxy: desensitized request for token=%d: %v", token.ID, desensitizeResult.Redacted)
+	}
+
 	// 5. 智能调度 + 转发 + 降级
 	endpoint := r.URL.Path
 	clientIP := extractClientIP(r)
@@ -171,9 +178,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 					rlog.IsRetry = true // 标记为重试
 					meter.RecordRequest(rlog)
 					if result.IsStream {
-						StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+						StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 					} else {
-						NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+						NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 					}
 					return
 				}
@@ -223,9 +230,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 						meter.RecordRequest(rlog)
 
 						if result.IsStream {
-							StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+							StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 						} else {
-							NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+							NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 						}
 						return
 					}
@@ -246,7 +253,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		meter.RecordRequest(rlog)
 
 		if result.IsStream {
-			streamResult := StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+			streamResult := StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 			// 流式完成后检查是否中途被错误中断
 			if streamResult.StreamAborted {
 				LogWarn("Proxy: stream aborted for %s → %s, upstream=%s, err=%s",
@@ -269,7 +276,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
-			NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP)
+			NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 		}
 		return
 	}
@@ -344,14 +351,18 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleReload 管理接口：重新加载 Provider
+// handleReload 管理接口：重新加载 Provider + 脱敏规则
 func handleReload(w http.ResponseWriter, r *http.Request) {
 	if err := reloadProviders(); err != nil {
 		writeJSON(w, 500, map[string]interface{}{"error": err.Error()})
 		return
 	}
+	// 同时刷新脱敏规则
+	if err := LoadDesensitizeRules(); err != nil {
+		LogWarn("Reload: failed to reload desensitize rules: %v", err)
+	}
 	writeJSON(w, 200, map[string]interface{}{
-		"message":   "Providers reloaded",
+		"message":   "Providers and desensitize rules reloaded",
 		"count":     len(router.GetProviders()),
 		"timestamp": time.Now().UTC(),
 	})

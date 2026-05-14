@@ -113,10 +113,12 @@ type Token struct {
 	QuotaUsed       int64      `json:"quota_used"`        // 已用额度(分)
 	RateLimitRPM    int        `json:"rate_limit_rpm"`    // 每分钟限速, 0=不限
 	SubnetWhitelist string     `json:"subnet_whitelist"`  // JSON array: ["10.0.0.0/8"]
-	SmartDowngrade  bool       `json:"smart_downgrade"`   // 允许自动降级（强模型→便宜模型）
-	Enabled         bool       `json:"enabled"`
-	ExpiresAt       *time.Time `json:"expires_at"`
-	CreatedAt       time.Time  `json:"created_at"`
+	SmartDowngrade      bool       `json:"smart_downgrade"`      // 允许自动降级（强模型→便宜模型）
+	DesensitizeEnabled bool       `json:"desensitize_enabled"` // 是否启用脱敏
+	DesensitizeLevel   string     `json:"desensitize_level"`   // 脱敏级别：off/standard/strict
+	Enabled            bool       `json:"enabled"`
+	ExpiresAt          *time.Time `json:"expires_at"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 // IsExpired 检查 Token 是否过期
