@@ -93,6 +93,8 @@ func BuildRequestLog(reqID string, token *Token, provider *Provider,
 		errMsg = result.Error
 	}
 
+	errType := string(result.UpstreamError.Type)
+
 	return &RequestLog{
 		RequestID:    reqID,
 		TokenID:      token.ID,
@@ -109,6 +111,7 @@ func BuildRequestLog(reqID string, token *Token, provider *Provider,
 		IsStream:     result.IsStream,
 		IsRetry:      isRetry,
 		ErrorMessage: errMsg,
+		ErrorType:    errType,
 		ClientIP:     clientIP,
 	}
 }

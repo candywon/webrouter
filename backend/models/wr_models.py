@@ -188,6 +188,7 @@ class RequestLog(db.Model):
     is_stream = db.Column(db.Boolean, default=False)
     is_retry = db.Column(db.Boolean, default=False)
     error_message = db.Column(db.Text, default='')
+    error_type = db.Column(db.String(30), default='')    # quota_exhausted/rate_limited/timeout/unknown
     client_ip = db.Column(db.String(45), default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
@@ -210,6 +211,7 @@ class RequestLog(db.Model):
             'is_stream': self.is_stream,
             'is_retry': self.is_retry,
             'error_message': self.error_message,
+            'error_type': self.error_type,
             'client_ip': self.client_ip,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

@@ -130,6 +130,7 @@ func migrate() error {
 	// 增量迁移：为已有表添加新列（SQLite ALTER TABLE 只支持 ADD COLUMN）
 	alterMigrations := []string{
 		`ALTER TABLE wr_provider_ext ADD COLUMN supports_tools INTEGER DEFAULT 1`,
+		`ALTER TABLE wr_request_logs ADD COLUMN error_type TEXT DEFAULT ''`,
 	}
 	for _, m := range alterMigrations {
 		if _, err := db.Exec(m); err != nil {
@@ -426,12 +427,12 @@ func InsertRequestLog(log *RequestLog) error {
 		(request_id, token_id, token_name, provider_id, provider_name,
 		 model_name, endpoint, input_tokens, output_tokens,
 		 status_code, latency_ms, cost_cents, is_stream, is_retry,
-		 error_message, client_ip, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 error_message, error_type, client_ip, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		log.RequestID, log.TokenID, log.TokenName, log.ProviderID, log.ProviderName,
 		log.ModelName, log.Endpoint, log.InputTokens, log.OutputTokens,
 		log.StatusCode, log.LatencyMs, log.CostCents, boolToInt(log.IsStream), boolToInt(log.IsRetry),
-		log.ErrorMessage, log.ClientIP, time.Now().UTC(),
+		log.ErrorMessage, log.ErrorType, log.ClientIP, time.Now().UTC(),
 	)
 	if err != nil {
 		LogError("insert request log FAILED: %v", err)

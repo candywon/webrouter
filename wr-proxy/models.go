@@ -163,24 +163,25 @@ func (t *Token) CanUseProvider(providerID int) bool {
 
 // RequestLog 请求日志
 type RequestLog struct {
-	ID           int64     `json:"id"`
-	RequestID    string    `json:"request_id"`
-	TokenID      int       `json:"token_id"`
-	TokenName    string    `json:"token_name"`
-	ProviderID   int       `json:"provider_id"`
-	ProviderName string    `json:"provider_name"`
-	ModelName    string    `json:"model_name"`
-	Endpoint     string    `json:"endpoint"`
-	InputTokens  int64     `json:"input_tokens"`
-	OutputTokens int64     `json:"output_tokens"`
-	StatusCode   int       `json:"status_code"`
-	LatencyMs    int       `json:"latency_ms"`
-	CostCents    int64     `json:"cost_cents"`
-	IsStream     bool      `json:"is_stream"`
-	IsRetry      bool      `json:"is_retry"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	ClientIP     string    `json:"client_ip"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	RequestID     string    `json:"request_id"`
+	TokenID       int       `json:"token_id"`
+	TokenName     string    `json:"token_name"`
+	ProviderID    int       `json:"provider_id"`
+	ProviderName  string    `json:"provider_name"`
+	ModelName     string    `json:"model_name"`
+	Endpoint      string    `json:"endpoint"`
+	InputTokens   int64     `json:"input_tokens"`
+	OutputTokens  int64     `json:"output_tokens"`
+	StatusCode    int       `json:"status_code"`
+	LatencyMs     int       `json:"latency_ms"`
+	CostCents     int64     `json:"cost_cents"`
+	IsStream      bool      `json:"is_stream"`
+	IsRetry       bool      `json:"is_retry"`
+	ErrorMessage  string    `json:"error_message,omitempty"`
+	ErrorType     string    `json:"error_type,omitempty"` // quota_exhausted/rate_limited/timeout/unknown
+	ClientIP      string    `json:"client_ip"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // QuotaPrediction 额度预测结果
