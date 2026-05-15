@@ -122,8 +122,24 @@ class DirectProviderAdapter(BaseProviderAdapter):
                 'body': {'model': 'gpt-4o-mini', 'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 1},
             }
 
+        # 优先用 Provider 实际配置的模型来检测，而非硬编码模型名
+        body = dict(config['body'])
+        provider_models = self.get_models()
+        if provider_models:
+            body['model'] = provider_models[0]
+
+        # 智能去重：如果 base_url 路径已包含 endpoint 前缀，则去掉重复部分
+        # 例：base_url=.../compatible-mode/v1 + endpoint=/compatible-mode/v1/chat/completions
+        #   → 实际 endpoint=/chat/completions
+        endpoint = config['endpoint']
+        base_path = parsed.path.rstrip('/') if parsed.path else ''
+        if base_path and endpoint.startswith(base_path):
+            endpoint = endpoint[len(base_path):]
+            if not endpoint.startswith('/'):
+                endpoint = '/' + endpoint
+
         headers = config.get('headers_extra', {})
-        return self._send_test_request(config['endpoint'], config['body'], headers=headers)
+        return self._send_test_request(endpoint, body, headers=headers)
 
 
 class AggregateProviderAdapter(BaseProviderAdapter):
@@ -133,6 +149,9 @@ class AggregateProviderAdapter(BaseProviderAdapter):
 
     def check_health(self) -> dict:
         body = {'model': 'gpt-4o-mini', 'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 1}
+        provider_models = self.get_models()
+        if provider_models:
+            body['model'] = provider_models[0]
         return self._send_test_request('/v1/chat/completions', body)
 
 
@@ -257,6 +276,9 @@ class CustomProviderAdapter(BaseProviderAdapter):
             return result
 
         body = {'model': 'gpt-4o-mini', 'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 1}
+        provider_models = self.get_models()
+        if provider_models:
+            body['model'] = provider_models[0]
         return self._send_test_request('/v1/chat/completions', body)
 
 
