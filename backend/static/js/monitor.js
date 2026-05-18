@@ -1,5 +1,7 @@
 /* 健康监控页面逻辑 */
 const MonitorPage = {
+  cooldownTimer: null,
+
   async load() {
     // 绑定全部检测按钮
     const btn = document.getElementById('btn-check-all');
@@ -13,13 +15,92 @@ const MonitorPage = {
     } catch (e) {
       console.error('Failed to load monitor channels:', e);
     }
+
+    // 加载冷却状态
+    this.loadCooldowns();
+  },
+
+  async loadCooldowns() {
+    try {
+      const data = await API.get('/providers/cooldowns');
+      this.renderCooldowns(data.cooldowns || []);
+    } catch (e) {
+      console.error('Failed to load cooldowns:', e);
+    }
+  },
+
+  renderCooldowns(cooldowns) {
+    // 移除旧的冷却卡片
+    const existing = document.getElementById('cooldown-card');
+    if (existing) existing.remove();
+
+    if (!cooldowns.length) return;
+
+    const el = document.getElementById('monitor-content');
+    if (!el) return;
+
+    const card = document.createElement('div');
+    card.id = 'cooldown-card';
+    card.className = 'card';
+    card.style.marginBottom = '16px';
+
+    let html = '<div class="card-header"><span class="card-title">⏳ 冷却中的 Provider</span><button class="btn-icon" onclick="MonitorPage.loadCooldowns()" title="刷新">🔄</button></div>';
+    html += '<table><thead><tr><th>Provider</th><th>状态</th><th>剩余时间</th><th>操作</th></tr></thead><tbody>';
+    cooldowns.forEach(cd => {
+      const secs = cd.cooldown_remaining_sec;
+      const timeStr = formatCooldown(secs);
+      html += `<tr>
+        <td><strong>${esc(cd.name)}</strong></td>
+        <td><span class="badge badge-warning">冷却中</span></td>
+        <td id="cooldown-${cd.provider_id}">${timeStr}</td>
+        <td><button class="btn btn-sm" onclick="MonitorPage.clearCooldown(${cd.provider_id})">清除冷却</button></td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    card.innerHTML = html;
+
+    // 插入到最前面
+    el.parentNode.insertBefore(card, el);
+
+    // 启动倒计时刷新
+    this.startCooldownTimer(cooldowns);
+  },
+
+  startCooldownTimer(cooldowns) {
+    if (this.cooldownTimer) clearInterval(this.cooldownTimer);
+    this.cooldownTimer = setInterval(() => {
+      cooldowns.forEach(cd => {
+        const el = document.getElementById(`cooldown-${cd.provider_id}`);
+        if (el && cd.cooldown_remaining_sec > 0) {
+          cd.cooldown_remaining_sec--;
+          el.textContent = formatCooldown(cd.cooldown_remaining_sec);
+        }
+      });
+      // 全部过期后重新加载
+      if (cooldowns.every(cd => cd.cooldown_remaining_sec <= 0)) {
+        clearInterval(this.cooldownTimer);
+        this.cooldownTimer = null;
+        this.loadCooldowns();
+      }
+    }, 1000);
+  },
+
+  async clearCooldown(providerId) {
+    try {
+      await API.post(`/providers/${providerId}/clear_cooldown`);
+      showToast('冷却已清除');
+      this.loadCooldowns();
+      this.load();
+    } catch (e) {
+      showToast('清除失败: ' + e.message);
+    }
   },
 
   renderChannels(channels) {
     const el = document.getElementById('monitor-content');
     if (!el) return;
     if (channels.length === 0) {
-      el.innerHTML = '<div class="empty-state"><div class="icon">💓</div><p>暂无渠道数据<br>请先在 New-API 中添加渠道</p></div>';
+      el.innerHTML = '<div class="empty-state"><div class="icon">💓</div><p>暂无渠道数据<br>请先在"渠道管理"中添加渠道</p></div>';
       return;
     }
     el.innerHTML = `<table>
@@ -32,8 +113,8 @@ const MonitorPage = {
           <td>${ch.health?.latency_ms != null ? ch.health.latency_ms + 'ms' : '-'}</td>
           <td>${formatDate(ch.health?.checked_at)}</td>
           <td>
-            <button class="btn" onclick="MonitorPage.checkChannel(${ch.channel_id})">检测</button>
-            <button class="btn" onclick="MonitorPage.showHistory(${ch.channel_id})">历史</button>
+            <button class="btn" onclick="MonitorPage.checkChannel(${ch.provider_id})">检测</button>
+            <button class="btn" onclick="MonitorPage.showHistory(${ch.provider_id})">历史</button>
           </td>
         </tr>
       `).join('')}</tbody>
@@ -51,12 +132,28 @@ const MonitorPage = {
   },
 
   async checkAll() {
+    const btn = document.getElementById('btn-check-all');
+    if (!btn) return;
+
+    // 禁用按钮并显示检测中状态
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.cursor = 'not-allowed';
+    btn.textContent = '检测中...';
+
     try {
       const result = await API.post('/monitor/check_all');
-      showToast(`全部检测完成, 共 ${result.results?.length || 0} 个渠道`);
+      const count = result.results?.length || 0;
+      showToast(`全部检测完成，共 ${count} 个渠道`);
       this.load();
     } catch (e) {
       showToast('全部检测失败: ' + e.message);
+    } finally {
+      // 恢复按钮状态
+      btn.disabled = false;
+      btn.style.opacity = '';
+      btn.style.cursor = '';
+      btn.textContent = '全部检测';
     }
   },
 

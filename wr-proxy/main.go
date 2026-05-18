@@ -50,6 +50,31 @@ func main() {
 	router.RefreshProviders(providers)
 	LogInfo("After channel expansion: %d providers", len(providers))
 
+	// 3.7 加载 Token 配额到内存，启动异步同步器
+	if err := LoadTokenQuotaCache(); err != nil {
+		LogWarn("Load token quota cache failed: %v", err)
+	}
+	go tokenQuotaSync()
+
+	// 3.8 加载模型分级（DB → 内存）
+	if err := RefreshModelGrades(); err != nil {
+		LogWarn("Load model grades failed: %v (using defaults)", err)
+	}
+
+	// 3.8.1 加载模型别名（DB → 内存）
+	if err := RefreshModelAliases(); err != nil {
+		LogWarn("Load model aliases failed: %v", err)
+	}
+
+	// 3.9 加载厂商健康测试配置
+	ReloadVendorTestConfigs()
+
+	// 3.10 加载优化特性开关
+	LoadFeatureToggles()
+
+	// 3.11 加载六维度复杂度配置
+	LoadComplexityConfig()
+
 	// 4. 初始化代理服务
 	proxySvc = NewProxyService()
 

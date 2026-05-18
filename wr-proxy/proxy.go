@@ -40,6 +40,7 @@ type ProxyResult struct {
 	StatusCode    int
 	InputTokens   int64
 	OutputTokens  int64
+	CachedTokens  int64
 	IsStream      bool
 	LatencyMs     int
 	Error         string
@@ -170,6 +171,124 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 	return resp, result
 }
 
+// ForwardBinary 转发二进制/多媒体请求（跳过 JSON 解析和流式检测）
+// 用于 audio/image 端点，body 可以是 JSON 或 multipart
+func (ps *ProxyService) ForwardBinary(provider *Provider, endpoint string,
+	req *http.Request, body []byte, model string, contentType string, isMultipart bool) (*http.Response, *ProxyResult) {
+
+	start := time.Now()
+
+	// 构造上游 URL
+	upstreamURL := provider.BaseURL + endpoint
+	if strings.HasSuffix(provider.BaseURL, "/v1") && strings.HasPrefix(endpoint, "/v1/") {
+		upstreamURL = provider.BaseURL + endpoint[3:]
+	}
+
+	upstreamReq, err := http.NewRequest(req.Method, upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, &ProxyResult{
+			StatusCode: 502,
+			Error:      fmt.Sprintf("build upstream request: %v", err),
+			LatencyMs:  int(time.Since(start).Milliseconds()),
+		}
+	}
+
+	// 复制原始请求头
+	for k, vv := range req.Header {
+		if strings.EqualFold(k, "Host") || strings.EqualFold(k, "Authorization") ||
+			strings.EqualFold(k, "Content-Length") {
+			continue
+		}
+		for _, v := range vv {
+			upstreamReq.Header.Add(k, v)
+		}
+	}
+
+	// 设置正确的 Content-Type（multipart 需要含 boundary）
+	upstreamReq.Header.Set("Content-Type", contentType)
+
+	// 替换为 Provider 的 API Key
+	if provider.APIKey != "" {
+		upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
+	}
+
+	// 设置超时
+	timeout := time.Duration(provider.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = cfg.DefaultTimeout
+	}
+	// 二进制请求可能需要更长超时（大文件上传）
+	if timeout < cfg.DefaultTimeout {
+		timeout = cfg.DefaultTimeout
+	}
+	ps.client.Timeout = timeout
+
+	resp, err := ps.client.Do(upstreamReq)
+	if err != nil {
+		return nil, &ProxyResult{
+			StatusCode: 502,
+			Error:      fmt.Sprintf("upstream request failed: %v", err),
+			LatencyMs:  int(time.Since(start).Milliseconds()),
+		}
+	}
+
+	result := &ProxyResult{
+		StatusCode: resp.StatusCode,
+		LatencyMs:  int(time.Since(start).Milliseconds()),
+	}
+
+	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+		provider.ConsecFails++
+	} else if resp.StatusCode < 400 {
+		provider.ConsecFails = 0
+	}
+
+	// 错误响应语义分析
+	if resp.StatusCode >= 400 {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if readErr == nil && len(body) > 0 {
+			result.UpstreamError = DetectUpstreamError(resp.StatusCode, body)
+			if result.UpstreamError.Type != UpstreamErrNone {
+				LogInfo("ForwardBinary: %s → %s semantic error: type=%s code=%s msg=%s",
+					model, provider.Name, result.UpstreamError.Type,
+					result.UpstreamError.Code, result.UpstreamError.Message)
+				if result.Error == "" {
+					result.Error = fmt.Sprintf("upstream semantic error: %s - %s",
+						result.UpstreamError.Type, result.UpstreamError.Message)
+				}
+			}
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		return resp, result
+	}
+
+	// 200 响应：检查是否含 JSON 错误（少数 API 200 但返回错误 JSON）
+	if resp.StatusCode == 200 && !isMultipart {
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr == nil && len(body) > 0 {
+			errDetail := DetectUpstreamError(200, body)
+			if errDetail.Type != UpstreamErrNone {
+				result.UpstreamError = errDetail
+				result.Error = fmt.Sprintf("upstream returned 200 but contains error: %s - %s",
+					errDetail.Type, errDetail.Message)
+				LogWarn("ForwardBinary: %s → %s 200-OK but semantic error: type=%s",
+					model, provider.Name, errDetail.Type)
+				resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+				return resp, result
+			}
+		}
+		// 还原 body
+		if len(body) > 0 {
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
+	}
+
+	return resp, result
+}
+
 // StreamResponse 流式 SSE 响应写入器（包级函数）
 // 返回 result.StreamAborted=true 表示流中途被错误中断（需触发 failover）
 func StreamResponse(w http.ResponseWriter, resp *http.Response,
@@ -265,6 +384,7 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	usage := parseStreamUsage(lastChunk.String())
 	result.InputTokens = usage.InputTokens
 	result.OutputTokens = usage.OutputTokens
+	result.CachedTokens = usage.CachedTokens
 
 	// 检测流式截断
 	if lastFinishReason == "length" {
@@ -302,6 +422,7 @@ func NonStreamResponse(w http.ResponseWriter, resp *http.Response,
 	usage := parseNonStreamUsage(body)
 	result.InputTokens = usage.InputTokens
 	result.OutputTokens = usage.OutputTokens
+	result.CachedTokens = usage.CachedTokens
 
 	// 检测 finish_reason=length（非流式）
 	if resp.StatusCode == 200 {
@@ -376,6 +497,7 @@ func extractFinishReason(data string) string {
 type UsageInfo struct {
 	InputTokens  int64
 	OutputTokens int64
+	CachedTokens int64
 }
 
 func parseNonStreamUsage(body []byte) UsageInfo {
@@ -391,6 +513,7 @@ func parseNonStreamUsage(body []byte) UsageInfo {
 		PromptTokens     int64 `json:"prompt_tokens"`
 		CompletionTokens int64 `json:"completion_tokens"`
 		TotalTokens      int64 `json:"total_tokens"`
+		CachedTokens     int64 `json:"cached_tokens"`
 	}
 	if err := json.Unmarshal(usageRaw, &usage); err != nil {
 		return UsageInfo{}
@@ -398,6 +521,7 @@ func parseNonStreamUsage(body []byte) UsageInfo {
 	return UsageInfo{
 		InputTokens:  usage.PromptTokens,
 		OutputTokens: usage.CompletionTokens,
+		CachedTokens: usage.CachedTokens,
 	}
 }
 
@@ -416,6 +540,7 @@ func parseStreamUsage(data string) UsageInfo {
 	var usage struct {
 		PromptTokens     int64 `json:"prompt_tokens"`
 		CompletionTokens int64 `json:"completion_tokens"`
+		CachedTokens     int64 `json:"cached_tokens"`
 	}
 	if err := json.Unmarshal(usageRaw, &usage); err != nil {
 		return UsageInfo{}
@@ -423,6 +548,7 @@ func parseStreamUsage(data string) UsageInfo {
 	return UsageInfo{
 		InputTokens:  usage.PromptTokens,
 		OutputTokens: usage.CompletionTokens,
+		CachedTokens: usage.CachedTokens,
 	}
 }
 

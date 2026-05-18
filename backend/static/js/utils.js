@@ -54,3 +54,18 @@ function formatDate(iso) {
   const d = new Date(iso);
   return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
+
+// HTML 转义
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// 格式化冷却倒计时
+function formatCooldown(secs) {
+  if (secs <= 0) return '已过期';
+  if (secs < 60) return secs + '秒';
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return m + '分' + s + '秒';
+}

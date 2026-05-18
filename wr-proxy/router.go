@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Router 调度引擎
@@ -17,6 +18,72 @@ type Router struct {
 
 var router = &Router{
 	strategy: "smart",
+}
+
+// SessionSticky session → provider 粘性映射
+type SessionSticky struct {
+	ProviderID  int
+	ProviderName string
+	LastUsed    time.Time
+}
+
+var (
+	sessionStickyMap   = make(map[string]*SessionSticky)
+	sessionStickyMutex sync.RWMutex
+	sessionStickyTTL   = 10 * time.Minute // session 粘性过期时间
+)
+
+// GetStickyProvider 获取 session 绑定的 Provider（如果仍在候选列表中且未过期）
+func GetStickyProvider(sessionID string, candidates []*Provider) *Provider {
+	if sessionID == "" {
+		return nil
+	}
+	sessionStickyMutex.RLock()
+	sticky, ok := sessionStickyMap[sessionID]
+	sessionStickyMutex.RUnlock()
+
+	if !ok || time.Since(sticky.LastUsed) > sessionStickyTTL {
+		if ok {
+			sessionStickyMutex.Lock()
+			delete(sessionStickyMap, sessionID)
+			sessionStickyMutex.Unlock()
+		}
+		return nil
+	}
+
+	// 检查绑定的 Provider 是否仍在候选列表中
+	for _, p := range candidates {
+		if p.ID == sticky.ProviderID {
+			return p
+		}
+	}
+	return nil
+}
+
+// SetStickyProvider 记录 session → Provider 映射
+func SetStickyProvider(sessionID string, provider *Provider) {
+	if sessionID == "" || provider == nil {
+		return
+	}
+	sessionStickyMutex.Lock()
+	sessionStickyMap[sessionID] = &SessionSticky{
+		ProviderID:   provider.ID,
+		ProviderName: provider.Name,
+		LastUsed:     time.Now(),
+	}
+	sessionStickyMutex.Unlock()
+}
+
+// ClearExpiredSticky 清理过期 session 粘性（可被定期调用）
+func ClearExpiredSticky() {
+	sessionStickyMutex.Lock()
+	defer sessionStickyMutex.Unlock()
+	now := time.Now()
+	for k, v := range sessionStickyMap {
+		if now.Sub(v.LastUsed) > sessionStickyTTL {
+			delete(sessionStickyMap, k)
+		}
+	}
 }
 
 // RefreshProviders 刷新 Provider 列表（热插拔核心）
@@ -38,7 +105,8 @@ func (r *Router) GetProviders() []*Provider {
 
 // SelectProvider 选择最优 Provider
 // excludeIDs: 本次请求链中已失败的 Provider，避免循环
-func (r *Router) SelectProvider(model string, token *Token, excludeIDs []int) *Provider {
+// sessionID: 会话 ID，用于粘性路由（同一 session 固定到同一 Provider 以利用 prompt cache）
+func (r *Router) SelectProvider(model string, token *Token, excludeIDs []int, sessionID string) *Provider {
 	r.mu.RLock()
 	providers := r.providers
 	r.mu.RUnlock()
@@ -66,20 +134,37 @@ func (r *Router) SelectProvider(model string, token *Token, excludeIDs []int) *P
 		return nil
 	}
 
-	// 2. 分组: 主力 → 热备 → 冷备
+	// 2. 粘性路由：有 session ID 且粘性命中，直接返回
+	if sessionID != "" {
+		if sticky := GetStickyProvider(sessionID, candidates); sticky != nil {
+			return sticky
+		}
+	}
+
+	// 3. 分组: 主力 → 热备 → 冷备
 	primary, hot, cold := groupByPriority(candidates)
 
-	// 3. 按策略选
+	// 4. 按策略选
+	var selected *Provider
 	switch r.strategy {
 	case "least_latency":
-		return selectFromGroups(selectLeastLatency, primary, hot, cold)
+		selected = selectFromGroups(selectLeastLatency, primary, hot, cold)
 	case "cost_first":
-		return selectFromGroups(selectCostFirst, primary, hot, cold)
+		selected = selectFromGroups(selectCostFirst, primary, hot, cold)
 	case "round_robin":
-		return selectFromGroups(selectWeightedRandom, primary, hot, cold)
-	default: // smart + priority
-		return selectFromGroups(selectSmart, primary, hot, cold)
+		selected = selectFromGroups(selectWeightedRandom, primary, hot, cold)
+	case "priority":
+		selected = selectFromGroups(selectByPriority, primary, hot, cold)
+	default: // smart
+		selected = selectFromGroups(selectSmart, primary, hot, cold)
 	}
+
+	// 5. 记录 session 粘性
+	if sessionID != "" && selected != nil {
+		SetStickyProvider(sessionID, selected)
+	}
+
+	return selected
 }
 
 // selectFromGroups 按分组顺序选，主力优先
@@ -159,6 +244,17 @@ func selectWeightedRandom(group []*Provider) *Provider {
 		}
 	}
 	return weightedPick(group, weights)
+}
+
+// selectByPriority 按 Provider 优先级排序，选最高的
+func selectByPriority(group []*Provider) *Provider {
+	if len(group) == 1 {
+		return group[0]
+	}
+	sort.Slice(group, func(i, j int) bool {
+		return group[i].Priority > group[j].Priority
+	})
+	return group[0]
 }
 
 // --- 辅助 ---

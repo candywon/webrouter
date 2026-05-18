@@ -7,8 +7,6 @@ class Config:
     _default_db = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'webrouter.db')
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URI', f'sqlite:///{_default_db}')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    NEWAPI_URL = os.environ.get('NEWAPI_URL', 'http://localhost:3000')
-    NEWAPI_ADMIN_TOKEN = os.environ.get('NEWAPI_ADMIN_TOKEN', '')
     REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
     TZ = os.environ.get('TZ', 'Asia/Shanghai')
 

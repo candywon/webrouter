@@ -138,12 +138,14 @@ class ChannelPage {
                             <input type="text" id="cf-models" placeholder="gpt-4o, claude-3.5-sonnet">
                         </div>
                         <div class="form-group">
-                            <label>优先级（0-100，越大越优先）</label>
+                            <label>优先级</label>
                             <input type="number" id="cf-priority" value="0" min="0" max="100">
+                            <span class="hint">≥90 主力｜50~89 热备｜&lt;50 冷备。值越大越优先被选中，0=继承 Provider</span>
                         </div>
                         <div class="form-group">
-                            <label>权重（0-100）</label>
+                            <label>权重</label>
                             <input type="number" id="cf-weight" value="0" min="0" max="100">
+                            <span class="hint">同优先级内按权重分配流量比例，0=继承 Provider</span>
                         </div>
                         <div class="form-group">
                             <label>速率限制 RPM（0=不限）</label>

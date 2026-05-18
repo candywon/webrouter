@@ -313,6 +313,10 @@ def update_provider(provider_id):
 
     db.session.commit()
 
+    # 更新额度后自动清除冷却（如充值恢复）
+    if 'quota_total' in data or 'quota_used' in data:
+        _notify_clear_cooldown(provider_id)
+
     # 通知 wr-proxy 刷新
     _notify_proxy_reload()
 
@@ -405,6 +409,9 @@ def update_quota(provider_id):
 
     db.session.commit()
 
+    # 充值后自动清除冷却
+    _notify_clear_cooldown(provider_id)
+
     _notify_proxy_reload()
     return jsonify({
         'message': '额度更新成功',
@@ -442,3 +449,60 @@ def _notify_proxy_reload():
         http.post(f"{proxy_url}/admin/reload", timeout=3)
     except Exception:
         pass  # wr-proxy 可能未启动，静默失败
+
+
+def _notify_clear_cooldown(provider_id):
+    """通知 wr-proxy 清除指定 Provider 的冷却状态"""
+    import os
+    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    try:
+        http.post(f"{proxy_url}/admin/clear_cooldown/{provider_id}", timeout=3)
+    except Exception:
+        pass  # wr-proxy 可能未启动，静默失败
+
+
+# ============================================================
+#  Provider 冷却管理（查询 wr-proxy 运行时冷却状态）
+# ============================================================
+
+@providers_bp.route('/cooldowns')
+def list_cooldowns():
+    """列出所有冷却中的 Provider（查询 wr-proxy 运行时状态）"""
+    import os
+    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    try:
+        resp = http.get(f"{proxy_url}/admin/cooldowns", timeout=3)
+        return jsonify(resp.json())
+    except Exception as e:
+        return jsonify({'cooldowns': [], 'total': 0, 'error': str(e)})
+
+
+@providers_bp.route('/<int:provider_id>/clear_cooldown', methods=['POST'])
+def clear_cooldown(provider_id):
+    """手动清除指定 Provider 的冷却状态"""
+    _notify_clear_cooldown(provider_id)
+    return jsonify({'message': '冷却清除请求已发送', 'provider_id': provider_id})
+
+
+@providers_bp.route('/request_cache')
+def list_request_cache():
+    """列出 wr-proxy 请求 Hash 缓存"""
+    import os
+    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    try:
+        resp = http.get(f"{proxy_url}/admin/request_cache", timeout=3)
+        return jsonify(resp.json())
+    except Exception as e:
+        return jsonify({'entries': [], 'total': 0, 'error': str(e)})
+
+
+@providers_bp.route('/request_cache', methods=['DELETE'])
+def clear_request_cache():
+    """清空 wr-proxy 请求 Hash 缓存"""
+    import os
+    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    try:
+        resp = http.delete(f"{proxy_url}/admin/request_cache", timeout=3)
+        return jsonify(resp.json())
+    except Exception as e:
+        return jsonify({'error': str(e)})

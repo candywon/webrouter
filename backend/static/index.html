@@ -3,35 +3,62 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebRouter - AI中转站管理</title>
+  <title>AI-API综合管理平台</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
   <div class="app-layout">
     <!-- 侧边栏 -->
     <aside class="sidebar">
-      <div class="sidebar-logo">⚡ WebRouter</div>
-      <ul class="sidebar-nav">
-        <li><a href="#/"><span class="icon">📊</span> 仪表盘</a></li>
-        <li><a href="#/providers"><span class="icon">🔌</span> 数据源管理</a></li>
-        <li><a href="#/channels"><span class="icon">📡</span> 渠道管理</a></li>
-        <li><a href="#/tokens"><span class="icon">🔑</span> 令牌管理</a></li>
-        <li><a href="#/pricing"><span class="icon">💲</span> 模型定价</a></li>
-        <li><a href="#/desensitize"><span class="icon">🛡️</span> 脱敏规则</a></li>
-        <li><a href="#/monitor"><span class="icon">💓</span> 健康监控</a></li>
-        <li><a href="#/alerts"><span class="icon">🔔</span> 告警规则</a></li>
-        <li><a href="#/billing"><span class="icon">💰</span> 计费统计</a></li>
-        <li><a href="#/team"><span class="icon">👥</span> 团队管理</a></li>
-        <li><a href="#/cli"><span class="icon">⌨️</span> CLI 对接</a></li>
-        <li><a href="#/settings"><span class="icon">⚙️</span> 系统设置</a></li>
-      </ul>
+      <div class="sidebar-logo">AI-API管理平台</div>
+      <nav class="sidebar-nav">
+        <a href="#/">仪表盘</a>
+
+        <div class="nav-group">
+          <div class="nav-group-header" onclick="toggleNavGroup(this)">基础配置 <span class="nav-arrow">›</span></div>
+          <div class="nav-group-items">
+            <a href="#/providers">数据源管理</a>
+            <a href="#/channels">渠道管理</a>
+          </div>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-header" onclick="toggleNavGroup(this)">路由策略 <span class="nav-arrow">›</span></div>
+          <div class="nav-group-items">
+            <a href="#/tokens">令牌管理</a>
+            <a href="#/team">团队管理</a>
+            <a href="#/modelgrades">模型分级</a>
+            <a href="#/pricing">模型定价</a>
+            <a href="#/desensitize">脱敏规则</a>
+          </div>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-header" onclick="toggleNavGroup(this)">运维监控 <span class="nav-arrow">›</span></div>
+          <div class="nav-group-items">
+            <a href="#/monitor">健康监控</a>
+            <a href="#/alerts">告警规则</a>
+            <a href="#/billing">计费统计</a>
+          </div>
+        </div>
+
+        <div class="nav-group">
+          <div class="nav-group-header" onclick="toggleNavGroup(this)">工具与系统 <span class="nav-arrow">›</span></div>
+          <div class="nav-group-items">
+            <a href="#/cli">CLI 对接</a>
+            <a href="#/reqcache">请求缓存</a>
+            <a href="#/api-test">API 测试</a>
+            <a href="#/settings">系统设置</a>
+          </div>
+        </div>
+      </nav>
     </aside>
 
     <!-- 主内容 -->
     <main class="main-content">
       <header class="header">
         <span class="header-title" id="header-title">仪表盘</span>
-        <span style="color:var(--text-muted);font-size:13px">WebRouter v1.0</span>
+        <span class="header-version">AI-API v1.0</span>
       </header>
 
       <!-- 仪表盘 -->
@@ -46,6 +73,29 @@
             <span class="card-title">渠道状态</span>
           </div>
           <div id="channel-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Prompt Cache 命中率</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="cache-hours" onchange="DashboardPage.loadCacheHitRate()" style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:12px;">
+                <option value="6">近 6 小时</option>
+                <option value="12">近 12 小时</option>
+                <option value="24" selected>近 24 小时</option>
+                <option value="72">近 3 天</option>
+                <option value="168">近 7 天</option>
+              </select>
+              <select id="cache-group-by" onchange="DashboardPage.loadCacheHitRate()" style="padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:12px;">
+                <option value="model" selected>按模型</option>
+                <option value="provider">按数据源</option>
+              </select>
+            </div>
+          </div>
+          <div id="cache-hit-total" style="padding:12px 20px;border-bottom:1px solid var(--border);display:none;">
+          </div>
+          <div id="cache-hit-content">
+            <div class="empty-state"><div class="icon">💾</div><p>暂无缓存命中数据</p></div>
+          </div>
         </div>
       </div>
 
@@ -162,6 +212,86 @@
                   <button class="btn-primary" onclick="pricingPage.submitBatch()">提交</button>
                   <button class="btn-secondary" onclick="pricingPage.hideBatchForm()">取消</button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 模型分级 -->
+      <div class="page" id="page-modelgrades">
+        <div id="modelgrades-page-content">
+          <div class="page-header">
+            <h2>🎯 模型分级管理</h2>
+            <div>
+              <select id="tier-filter" onchange="modelGradesPage.onTierFilter()" style="padding:6px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:13px;">
+                <option value="">全部分级</option>
+              </select>
+              <button class="btn-primary" onclick="modelGradesPage.showAddForm()">+ 添加分级</button>
+              <button class="btn-secondary" onclick="modelGradesPage.reloadCache()">🔄 刷新缓存</button>
+            </div>
+          </div>
+          <div class="card">
+            <div id="modelgrades-content">
+              <div class="empty-state"><div class="icon">🎯</div><p>加载中...</p></div>
+            </div>
+          </div>
+
+          <!-- 分级编辑表单 -->
+          <div id="grade-form-modal" class="modal" style="display:none">
+            <div class="modal-content" style="max-width:520px">
+              <div class="modal-header">
+                <h3 id="grade-form-title">添加模型分级</h3>
+                <button class="modal-close" onclick="modelGradesPage.hideForm()">&times;</button>
+              </div>
+              <div class="modal-body">
+                <form id="grade-form">
+                  <div class="form-group">
+                    <label>模型名称 *</label>
+                    <input type="text" id="gr-model" required placeholder="如: gpt-4o, qwen-plus">
+                  </div>
+                  <div class="form-group">
+                    <label>分级 *</label>
+                    <select id="gr-tier" required>
+                      <option value="economy">🟢 经济型 — 便宜快速</option>
+                      <option value="standard">🟡 标准型 — 中等性价比</option>
+                      <option value="premium">🔴 旗舰型 — 最强推理</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>相对成本指数</label>
+                    <input type="number" id="gr-cost-index" step="0.1" min="0" value="1.0">
+                    <p class="hint">相对值，经济型约 1-2，标准型约 3-6，旗舰型约 8-15</p>
+                  </div>
+                  <div class="form-group">
+                    <label>厂商</label>
+                    <select id="gr-vendor">
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="google">Google</option>
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="qwen">通义千问</option>
+                      <option value="zhipu">智谱</option>
+                      <option value="moonshot">Moonshot</option>
+                      <option value="other">其他</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>描述说明</label>
+                    <textarea id="gr-description" rows="2" placeholder="可选"></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label>排序（同分组内越小越优先）</label>
+                    <input type="number" id="gr-sort-order" value="0" min="0">
+                  </div>
+                  <div class="form-group">
+                    <label><input type="checkbox" id="gr-enabled" checked> 启用（参与 auto/smart 调度）</label>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" class="btn-primary">保存</button>
+                    <button type="button" class="btn-secondary" onclick="modelGradesPage.hideForm()">取消</button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>
@@ -298,23 +428,183 @@
 
       <!-- 计费统计 -->
       <div class="page" id="page-billing">
-        <div class="card">
-          <div class="card-header"><span class="card-title">成本分析（近30天）</span></div>
-          <div id="billing-content">
-            <div class="empty-state"><div class="icon">💰</div><p>加载中...</p></div>
+        <div class="page-header">
+          <h2>计费统计</h2>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="billing-hours" onchange="BillingPage.onHoursChange()" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);padding:6px 12px;font-size:14px;">
+              <option value="6">近 6 小时</option>
+              <option value="12">近 12 小时</option>
+              <option value="24" selected>近 24 小时</option>
+              <option value="72">近 3 天</option>
+              <option value="168">近 7 天</option>
+              <option value="720">近 30 天</option>
+            </select>
+            <button class="btn-primary" onclick="BillingPage.exportData()">导出 CSV</button>
           </div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="stats-grid" id="billing-summary">
+            <div class="empty-state"><p>加载中...</p></div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-header">
+            <span class="card-title">每日趋势</span>
+          </div>
+          <div class="chart-container" style="padding:16px;">
+            <canvas id="billing-daily-chart" height="200"></canvas>
+          </div>
+        </div>
+        <div class="tabs" style="margin-bottom:16px;">
+          <button class="tab active" data-tab="models" onclick="BillingPage.switchTab(this)">按模型</button>
+          <button class="tab" data-tab="tokens" onclick="BillingPage.switchTab(this)">按令牌</button>
+          <button class="tab" data-tab="providers" onclick="BillingPage.switchTab(this)">按数据源</button>
+          <button class="tab" data-tab="clients" onclick="BillingPage.switchTab(this)">按客户端</button>
+          <button class="tab" data-tab="endpoints" onclick="BillingPage.switchTab(this)">按接口</button>
+          <button class="tab" data-tab="errors" onclick="BillingPage.switchTab(this)">异常分析</button>
+        </div>
+        <div class="card" id="billing-tab-content">
+          <div class="empty-state"><p>加载中...</p></div>
         </div>
       </div>
 
       <!-- 团队管理 -->
       <div class="page" id="page-team">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">团队成员</span>
-            <button class="btn btn-primary" id="btn-invite-member">+ 邀请成员</button>
+        <div class="page-header">
+          <h2>团队管理</h2>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-primary" onclick="TeamPage.showOrgForm()">+ 创建组织</button>
+            <button class="btn-secondary" onclick="TeamPage.showMemberForm()">+ 添加成员</button>
+            <button class="btn-secondary" onclick="TeamPage.showBatchImport('global')">📥 批量导入</button>
           </div>
-          <div id="team-content">
-            <div class="empty-state"><div class="icon">👥</div><p>加载中...</p></div>
+        </div>
+        <div class="team-layout">
+          <!-- 左侧组织树 -->
+          <div class="team-sidebar" id="team-tree">
+            <div class="empty-state"><p>加载中...</p></div>
+          </div>
+          <!-- 右侧成员列表 -->
+          <div class="team-main" id="team-content">
+            <div class="empty-state">
+              <div class="icon">👥</div>
+              <p>请先创建组织架构</p>
+              <p class="hint">支持 企业 → 部门 → 小组 的层级结构</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 组织编辑模态框 -->
+      <div id="org-modal" class="modal" style="display:none">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3 id="org-form-title">创建组织</h3>
+            <button class="modal-close" onclick="TeamPage.hideOrgForm()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="org-form">
+              <div class="form-group">
+                <label>组织名称 *</label>
+                <input type="text" id="of-name" required placeholder="如: 研发部">
+              </div>
+              <div class="form-group">
+                <label>组织类型</label>
+                <select id="of-type">
+                  <option value="company">企业/公司</option>
+                  <option value="department" selected>部门</option>
+                  <option value="group">小组</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>上级组织</label>
+                <select id="of-parent">
+                  <option value="">— 顶级组织 —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>总额度（元，0=不限）</label>
+                <input type="number" id="of-quota" min="0" step="0.01" value="0">
+              </div>
+              <div class="form-group">
+                <label>额度周期</label>
+                <select id="of-period">
+                  <option value="monthly">每月</option>
+                  <option value="yearly">每年</option>
+                  <option value="none">不限</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">保存</button>
+                <button type="button" class="btn-secondary" onclick="TeamPage.hideOrgForm()">取消</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- 成员编辑模态框 -->
+      <div id="team-modal" class="modal" style="display:none">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h3 id="team-form-title">添加成员</h3>
+            <button class="modal-close" onclick="TeamPage.hideMemberForm()">&times;</button>
+          </div>
+          <div class="modal-body">
+            <form id="team-form">
+              <div class="form-group">
+                <label>名称 *</label>
+                <input type="text" id="tf-name" required placeholder="如: 张三-研发部">
+              </div>
+              <div class="form-group">
+                <label>所属组织</label>
+                <select id="tf-org">
+                  <option value="">— 未分配 —</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>成员邮箱</label>
+                <input type="email" id="tf-email" placeholder="member@example.com">
+              </div>
+              <div class="form-group" id="tf-email-notify-group" style="display:none">
+                <label><input type="checkbox" id="tf-email-notify" checked> 发送邮件通知（含网关地址和 API Key）</label>
+                <span class="hint">编辑成员时勾选此项可发送更新通知</span>
+              </div>
+              <div class="form-group">
+                <label>总额度（元，0=不限）</label>
+                <input type="number" id="tf-quota" min="0" step="0.01" value="0">
+              </div>
+              <div class="form-group">
+                <label>RPM 限速（0=不限）</label>
+                <input type="number" id="tf-rpm" min="0" value="0">
+              </div>
+              <div class="form-group">
+                <label>允许模型</label>
+                <div id="tf-models-select" class="multi-select"></div>
+              </div>
+              <div class="form-group">
+                <label>数据源</label>
+                <div id="tf-provider-select" class="multi-select"></div>
+              </div>
+              <div class="form-group">
+                <label>IP 白名单（JSON数组，空=不限制）</label>
+                <input type="text" id="tf-ip-whitelist" placeholder='["10.0.0.0/8"]'>
+              </div>
+              <div class="form-group">
+                <label>过期时间</label>
+                <input type="datetime-local" id="tf-expires">
+              </div>
+              <div class="form-group">
+                <label><input type="checkbox" id="tf-enabled" checked> 启用</label>
+              </div>
+              <div id="tf-key-section" class="form-group" style="display:none">
+                <label>API Key（创建成功后显示，请妥善保存）</label>
+                <input type="text" id="tf-key" readonly style="font-family:monospace;color:var(--accent);">
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn-primary">保存</button>
+                <button type="button" class="btn-secondary" onclick="TeamPage.hideMemberForm()">取消</button>
+              </div>
+            </form>
           </div>
         </div>
       </div>
@@ -323,6 +613,143 @@
       <div class="page" id="page-cli">
         <div id="cli-tools"></div>
         <div id="cli-output"></div>
+      </div>
+
+      <!-- 请求缓存 -->
+      <div class="page" id="page-reqcache">
+        <div id="reqcache-page-content">
+          <div class="page-header">
+            <h2>🔄 请求 Hash 缓存</h2>
+            <div>
+              <button class="btn-primary" onclick="reqCachePage.refresh()">🔄 刷新</button>
+              <button class="btn-secondary" onclick="reqCachePage.clearAll()">🗑️ 清空缓存</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">缓存条目（每 10 分钟自动清理 1 小时前条目）</span>
+              <span id="reqcache-count" class="badge"></span>
+            </div>
+            <div id="reqcache-content">
+              <div class="empty-state"><div class="icon">🔄</div><p>加载中...</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- API 测试 -->
+      <div class="page" id="page-api-test">
+        <div id="api-test-content">
+          <div class="page-header">
+            <h2>🧪 API 测试</h2>
+          </div>
+          <div class="card" style="border-left:3px solid var(--accent);">
+            <div class="card-header"><span class="card-title">发送测试请求</span></div>
+            <div style="padding:16px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                <div class="form-group">
+                  <label>网关地址</label>
+                  <input type="text" id="at-gateway-url" value="http://localhost:5051" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <div class="form-group">
+                  <label>API Key</label>
+                  <select id="at-api-key" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">
+                    <option value="">— 选择成员 —</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
+                <div class="form-group">
+                  <label>模型选择</label>
+                  <div style="display:flex;gap:8px;margin-top:4px;">
+                    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
+                      <input type="radio" name="at-model-mode" value="specific" checked onchange="ApiTestPage.toggleModelMode()"> 指定模型
+                    </label>
+                    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
+                      <input type="radio" name="at-model-mode" value="auto" onchange="ApiTestPage.toggleModelMode()"> ✨ auto/smart
+                    </label>
+                  </div>
+                </div>
+                <div class="form-group" id="at-model-specific-group">
+                  <label>模型名称</label>
+                  <input type="text" id="at-model-name" value="qwen3-coder-flash" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">
+                </div>
+                <div class="form-group" id="at-auto-mode-group" style="display:none;">
+                  <label>智能模式</label>
+                  <select id="at-auto-mode" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">
+                    <option value="auto">auto — 完全自动</option>
+                    <option value="smart">smart — 智能调度</option>
+                  </select>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">网关根据请求复杂度自动选择模型</div>
+                </div>
+                <div class="form-group">
+                  <label>响应模式</label>
+                  <select id="at-stream" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">
+                    <option value="true">流式 (stream)</option>
+                    <option value="false">非流式</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom:16px;">
+                <label>测试消息内容</label>
+                <textarea id="at-message" rows="3" style="width:100%;padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;resize:vertical;">你好，请介绍一下你自己。</textarea>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn-primary" onclick="ApiTestPage.sendRequest()" id="at-send-btn">🚀 发送请求</button>
+                <button class="btn-secondary" onclick="ApiTestPage.sendAutoRequest()">✨ 测试 auto/smart 模式</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 响应结果 -->
+          <div class="card" id="at-response-card" style="display:none;">
+            <div class="card-header">
+              <span class="card-title">响应结果</span>
+              <span id="at-response-time" class="badge badge-info" style="margin-left:12px;"></span>
+              <span id="at-response-model" class="badge badge-success" style="margin-left:8px;"></span>
+            </div>
+            <div style="padding:16px;">
+              <div id="at-response-content" style="background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:16px;min-height:60px;white-space:pre-wrap;font-size:14px;line-height:1.6;color:var(--text-primary);"></div>
+              <div id="at-usage-info" style="margin-top:12px;font-size:12px;color:var(--text-muted);"></div>
+              <details id="at-raw-details" style="margin-top:12px;color:var(--text-muted);font-size:12px;">
+                <summary style="cursor:pointer;color:var(--accent);">查看原始响应 ▾</summary>
+                <pre id="at-raw-response" style="margin-top:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:11px;max-height:400px;overflow:auto;color:var(--text-secondary);"></pre>
+              </details>
+            </div>
+          </div>
+
+          <!-- 使用指南 -->
+          <div class="card" style="border-left:3px solid #8b5cf6;">
+            <div class="card-header"><span class="card-title">💡 智能模型选择说明</span></div>
+            <div style="padding:16px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="padding:12px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid var(--border);">
+                  <h4 style="margin:0 0 8px 0;color:var(--accent);">✨ model=auto / smart</h4>
+                  <p style="margin:0;font-size:13px;color:var(--text-secondary);line-height:1.6;">
+                    将 model 参数设置为 <code>auto</code> 或 <code>smart</code>，网关会分析请求内容的复杂度（输入长度、对话轮数、代码检测、工具调用、推理关键词、系统提示词六个维度），自动选择最合适的模型。
+                  </p>
+                  <div style="margin-top:8px;font-size:12px;color:var(--text-muted);">
+                    <strong>简单请求</strong> → 经济型模型（快速省钱）<br>
+                    <strong>中等复杂度</strong> → 标准模型（性价比）<br>
+                    <strong>复杂推理</strong> → 高级模型（最强推理）
+                  </div>
+                </div>
+                <div style="padding:12px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px solid var(--border);">
+                  <h4 style="margin:0 0 8px 0;color:var(--accent);">📝 使用示例</h4>
+                  <pre style="margin:0;font-size:11px;color:var(--text-secondary);line-height:1.5;overflow-x:auto;">curl GATEWAY_URL/v1/chat/completions \
+  -H "Authorization: Bearer API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[
+    {"role":"user","content":"分析这段代码的问题"}
+  ]}'</pre>
+                  <p style="margin-top:8px;font-size:12px;color:var(--text-muted);">
+                    智能降级也可在"令牌管理"中为成员开启，无需客户端修改 model 参数。
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 系统设置 -->
@@ -344,12 +771,16 @@
   <script src="/static/js/channel.js"></script>
   <script src="/static/js/tokens.js"></script>
   <script src="/static/js/pricing.js"></script>
+  <script src="/static/js/modelgrades.js"></script>
+  <script src="/static/js/reqcache.js"></script>
+  <script src="/static/js/api-test.js"></script>
   <script src="/static/js/desensitize.js"></script>
   <script src="/static/js/monitor.js"></script>
   <script src="/static/js/alert.js"></script>
   <script src="/static/js/billing.js"></script>
   <script src="/static/js/team.js"></script>
   <script src="/static/js/cli-export.js"></script>
+  <script src="/static/js/settings.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>

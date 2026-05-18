@@ -63,8 +63,6 @@ class ProvidersPage {
         const typeLabel = {
             'direct': '直连官方',
             'aggregate': '聚合平台',
-            'newapi': 'New-API',
-            'oneapi': 'One-API',
             'litellm': 'LiteLLM',
             'custom': '自定义',
         };
@@ -137,8 +135,6 @@ class ProvidersPage {
                                 <select id="pf-type" onchange="providersPage.onTypeChange()">
                                     <option value="direct">🔌 直连官方</option>
                                     <option value="aggregate">🔀 聚合平台</option>
-                                    <option value="newapi">🏗️ 自建 New-API</option>
-                                    <option value="oneapi">🏗️ 自建 One-API</option>
                                     <option value="litellm">🦙 LiteLLM 代理</option>
                                     <option value="custom">⚙️ 自定义网关</option>
                                 </select>
@@ -156,14 +152,6 @@ class ProvidersPage {
                                 <label>API Key</label>
                                 <input type="password" id="pf-api-key" placeholder="sk-xxx">
                             </div>
-                            <div class="form-group" id="pf-admin-token-group" style="display:none">
-                                <label>Admin Token</label>
-                                <input type="password" id="pf-admin-token" placeholder="New-API/One-API 管理令牌">
-                            </div>
-                            <div class="form-group" id="pf-db-uri-group" style="display:none">
-                                <label>数据库连接串</label>
-                                <input type="text" id="pf-db-uri" placeholder="如: sqlite:///data/new-api.db">
-                            </div>
                             <div class="form-group" id="pf-master-key-group" style="display:none">
                                 <label>Master Key</label>
                                 <input type="password" id="pf-master-key" placeholder="LiteLLM Master Key">
@@ -171,6 +159,11 @@ class ProvidersPage {
                             <div class="form-group" id="pf-health-endpoint-group" style="display:none">
                                 <label>健康检测端点</label>
                                 <input type="text" id="pf-health-endpoint" placeholder="如: /health">
+                            </div>
+                            <div class="form-group">
+                                <label>可用模型（逗号分隔，留空=全部）</label>
+                                <input type="text" id="pf-models" placeholder="如: gpt-4o, claude-3-5-sonnet">
+                                <span class="hint">留空表示不限制，支持该 Provider 的所有模型</span>
                             </div>
                             <div class="form-group">
                                 <label>备注</label>
@@ -191,10 +184,6 @@ class ProvidersPage {
 
     onTypeChange() {
         const type = document.getElementById('pf-type').value;
-        document.getElementById('pf-admin-token-group').style.display =
-            (type === 'newapi' || type === 'oneapi') ? '' : 'none';
-        document.getElementById('pf-db-uri-group').style.display =
-            (type === 'newapi' || type === 'oneapi') ? '' : 'none';
         document.getElementById('pf-master-key-group').style.display =
             (type === 'litellm') ? '' : 'none';
         document.getElementById('pf-health-endpoint-group').style.display =
@@ -206,6 +195,7 @@ class ProvidersPage {
         document.getElementById('form-title').textContent = '添加数据源';
         document.getElementById('provider-form').reset();
         document.getElementById('pf-type').value = 'direct';
+        document.getElementById('pf-models').value = '';
         this.onTypeChange();
         document.getElementById('provider-form-modal').style.display = 'flex';
 
@@ -226,6 +216,8 @@ class ProvidersPage {
         document.getElementById('pf-name').value = p.name;
         document.getElementById('pf-base-url').value = p.base_url;
         document.getElementById('pf-notes').value = p.notes || '';
+        const models = (p.models && Array.isArray(p.models)) ? p.models.join(', ') : (p.models || '');
+        document.getElementById('pf-models').value = models;
         this.onTypeChange();
         document.getElementById('provider-form-modal').style.display = 'flex';
 
@@ -243,18 +235,26 @@ class ProvidersPage {
 
     async submitForm() {
         const type = document.getElementById('pf-type').value;
+        const modelsStr = document.getElementById('pf-models').value.trim();
+        const models = modelsStr ? modelsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
         const data = {
             type,
             name: document.getElementById('pf-name').value.trim(),
             base_url: document.getElementById('pf-base-url').value.trim(),
-            api_key: document.getElementById('pf-api-key').value.trim(),
             notes: document.getElementById('pf-notes').value.trim(),
         };
 
-        if (type === 'newapi' || type === 'oneapi') {
-            data.admin_token = document.getElementById('pf-admin-token').value.trim();
-            data.db_uri = document.getElementById('pf-db-uri').value.trim();
+        if (models.length > 0) data.models = models;
+
+        const keyVal = document.getElementById('pf-api-key').value.trim();
+        if (keyVal) {
+            data.api_key = keyVal;
+        } else if (!this.editingId) {
+            showToast('API Key 不能为空');
+            return;
         }
+        // 编辑时 key 留空表示不修改
+
         if (type === 'litellm') {
             data.master_key = document.getElementById('pf-master-key').value.trim();
         }

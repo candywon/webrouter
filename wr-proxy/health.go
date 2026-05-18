@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -104,6 +105,34 @@ func (hc *HealthChecker) checkDirect(p *Provider) (string, int, string) {
 	if endpoint == "" {
 		return hc.checkGeneric(p)
 	}
+	// 优先使用 Provider 实际配置的模型来检测
+	models := parseModelsList(p.Models)
+	if len(models) > 0 {
+		body = injectModel(body, models[0])
+	}
+	// 去重：如果 base_url 路径已包含 endpoint 的前缀，则去掉重复部分
+	// 例：base_url=.../compatible-mode/v1 + endpoint=/compatible-mode/v1/chat/completions
+	//   → 实际 endpoint=/chat/completions
+	if strings.HasSuffix(strings.TrimRight(p.BaseURL, "/"), endpoint) {
+		endpoint = "/"
+	} else {
+		parsed := parseURL(p.BaseURL)
+		basePath := strings.Trim(parsed.Path, "/")
+		if basePath != "" {
+			fullPrefix := "/" + basePath + "/"
+			if strings.HasPrefix(endpoint, fullPrefix) {
+				endpoint = strings.TrimPrefix(endpoint, fullPrefix)
+				if !strings.HasPrefix(endpoint, "/") {
+					endpoint = "/" + endpoint
+				}
+			} else if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(endpoint, "/v1/") {
+				endpoint = strings.TrimPrefix(endpoint, "/v1")
+				if !strings.HasPrefix(endpoint, "/") {
+					endpoint = "/" + endpoint
+				}
+			}
+		}
+	}
 	return hc.sendTestRequest(p, endpoint, body)
 }
 
@@ -199,20 +228,46 @@ func (hc *HealthChecker) doRequest(req *http.Request) (string, int, string) {
 	}
 }
 
+// parseURL 安全解析 URL，失败返回空结构体
+func parseURL(raw string) *url.URL {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return &url.URL{}
+	}
+	return u
+}
+
+// injectModel 替换 JSON body 中的 model 字段
+func injectModel(body, model string) string {
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(body), &obj); err != nil {
+		return body
+	}
+	obj["model"] = model
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return string(out)
+}
+
 // --- 厂商测试配置 ---
 
-func getVendorTestConfig(baseURL string) (endpoint, body string) {
-	domainConfigs := map[string][2]string{
-		"api.openai.com":   {"/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
-		"api.anthropic.com": {"/v1/messages", `{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
-		"api.deepseek.com": {"/v1/chat/completions", `{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
-		"dashscope.aliyuncs.com": {"/compatible-mode/v1/chat/completions", `{"model":"qwen-turbo","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
-		"open.bigmodel.cn": {"/v4/chat/completions", `{"model":"glm-4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":1}`},
-	}
+var vendorTestConfigs []VendorTestConfig
 
-	for domain, config := range domainConfigs {
-		if strings.Contains(strings.ToLower(baseURL), domain) {
-			return config[0], config[1]
+// ReloadVendorTestConfigs 从 DB 重新加载厂商测试配置
+func ReloadVendorTestConfigs() {
+	vendorTestConfigs = LoadHealthTestConfigs()
+	LogInfo("Vendor test configs reloaded: %d entries", len(vendorTestConfigs))
+}
+
+func getVendorTestConfig(baseURL string) (endpoint, body string) {
+	if len(vendorTestConfigs) == 0 {
+		vendorTestConfigs = LoadHealthTestConfigs()
+	}
+	for _, cfg := range vendorTestConfigs {
+		if strings.Contains(strings.ToLower(baseURL), cfg.Domain) {
+			return cfg.Endpoint, cfg.Body
 		}
 	}
 	return "", ""

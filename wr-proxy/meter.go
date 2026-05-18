@@ -28,19 +28,17 @@ var meter = &Meter{
 
 // RecordRequest 记录一次请求
 func (m *Meter) RecordRequest(rlog *RequestLog) {
-	// 1. 写 DB 日志
-	if err := InsertRequestLog(rlog); err != nil {
-		LogWarn("Meter: write log failed: %v", err)
-	}
+	// 1. 异步写 DB 日志（非阻塞，不阻塞主请求流程）
+	InsertRequestLogAsync(rlog)
 
-	// 2. 扣 Token 配额
+	// 2. 扣 Token 配额（改为内存扣减，由 quotaSync 定期同步 DB）
 	if rlog.CostCents > 0 && rlog.StatusCode < 400 {
-		DeductTokenQuota(rlog.TokenID, rlog.CostCents)
+		DeductTokenQuotaAsync(rlog.TokenID, rlog.CostCents)
 	}
 
-	// 3. 累加 Provider 用量
+	// 3. 累加 Provider 用量（异步）
 	if rlog.CostCents > 0 {
-		UpdateProviderQuota(rlog.ProviderID, rlog.CostCents)
+		UpdateProviderQuotaAsync(rlog.ProviderID, rlog.CostCents)
 	}
 
 	// 4. 内存缓存（用于实时统计和预测）
@@ -105,6 +103,7 @@ func BuildRequestLog(reqID string, token *Token, provider *Provider,
 		Endpoint:     endpoint,
 		InputTokens:  result.InputTokens,
 		OutputTokens: result.OutputTokens,
+		CachedTokens: result.CachedTokens,
 		StatusCode:   result.StatusCode,
 		LatencyMs:    result.LatencyMs,
 		CostCents:    costCents,

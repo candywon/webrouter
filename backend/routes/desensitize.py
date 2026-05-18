@@ -29,7 +29,7 @@ def list_builtin():
         {'category': 'BANKCARD', 'name': '银行卡号', 'pattern': r'\b[3-6]\d{12,18}\b', 'level': 'standard'},
         {'category': 'APIKEY', 'name': 'API密钥', 'pattern': r'(?:sk|sk_live|sk_test|key|api_key|apikey|secret|token|Bearer)\s*[:=]\s*["\']?[\w\-]{16,}["\']?', 'level': 'standard'},
         {'category': 'EMAIL', 'name': '邮箱', 'pattern': r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', 'level': 'standard'},
-        {'category': 'PHONE', 'name': '手机号', 'pattern': r'1[3-9]\d{9}', 'level': 'standard'},
+        {'category': 'PHONE', 'name': '手机号', 'pattern': r'\b1[3-9]\d{9}\b', 'level': 'standard'},
         {'category': 'IP', 'name': 'IP地址', 'pattern': r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b', 'level': 'standard'},
     ]
     return jsonify({'builtin': builtin})
@@ -158,44 +158,86 @@ def delete_rule(rule_id):
 
 @desensitize_bp.route('/test', methods=['POST'])
 def test_rule():
-    """测试脱敏规则（不持久化，仅返回脱敏结果预览）"""
+    """测试脱敏规则（不持久化，按实际引擎顺序逐条执行）"""
     data = request.get_json()
     if not data or 'text' not in data:
         return jsonify({'error': '需要 text 字段'}), 400
 
     text = data['text']
-    rules = data.get('rules', [])  # [{type, pattern, category, level}]
+    custom_rules = data.get('rules', [])  # [{type, pattern, category, level}]
 
+    # 内置规则（与 wr-proxy/desensitize.go 顺序一致：长规则优先）
+    builtin_rules = [
+        {'category': 'IDCARD', 'pattern': r'[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]', 'type': 'regex', 'is_builtin': True},
+        {'category': 'BANKCARD', 'pattern': r'\b[3-6]\d{12,18}\b', 'type': 'regex', 'is_builtin': True},
+        {'category': 'APIKEY', 'pattern': r'(?:sk|sk_live|sk_test|key|api_key|apikey|secret|token|Bearer)\s*[:=]\s*["\']?[\w\-]{16,}["\']?', 'type': 'regex', 'is_builtin': True},
+        {'category': 'EMAIL', 'pattern': r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', 'type': 'regex', 'is_builtin': True},
+        {'category': 'PHONE', 'pattern': r'\b1[3-9]\d{9}\b', 'type': 'regex', 'is_builtin': True},
+        {'category': 'IP', 'pattern': r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b', 'type': 'regex', 'is_builtin': True},
+    ]
+
+    working_text = text
     results = []
-    for r in rules:
-        rule_type = r.get('type', 'regex')
-        pattern = r.get('pattern', '')
-        category = r.get('category', 'CUSTOM')
+    counters = {}  # category → count
 
-        if rule_type == 'regex':
+    def process_rules(rules_list):
+        nonlocal working_text
+        for r in rules_list:
+            rule_type = r.get('type', 'regex')
+            pattern = r.get('pattern', '')
+            category = r.get('category', 'CUSTOM')
+            is_builtin = r.get('is_builtin', False)
+
             try:
-                matches = re.findall(pattern, text)
-                if matches:
-                    results.append({
-                        'category': category,
-                        'pattern': pattern,
-                        'matches': matches,
-                        'count': len(matches),
-                    })
-            except re.error:
-                results.append({'category': category, 'error': '正则语法错误'})
-        elif rule_type == 'exact':
-            count = text.count(pattern)
-            if count > 0:
-                results.append({
-                    'category': category,
-                    'pattern': pattern,
-                    'matches': [pattern],
-                    'count': count,
-                })
+                if rule_type == 'regex':
+                    regex = re.compile(pattern)
+                    matches = regex.findall(working_text)
+                elif rule_type == 'exact':
+                    count = working_text.count(pattern)
+                    matches = [pattern] if count > 0 else []
+                else:
+                    continue
+            except re.error as e:
+                results.append({'category': category, 'error': f'正则语法错误: {e}', 'is_builtin': is_builtin})
+                continue
+
+            if not matches:
+                continue
+
+            # 过滤掉包含方括号的匹配（说明是前一轮替换的残留）
+            real_matches = [m for m in matches if '[' not in str(m) and ']' not in str(m)]
+            if not real_matches:
+                continue
+
+            # 去重并生成标记
+            counters.setdefault(category, 0)
+            seen = {}
+            for m in real_matches:
+                m_str = str(m)
+                if m_str in seen:
+                    working_text = working_text.replace(m_str, seen[m_str])
+                    continue
+                counters[category] += 1
+                n = counters[category]
+                marker = f'[{category}_{n}]'
+                seen[m_str] = marker
+                working_text = working_text.replace(m_str, marker)
+
+            results.append({
+                'category': category,
+                'pattern': pattern,
+                'matches': real_matches,
+                'count': len(real_matches),
+                'is_builtin': is_builtin,
+            })
+
+    # 按顺序：先内置规则，再自定义规则
+    process_rules(builtin_rules)
+    process_rules(custom_rules)
 
     return jsonify({
         'original_text': text,
+        'sanitized_text': working_text,
         'results': results,
         'total_matches': sum(r.get('count', 0) for r in results),
     })

@@ -350,6 +350,41 @@ func (rc *RequestCache) CleanStale() {
 	}
 }
 
+// ListEntries 列出所有缓存条目（管理接口用）
+type RequestCacheEntryInfo struct {
+	Key        string    `json:"key"`
+	Hash       string    `json:"hash"`
+	Success    bool      `json:"success"`
+	Timestamp  time.Time `json:"timestamp"`
+	AgeSeconds int       `json:"age_seconds"`
+}
+
+func (rc *RequestCache) ListEntries() []RequestCacheEntryInfo {
+	rc.mu.RLock()
+	defer rc.mu.RUnlock()
+	result := make([]RequestCacheEntryInfo, 0, len(rc.entries))
+	now := time.Now()
+	for key, entry := range rc.entries {
+		result = append(result, RequestCacheEntryInfo{
+			Key:        key,
+			Hash:       entry.Hash,
+			Success:    entry.Success,
+			Timestamp:  entry.Timestamp,
+			AgeSeconds: int(now.Sub(entry.Timestamp).Seconds()),
+		})
+	}
+	return result
+}
+
+// ClearAll 清空所有缓存条目
+func (rc *RequestCache) ClearAll() int {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	n := len(rc.entries)
+	rc.entries = make(map[string]*requestCacheEntry)
+	return n
+}
+
 // --- 降级策略决策 ---
 
 // ShouldFailover 判断是否应该触发降级切换 Provider

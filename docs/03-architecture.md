@@ -20,49 +20,48 @@
         ┌─────▼─────┐   ┌──────────▼──────────┐   ┌─────▼─────┐
         │ WebRouter  │   │    静态资源 (前端)    │   │  任意      │
         │ (Flask)    │   │                     │   │  Provider  │
-        │ :5000      │   │                     │   │  实例       │
+        │ :5050      │   │                     │   │  实例       │
         └─────┬──────┘   └─────────────────────┘   └─────┬─────┘
               │                                          │
         ┌─────▼──────────────────────────────────────────▼──┐
-        │              Provider 抽象层                       │
-        │                                                   │
-        │  direct · aggregate · newapi · oneapi · litellm · custom  │
+        │              wr-proxy (Go 代理网关)                 │
+        │  智能路由 · 脱敏 · 重试 · 计量 · 二进制流支持       │
         │                                                   │
         │  ┌────────┐ ┌────────┐ ┌─────────┐ ┌─────────┐  │
-        │  │官方直连 │ │聚合平台 │ │New-API  │ │LiteLLM  │  │
-        │  │(HTTP)  │ │(HTTP)  │ │(DB+HTTP)│ │(HTTP)   │  │
-        │  └────────┘ └────────┘ └────┬────┘ └─────────┘  │
-        └─────────────────────────────┼───────────────────┘
-                                      │
-                              ┌───────▼───────┐
-                              │  MySQL/SQLite  │
-                              │  (New-API DB)  │
-                              └───────┬───────┘
-                                      │
-                              ┌───────▼───────┐
-                              │    Redis       │
-                              │    :6379       │
-                              └───────────────┘
+        │  │直连官方 │ │聚合平台 │ │LiteLLM  │ │自定义    │  │
+        │  │(HTTP)  │ │(HTTP)  │ │(HTTP)   │ │(HTTP)   │  │
+        │  └────────┘ └────────┘ └─────────┘ └─────────┘  │
+        └─────────────────────────┬─────────────────────────┘
+                                  │
+                          ┌───────▼───────┐
+                          │    SQLite      │
+                          │  (wr-proxy.db) │
+                          └───────┬───────┘
+                                  │
+                          ┌───────▼───────┐
+                          │    Redis       │
+                          │    :6379       │
+                          └───────────────┘
 ```
 
 ### 1.2 职责分工
 
-|| 组件 | 职责 | 技术 |
+| 组件 | 职责 | 技术 |
 |------|------|------|
 | Nginx | 反向代理、SSL、静态资源 | Nginx |
-| WebRouter | 管理增强：Provider 管理、统一监控、告警、计费、团队、对接 | Python Flask |
+| WebRouter (Flask) | 管理增强：Provider 管理、统一监控、告警、计费、团队、对接 | Python Flask |
+| wr-proxy (Go) | 代理网关核心：智能路由、请求脱敏、自动重试、成本计量、二进制流 | Go |
 | Provider 层 | API 源抽象：统一注册、统一检测、统一调度 | 可插拔适配器 |
-| New-API | API网关核心（作为 newapi 类型 Provider）：渠道管理、Key轮换、格式转换、负载均衡 | Go + React |
-| MySQL/SQLite | 共享数据存储 | 兼容New-API表结构 |
+| SQLite | 共享数据存储（wr-provider.db + webrouter.db） | 纯 Go/Python |
 | Redis | 缓存、会话、实时统计 | Redis |
 
 ### 1.3 核心原则
 
-1. **Provider 抽象优先** — 所有 API 源（直连、聚合、自建）统一为 Provider 概念，New-API 只是其中一种
-2. **不修改上游源码** — 通过数据库共享 + 管理API + HTTP检测集成，不碰任何上游代码
+1. **Provider 抽象优先** — 所有 API 源（直连、聚合、自建）统一为 Provider 概念
+2. **wr-proxy 内置网关** — 自研 Go 代理，不依赖任何第三方网关，自主可控
 3. **数据能力分级** — 不同 Provider 类型获取不同深度的数据，但健康检测是基线能力
 4. **故障隔离** — 单个 Provider 挂了不影响其他 Provider 的监控和告警
-5. **渐进式接入** — 用户可以先只注册直连 Provider（最简模式），再逐步添加自建网关
+5. **渐进式接入** — 用户可以先只注册直连 Provider（最简模式），再逐步添加外部网关
 
 ---
 
@@ -77,15 +76,13 @@ backend/
 ├── extensions.py          # Flask扩展初始化
 ├── models/
 │   ├── __init__.py
-│   ├── provider.py        # Provider数据模型 ★
-│   ├── newapi_adapter.py  # New-API数据库适配器(newapi类型Provider)
-│   ├── oneapi_adapter.py  # One-API数据库适配器(oneapi类型Provider) ★
+│   ├── provider.py        # Provider数据模型
 │   ├── wr_models.py       # WebRouter自有表模型
-│   └── provider_factory.py # Provider适配器工厂 ★
+│   └── provider_factory.py # Provider适配器工厂
 ├── routes/
 │   ├── __init__.py
 │   ├── dashboard.py       # 仪表盘API
-│   ├── providers.py       # Provider管理API ★
+│   ├── providers.py       # Provider管理API
 │   ├── monitor.py         # 监控API
 │   ├── alert.py           # 告警API
 │   ├── billing.py         # 计费API
@@ -94,43 +91,59 @@ backend/
 │   └── settings.py        # 设置API
 ├── services/
 │   ├── __init__.py
-│   ├── provider_manager.py # Provider生命周期管理 ★
-│   ├── health_checker.py  # 统一健康检测(支持多Provider类型)
+│   ├── provider_manager.py # Provider生命周期管理
+│   ├── health_checker.py  # 统一健康检测
 │   ├── alert_engine.py    # 告警引擎
 │   ├── stats_collector.py # 统计采集
 │   ├── cli_generator.py   # CLI配置生成
 │   └── demo_data.py       # 演示数据
 ├── static/                # 前端静态文件
 │   ├── js/
-│   │   ├── providers.js   # Provider管理页面JS ★
+│   │   ├── providers.js   # Provider管理页面JS
 │   │   └── ...
 │   └── ...
 └── data/                  # SQLite数据目录
+
+wr-proxy/
+├── main.go                # Go代理入口
+├── handlers.go            # 请求处理（含多媒体端点）
+├── proxy.go               # HTTP代理转发
+├── router.go              # 路由注册
+├── retry.go               # 重试引擎
+├── desensitize.go         # 脱敏引擎
+├── meter.go               # 成本计量
+├── auth.go                # Token认证
+├── config.go              # 配置管理
+├── models.go              # 数据模型
+├── smart_model.go         # 智能模型选择
+├── sanitizer.go           # 响应清理
+├── predictor.go           # 模型预测
+├── health.go              # 健康检查
+├── alert.go               # 告警集成
+├── util.go                # 工具函数
+├── data/                  # SQLite数据库
+└── docs/                  # wr-proxy详细文档
 ```
 
 ### 2.2 Provider 数据模型
 
-#### 2.2.1 wr_providers 表（核心新增）
+#### 2.2.1 wr_providers 表
 
 ```sql
 CREATE TABLE wr_providers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(100) NOT NULL,           -- 数据源名称
-    type VARCHAR(20) NOT NULL,            -- direct/aggregate/newapi/oneapi/litellm/custom
+    type VARCHAR(20) NOT NULL,            -- direct/aggregate/litellm/custom
     base_url VARCHAR(500) NOT NULL,       -- API Base URL
     api_key VARCHAR(500),                 -- API Key (AES加密存储)
     api_key_masked VARCHAR(50),           -- 脱敏显示 sk-xxx...xxxx
-    
-    -- newapi/oneapi 专有
-    admin_token VARCHAR(500),             -- 管理令牌(AES加密)
-    db_uri VARCHAR(500),                  -- 数据库连接串(可选，直读模式)
-    
+
     -- litellm 专有
     master_key VARCHAR(500),              -- LiteLLM Master Key
-    
+
     -- custom 专有
     health_endpoint VARCHAR(500),         -- 自定义健康检测端点
-    
+
     -- 通用配置
     models TEXT,                          -- JSON: 支持的模型列表
     tags TEXT,                            -- JSON: 标签 ["主力","备用"]
@@ -138,13 +151,13 @@ CREATE TABLE wr_providers (
     priority INTEGER DEFAULT 0,           -- 优先级 (越高越优先)
     check_interval INTEGER DEFAULT 300,   -- 健康检测间隔(秒)
     enabled BOOLEAN DEFAULT TRUE,
-    
+
     -- 状态(由系统自动维护)
     status VARCHAR(20) DEFAULT 'unchecked', -- healthy/warning/dead/disabled/unchecked
     last_check_at DATETIME,
     last_latency_ms INTEGER,
     last_error TEXT,
-    
+
     -- 元数据
     notes TEXT,                           -- 备注
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -159,39 +172,27 @@ CREATE TABLE wr_providers (
 
 class BaseProviderAdapter:
     """Provider 适配器基类 — 所有类型必须实现"""
-    
+
     PROVIDER_TYPE = None  # 子类覆盖
-    
+
     def __init__(self, provider: dict):
         self.provider = provider
         self.base_url = provider['base_url']
         self.api_key = provider.get('api_key', '')
-    
+
     def check_health(self) -> dict:
         """健康检测 — 所有类型必须实现"""
         raise NotImplementedError
-    
+
     def get_models(self) -> list:
         """获取支持的模型列表 — 可选"""
         return self.provider.get('models', [])
-    
-    def get_channels(self) -> list:
-        """获取渠道列表 — 仅 newapi/oneapi"""
-        return []
-    
-    def get_usage_stats(self, hours=24) -> list:
-        """获取用量统计 — 仅 newapi/oneapi"""
-        return []
-    
-    def get_users(self) -> list:
-        """获取用户列表 — 仅 newapi/oneapi"""
-        return []
 
 
 class DirectProviderAdapter(BaseProviderAdapter):
     """直连官方 API"""
     PROVIDER_TYPE = 'direct'
-    
+
     def check_health(self) -> dict:
         # 根据 base_url 识别厂商，发送对应格式的测试请求
         ...
@@ -200,63 +201,40 @@ class DirectProviderAdapter(BaseProviderAdapter):
 class AggregateProviderAdapter(BaseProviderAdapter):
     """聚合平台"""
     PROVIDER_TYPE = 'aggregate'
-    
+
     def check_health(self) -> dict:
         # 聚合平台通常兼容 OpenAI 格式，走 /v1/chat/completions
         ...
 
 
-class NewAPIProviderAdapter(BaseProviderAdapter):
-    """自建 New-API — 功能最丰富"""
-    PROVIDER_TYPE = 'newapi'
-    
-    def __init__(self, provider: dict):
-        super().__init__(provider)
-        self.admin_token = provider.get('admin_token', '')
-        self.db_uri = provider.get('db_uri', '')
-        self._db_adapter = None
-    
-    def _get_db_adapter(self):
-        """懒加载 New-API 数据库适配器"""
-        if self._db_adapter is None and self.db_uri:
-            self._db_adapter = NewAPIAdapter(self.db_uri)
-        return self._db_adapter
-    
-    def check_health(self) -> dict:
-        # HTTP 检测 + 可选 DB 渠道状态
-        ...
-    
-    def get_channels(self) -> list:
-        return self._get_db_adapter().get_channels()
-    
-    def get_usage_stats(self, hours=24) -> list:
-        return self._get_db_adapter().get_usage_stats(hours)
-    
-    def get_users(self) -> list:
-        return self._get_db_adapter().get_users()
-
-
 class LiteLLMProviderAdapter(BaseProviderAdapter):
     """LiteLLM 代理"""
     PROVIDER_TYPE = 'litellm'
-    
+
     def get_models(self) -> list:
         # GET /v1/models 自动发现
         ...
 
 
+class CustomProviderAdapter(BaseProviderAdapter):
+    """自定义网关"""
+    PROVIDER_TYPE = 'custom'
+
+    def check_health(self) -> dict:
+        # 使用自定义 health_endpoint
+        ...
+
+
 class ProviderFactory:
     """Provider 适配器工厂"""
-    
+
     _adapters = {
         'direct': DirectProviderAdapter,
         'aggregate': AggregateProviderAdapter,
-        'newapi': NewAPIProviderAdapter,
-        'oneapi': OneAPIProviderAdapter,
         'litellm': LiteLLMProviderAdapter,
         'custom': CustomProviderAdapter,
     }
-    
+
     @classmethod
     def create(cls, provider: dict) -> BaseProviderAdapter:
         provider_type = provider.get('type', 'custom')
@@ -264,55 +242,7 @@ class ProviderFactory:
         return adapter_class(provider)
 ```
 
-### 2.3 New-API数据库适配（newapi 类型 Provider）
-
-New-API 类型 Provider 仍直读 New-API 数据库，关键表映射不变：
-
-| New-API表 | 用途 | WebRouter读取方式 |
-|-----------|------|------------------|
-| channels | 渠道/Key管理 | 读取状态、余额、模型列表 |
-| tokens | API Key管理 | 读取额度、使用量 |
-| users | 用户管理 | 读取用户信息、角色 |
-| logs | 请求日志 | 读取调用量、错误率、延迟 |
-| options | 系统配置 | 读取全局设置 |
-
-适配器设计：
-
-```python
-# models/newapi_adapter.py
-class NewAPIAdapter:
-    """New-API数据库只读适配器"""
-
-    def __init__(self, db_uri):
-        self.engine = create_engine(db_uri)
-
-    def get_channels_status(self):
-        """获取所有渠道健康状态"""
-        sql = """
-        SELECT id, name, type, status, priority,
-               models, created_time, test_time
-        FROM channels
-        ORDER BY priority DESC
-        """
-        return pd.read_sql(sql, self.engine)
-
-    def get_usage_stats(self, hours=24):
-        """获取用量统计"""
-        sql = """
-        SELECT model_name, channel_id,
-               COUNT(*) as request_count,
-               SUM(prompt_tokens) as input_tokens,
-               SUM(completion_tokens) as output_tokens,
-               AVG(duration) as avg_duration,
-               SUM(CASE WHEN code != 200 THEN 1 ELSE 0 END) as error_count
-        FROM logs
-        WHERE created_at >= datetime('now', '-%d hours')
-        GROUP BY model_name, channel_id
-        """ % hours
-        return pd.read_sql(sql, self.engine)
-```
-
-### 2.4 统一健康检测（支持多 Provider 类型）
+### 2.3 统一健康检测（支持多 Provider 类型）
 
 ```python
 # services/health_checker.py
@@ -408,10 +338,10 @@ class WebhookAlertChannel:
             await session.post(self.url, json={"content": message})
 ```
 
-### 2.6 API路由设计
+### 2.5 API路由设计
 
 ```
-# Provider 管理（核心新增）
+# Provider 管理
 GET    /api/providers                    # Provider列表
 POST   /api/providers                    # 注册新Provider
 GET    /api/providers/:id                # Provider详情
@@ -419,7 +349,6 @@ PUT    /api/providers/:id                # 更新Provider配置
 DELETE /api/providers/:id                # 删除Provider
 POST   /api/providers/:id/check          # 手动触发单个Provider健康检测
 POST   /api/providers/check_all          # 手动触发全量检测
-GET    /api/providers/:id/channels       # Provider下的渠道列表(仅newapi/oneapi)
 GET    /api/providers/:id/models         # Provider支持的模型列表
 GET    /api/providers/types              # 获取支持的Provider类型定义
 
@@ -473,36 +402,41 @@ POST /api/settings/restore                # 恢复备份
 frontend/
 ├── index.html              # 管理后台SPA入口
 ├── css/
-│   ├── variables.css       # CSS变量(主题色)
-│   ├── layout.css          # 布局
-│   ├── dashboard.css       # 仪表盘样式
-│   ├── monitor.css         # 监控样式
-│   └── components.css      # 组件样式
-├── js/
-│   ├── app.js              # 应用入口、路由
-│   ├── api.js              # API请求封装
-│   ├── dashboard.js        # 仪表盘逻辑
-│   ├── monitor.js          # 监控逻辑
-│   ├── alert.js            # 告警逻辑
-│   ├── billing.js          # 计费逻辑
-│   ├── team.js             # 团队逻辑
-│   ├── cli-export.js       # CLI导出逻辑
-│   └── utils.js            # 工具函数
-└── assets/
-    └── icons/              # SVG图标
+│   ├── style.css           # 统一样式（明亮主题）
+└── js/
+    ├── router.js           # Hash路由
+    ├── api.js              # API请求封装
+    ├── dashboard.js        # 仪表盘逻辑
+    ├── providers.js        # Provider管理
+    ├── channels.js         # 渠道管理
+    ├── monitor.js          # 健康监控
+    ├── alert.js            # 告警逻辑
+    ├── billing.js          # 计费逻辑
+    ├── team.js             # 团队逻辑
+    ├── tokens.js           # 令牌管理
+    ├── pricing.js          # 模型定价
+    ├── modelgrades.js      # 模型分级
+    ├── desensitize.js      # 脱敏规则
+    ├── cli-export.js       # CLI导出逻辑
+    └── settings.js         # 系统设置
 ```
 
 ### 3.2 前端路由(Hash路由)
 
 ```
 #/                  → 仪表盘总览
-#/providers         → 数据源管理 ★
-#/channels          → 渠道管理(已注册Provider下的渠道)
+#/providers         → 数据源管理
+#/channels          → 渠道管理
 #/monitor           → 健康监控
 #/alerts            → 告警规则
 #/billing           → 计费统计
 #/team              → 团队管理
+#/tokens            → 令牌管理
+#/pricing           → 模型定价
+#/modelgrades       → 模型分级
+#/desensitize       → 脱敏规则
 #/cli               → CLI对接
+#/reqcache          → 请求缓存
 #/settings          → 系统设置
 ```
 
@@ -555,42 +489,38 @@ class Dashboard {
 version: '3.8'
 
 services:
-  # API网关核心
-  new-api:
-    image: calciumion/new-api:latest
-    container_name: webrouter-newapi
+  # wr-proxy 代理网关
+  wr-proxy:
+    build:
+      context: ../wr-proxy
+      dockerfile: ../deploy/Dockerfile-proxy
+    container_name: webrouter-proxy
     restart: always
     ports:
-      - "3000:3000"
+      - "5051:5051"
     environment:
       - TZ=Asia/Shanghai
-      - SQL_DSN=${DB_DSN:-}
-      - REDIS_CONN_STRING=redis://redis:6379
-      - SESSION_SECRET=${SESSION_SECRET}
     volumes:
-      - newapi_data:/data
+      - proxy_data:/app/data
     depends_on:
-      - redis
+      - webrouter
 
   # WebRouter管理后台
   webrouter:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile.flask
+      context: ../backend
+      dockerfile: ../deploy/Dockerfile
     container_name: webrouter-app
     restart: always
     ports:
-      - "5000:5000"
+      - "5050:5050"
     environment:
       - TZ=Asia/Shanghai
-      - DATABASE_URI=${DB_DSN:-sqlite:///data/new-api.db}
-      - NEWAPI_URL=http://new-api:3000
-      - NEWAPI_ADMIN_TOKEN=${NEWAPI_ADMIN_TOKEN}
+      - DATABASE_URI=${DB_DSN:-sqlite:///data/webrouter.db}
       - REDIS_URL=redis://redis:6379
     volumes:
       - webrouter_data:/app/data
     depends_on:
-      - new-api
       - redis
 
   # Redis缓存
@@ -603,23 +533,8 @@ services:
     volumes:
       - redis_data:/data
 
-  # Nginx反向代理
-  nginx:
-    image: nginx:alpine
-    container_name: webrouter-nginx
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - webrouter
-      - new-api
-
 volumes:
-  newapi_data:
+  proxy_data:
   webrouter_data:
   redis_data:
 ```
@@ -627,12 +542,12 @@ volumes:
 ### 4.2 Nginx配置
 
 ```nginx
-# deploy/nginx/nginx.conf
+# deploy/nginx.conf
 upstream webrouter {
-    server webrouter:5000;
+    server webrouter:5050;
 }
-upstream newapi {
-    server new-api:3000;
+upstream wrproxy {
+    server wr-proxy:5051;
 }
 
 server {
@@ -646,48 +561,33 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # New-API管理接口
+    # WebRouter API
     location /api/ {
-        proxy_pass http://newapi;
+        proxy_pass http://webrouter;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
-    # AI API转发(用户调用)
+    # AI API转发（用户调用）
     location /v1/ {
-        proxy_pass http://newapi;
+        proxy_pass http://wrproxy;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_buffering off;
         proxy_read_timeout 300s;
+        # SSE支持
+        proxy_set_header Connection '';
+        proxy_http_version 1.1;
+        chunked_transfer_encoding off;
     }
 }
 ```
 
-### 4.3 Flask Dockerfile
-
-```dockerfile
-# deploy/Dockerfile.flask
-FROM python:3.11-slim
-
-WORKDIR /app
-
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY backend/ .
-COPY frontend/ ./static/
-
-EXPOSE 5000
-
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:create_app()"]
-```
-
-### 4.4 一键部署脚本
+### 4.3 一键部署脚本
 
 ```bash
 #!/bin/bash
-# scripts/install.sh
+# deploy/install.sh
 
 set -e
 
@@ -713,7 +613,6 @@ mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR"
 # 4. 生成配置
 cat > .env << EOF
 SESSION_SECRET=$(openssl rand -hex 32)
-NEWAPI_ADMIN_TOKEN=$(openssl rand -hex 16)
 DB_DSN=
 EOF
 
@@ -732,8 +631,8 @@ sleep 10
 PUBLIC_IP=$(curl -s ifconfig.me || echo "YOUR_SERVER_IP")
 echo ""
 echo "=== 部署完成 ==="
-echo "管理后台: http://$PUBLIC_IP"
-echo "New-API:  http://$PUBLIC_IP:3000"
+echo "管理后台: http://$PUBLIC_IP:5050"
+echo "代理网关: http://$PUBLIC_IP:5051"
 echo "默认密码已写入 .env 文件"
 echo "=================="
 ```
@@ -742,19 +641,17 @@ echo "=================="
 
 ## 五、数据模型
 
-### 5.1 WebRouter自有表(追加到New-API数据库)
+### 5.1 WebRouter自有表
 
 ```sql
--- ★ 核心新增：Provider 数据源
+-- Provider 数据源
 CREATE TABLE wr_providers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(100) NOT NULL,           -- 数据源名称
-    type VARCHAR(20) NOT NULL,            -- direct/aggregate/newapi/oneapi/litellm/custom
+    type VARCHAR(20) NOT NULL,            -- direct/aggregate/litellm/custom
     base_url VARCHAR(500) NOT NULL,       -- API Base URL
     api_key VARCHAR(500),                 -- API Key (AES加密存储)
     api_key_masked VARCHAR(50),           -- 脱敏显示 sk-xxx...xxxx
-    admin_token VARCHAR(500),             -- 管理令牌(newapi/oneapi, AES加密)
-    db_uri VARCHAR(500),                  -- 数据库连接串(newapi/oneapi)
     master_key VARCHAR(500),              -- Master Key(litellm, AES加密)
     health_endpoint VARCHAR(500),         -- 自定义健康端点(custom)
     models TEXT,                          -- JSON: 支持的模型列表
@@ -799,8 +696,8 @@ CREATE TABLE wr_alert_history (
 -- 渠道健康记录
 CREATE TABLE wr_channel_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider_id INTEGER,                    -- 关联 Provider ID ★
-    channel_id INTEGER,                     -- New-API渠道ID(仅newapi/oneapi类型)
+    provider_id INTEGER,                    -- 关联 Provider ID
+    channel_id INTEGER,                     -- 渠道ID
     status VARCHAR(20) NOT NULL,            -- healthy/warning/dead/disabled
     latency_ms INTEGER,
     error_message TEXT,
@@ -851,15 +748,15 @@ CREATE TABLE wr_cli_templates (
 
 | 层 | 技术 | 选型理由 |
 |----|------|---------|
-| API网关 | New-API (Go) | 3.2万Star，功能最全，兼容One-API数据 |
+| API网关 | wr-proxy (Go) | 自主研发，零依赖，支持二进制流/脱敏/重试/智能路由 |
 | 管理后端 | Flask (Python) | 技术栈统一，开发快 |
 | 前端 | 原生HTML/CSS/JS | 与包装站一致，无需构建工具 |
 | 图表 | Chart.js | 轻量(60KB)，按需加载 |
-| 数据库 | SQLite→MySQL | 开发用SQLite，生产平滑迁移MySQL |
-| 缓存 | Redis | New-API已依赖Redis，复用 |
-| 部署 | Docker Compose | 一键部署，与New-API一致 |
+| 数据库 | SQLite | 纯 Go/Python 驱动，无需 CGO，单文件部署 |
+| 缓存 | Redis | 可选，用于会话和实时统计 |
+| 部署 | Docker Compose | 一键部署 |
 | 反向代理 | Nginx | SSL、路由分发、静态资源 |
-| 进程管理 | Gunicorn | Flask生产级WSGI服务器 |
+| 进程管理 | Gunicorn / start.py | Flask生产级WSGI + 双进程管理 |
 | 定时任务 | APScheduler | 健康检测、统计采集、告警评估 |
 
 ---
@@ -869,8 +766,8 @@ CREATE TABLE wr_cli_templates (
 | 措施 | 说明 |
 |------|------|
 | HTTPS | Nginx终止SSL，Let's Encrypt自动续期 |
-| Key加密存储 | 复用New-API的加密机制 |
-| 管理后台认证 | JWT Token，与New-API用户体系打通 |
+| Key加密存储 | API Key 加密后存储 |
+| 管理后台认证 | JWT Token |
 | API限流 | Nginx层限流，防止暴力请求 |
 | 数据隔离 | 团队版用户数据严格隔离，按user_id过滤 |
 | 备份加密 | 备份文件AES加密，传输用HTTPS |

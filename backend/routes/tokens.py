@@ -34,8 +34,10 @@ def create_token():
     )
 
     # 可选字段
-    if 'user_id' in data:
-        token.user_id = int(data['user_id'])
+    if 'org_id' in data:
+        token.org_id = int(data['org_id']) if data['org_id'] else None
+    if 'member_email' in data:
+        token.member_email = data['member_email'].strip()
     if 'models' in data:
         m = data['models']
         token.models = json.dumps(m) if isinstance(m, list) else m
@@ -129,10 +131,12 @@ def update_token(token_id):
     if not data:
         return jsonify({'error': 'No data'}), 400
 
+    if 'org_id' in data:
+        token.org_id = int(data['org_id']) if data['org_id'] else None
+    if 'member_email' in data:
+        token.member_email = data['member_email'].strip()
     if 'name' in data:
         token.name = data['name'].strip()
-    if 'user_id' in data:
-        token.user_id = int(data['user_id'])
     if 'models' in data:
         m = data['models']
         token.models = json.dumps(m) if isinstance(m, list) else m

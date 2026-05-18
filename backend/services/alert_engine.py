@@ -1,5 +1,6 @@
 """告警引擎 — 评估告警规则并发送通知"""
-import json, time, logging, asyncio
+import json, time, logging, asyncio, smtplib
+from email.mime.text import MIMEText
 from datetime import datetime
 import aiohttp
 from extensions import db
@@ -10,31 +11,62 @@ logger = logging.getLogger(__name__)
 
 class WeChatAlertChannel:
     """Server酱微信推送"""
-    def __init__(self, sendkey: str):
-        self.url = f"https://sctapi.ftqq.com/{sendkey}.send"
+    def __init__(self, sendkey: str = ''):
+        self.sendkey = sendkey
+        self.url = f"https://sctapi.ftqq.com/{sendkey}.send" if sendkey else None
 
     async def send(self, title: str, content: str):
+        if not self.url:
+            logger.warning("微信告警未配置 sendkey，跳过发送")
+            return
         async with aiohttp.ClientSession() as s:
-            await s.post(self.url, data={"title": title, "desp": content})
+            resp = await s.post(self.url, data={"title": title, "desp": content}, timeout=aiohttp.ClientTimeout(total=10))
+            if resp.status != 200:
+                logger.warning(f"Server酱推送失败: HTTP {resp.status}")
 
 
 class EmailAlertChannel:
-    """邮件告警渠道"""
-    def __init__(self, to_addr: str, mail=None):
+    """SMTP 邮件告警（使用 Python 内置 smtplib）"""
+    def __init__(self, to_addr: str = '', smtp_host: str = '', smtp_port: int = 587,
+                 smtp_user: str = '', smtp_password: str = '', smtp_use_tls: bool = True,
+                 from_addr: str = ''):
         self.to_addr = to_addr
-        self.mail = mail
+        self.smtp_host = smtp_host
+        self.smtp_port = smtp_port
+        self.smtp_user = smtp_user
+        self.smtp_password = smtp_password
+        self.smtp_use_tls = smtp_use_tls
+        self.from_addr = from_addr or smtp_user
 
     async def send(self, title: str, content: str):
-        if not self.mail:
+        if not self.smtp_host or not self.to_addr:
+            logger.warning("邮件告警未配置 SMTP 或收件人，跳过发送")
             return
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._sync_send, title, content)
 
     def _sync_send(self, title, content):
-        from flask import current_app
-        with current_app.app_context():
-            self.mail.send_message(subject=f"[WebRouter告警] {title}",
-                                   recipients=[self.to_addr], body=content)
+        msg = MIMEText(content, 'plain', 'utf-8')
+        msg['Subject'] = f'[WebRouter告警] {title}'
+        msg['From'] = self.from_addr
+        msg['To'] = self.to_addr
+
+        try:
+            if self.smtp_port == 465:
+                server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=15)
+            else:
+                server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15)
+                server.ehlo()
+                server.starttls()
+
+            if self.smtp_user and self.smtp_password:
+                server.login(self.smtp_user, self.smtp_password)
+
+            server.sendmail(self.from_addr, self.to_addr.split(','), msg.as_string())
+            server.quit()
+            logger.info(f"邮件告警已发送: to={self.to_addr}")
+        except Exception as e:
+            logger.error(f"邮件告警发送失败: {e}")
 
 
 class WebhookAlertChannel:
@@ -82,7 +114,12 @@ class AlertEngine:
         self._cooldown[rule_id] = time.time()
 
     def _build_channels(self, names: list[str], cfg: dict):
-        return [CHANNEL_MAP[n](**cfg.get(n, {})) for n in names if n in CHANNEL_MAP]
+        channels = []
+        for n in names:
+            cls = CHANNEL_MAP.get(n)
+            if cls:
+                channels.append(cls(**cfg.get(n, {})))
+        return channels
 
     def evaluate_event(self, event: dict, channel_config: dict | None = None):
         """评估事件，返回触发规则ID列表"""

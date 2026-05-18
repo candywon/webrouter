@@ -41,6 +41,7 @@ class BaseProviderAdapter:
         }
 
         url = f"{self.base_url}{endpoint}"
+        logger.info(f"[{self.provider.get('name')}] Request URL: {url}")
         default_headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
@@ -127,16 +128,23 @@ class DirectProviderAdapter(BaseProviderAdapter):
         provider_models = self.get_models()
         if provider_models:
             body['model'] = provider_models[0]
-
-        # 智能去重：如果 base_url 路径已包含 endpoint 前缀，则去掉重复部分
-        # 例：base_url=.../compatible-mode/v1 + endpoint=/compatible-mode/v1/chat/completions
+        # 智能去重：如果 base_url 路径已包含 endpoint 的前缀，则去掉重复部分
+        # 例1：base_url=.../compatible-mode/v1 + endpoint=/compatible-mode/v1/chat/completions
+        #   → 实际 endpoint=/chat/completions
+        # 例2：base_url=.../v1 + endpoint=/v1/chat/completions
         #   → 实际 endpoint=/chat/completions
         endpoint = config['endpoint']
-        base_path = parsed.path.rstrip('/') if parsed.path else ''
-        if base_path and endpoint.startswith(base_path):
-            endpoint = endpoint[len(base_path):]
-            if not endpoint.startswith('/'):
-                endpoint = '/' + endpoint
+        base_path = parsed.path.strip('/') if parsed.path else ''
+        if base_path:
+            full_prefix = '/' + base_path + '/'
+            if endpoint.startswith(full_prefix):
+                endpoint = endpoint[len(base_path) + 1:]
+                if not endpoint.startswith('/'):
+                    endpoint = '/' + endpoint
+            elif base_path.endswith('/v1') and endpoint.startswith('/v1/'):
+                endpoint = endpoint[3:]
+                if not endpoint.startswith('/'):
+                    endpoint = '/' + endpoint
 
         headers = config.get('headers_extra', {})
         return self._send_test_request(endpoint, body, headers=headers)

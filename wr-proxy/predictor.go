@@ -32,7 +32,11 @@ func (pr *Predictor) PredictExhaustion(provider *Provider) *QuotaPrediction {
 	ratio := provider.QuotaRatio()
 
 	// 从 DB 取近 7 天每日用量
-	dailyCosts := pr.getDailyCosts(provider.ID, pr.cfg.PredictionDays)
+	days := cfg.PredictionDays
+	if days <= 0 {
+		days = 7
+	}
+	dailyCosts := pr.getDailyCosts(provider.ID, days)
 
 	// 计算日均消耗
 	burnRate := pr.calculateBurnRate(dailyCosts)
@@ -159,23 +163,31 @@ func (pr *Predictor) detectTrend(dailyCosts []float64) string {
 
 // alertLevel 判定预警级别
 func (pr *Predictor) alertLevel(quotaRatio float64, daysUntil float64) string {
+	criticalThreshold := cfg.QuotaCriticalThreshold
+	warnThreshold := cfg.QuotaWarnThreshold
+	if criticalThreshold <= 0 {
+		criticalThreshold = 0.05
+	}
+	if warnThreshold <= 0 {
+		warnThreshold = 0.2
+	}
 	switch {
 	case quotaRatio <= 0:
-		return "black"   // 已耗尽
-	case quotaRatio < pr.cfg.QuotaCriticalThreshold:
-		return "red"     // 紧急
+		return "black"
+	case quotaRatio < criticalThreshold:
+		return "red"
 	case daysUntil < 1:
-		return "red"     // 24小时内耗尽
-	case quotaRatio < pr.cfg.QuotaWarnThreshold:
-		return "orange"  // 警告
+		return "red"
+	case quotaRatio < warnThreshold:
+		return "orange"
 	case daysUntil < 3:
-		return "orange"  // 3天内耗尽
+		return "orange"
 	case quotaRatio < 0.5:
-		return "yellow"  // 关注
+		return "yellow"
 	case daysUntil < 7:
-		return "yellow"  // 7天内耗尽
+		return "yellow"
 	default:
-		return "green"   // 正常
+		return "green"
 	}
 }
 

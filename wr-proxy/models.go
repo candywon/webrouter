@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -181,6 +182,7 @@ type RequestLog struct {
 	Endpoint      string    `json:"endpoint"`
 	InputTokens   int64     `json:"input_tokens"`
 	OutputTokens  int64     `json:"output_tokens"`
+	CachedTokens  int64     `json:"cached_tokens"`
 	StatusCode    int       `json:"status_code"`
 	LatencyMs     int       `json:"latency_ms"`
 	CostCents     int64     `json:"cost_cents"`
@@ -206,10 +208,72 @@ type QuotaPrediction struct {
 
 // --- 辅助函数 ---
 
+// ResolveModelAlias 将短别名解析为完整模型名
+// 1. 精确匹配别名表（qwen-plus → qwen-plus-2025-07-28）
+// 2. 前缀匹配兜底（gpt-4o → gpt-4o-2024-05-13，如果别名表中没有的话）
+func ResolveModelAlias(model string) (string, bool) {
+	if model == "" {
+		return "", false
+	}
+
+	// 1. 精确匹配别名表
+	modelAliasMutex.RLock()
+	target, ok := modelAliasMap[model]
+	modelAliasMutex.RUnlock()
+	if ok {
+		return target, true
+	}
+
+	// 2. 前缀匹配：用模型列表中某个以 model 为前缀的完整名
+	return "", false
+}
+
+// ResolveModelWithPrefix 尝试前缀匹配：从 modelsJSON 中找以 model 开头的模型
+func ResolveModelWithPrefix(model string, modelsJSON string) (string, bool) {
+	if model == "" || modelsJSON == "" {
+		return "", false
+	}
+
+	// 先尝试从别名表解析
+	modelAliasMutex.RLock()
+	target, ok := modelAliasMap[model]
+	modelAliasMutex.RUnlock()
+	if ok {
+		return target, true
+	}
+
+	// 前缀匹配：解析 modelsJSON 中的每个模型，找以 model 为前缀的
+	models := parseModelsList(modelsJSON)
+	prefix := model + "-"
+	for _, m := range models {
+		if strings.HasPrefix(m, prefix) {
+			return m, true
+		}
+	}
+	return "", false
+}
+
 func modelInList(model, modelsJSON string) bool {
-	// 简单的字符串匹配，避免每个请求都 JSON parse
-	// 匹配 "gpt-4o" 在 ["gpt-4o","claude-3"] 中
-	return containsJSONString(modelsJSON, model)
+	// 1. 精确匹配
+	if containsJSONString(modelsJSON, model) {
+		return true
+	}
+	// 2. 别名表映射后精确匹配
+	modelAliasMutex.RLock()
+	target, ok := modelAliasMap[model]
+	modelAliasMutex.RUnlock()
+	if ok && containsJSONString(modelsJSON, target) {
+		return true
+	}
+	// 3. 前缀匹配：qwen-plus 匹配 qwen-plus-2025-07-28
+	models := parseModelsList(modelsJSON)
+	prefix := model + "-"
+	for _, m := range models {
+		if strings.HasPrefix(m, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func intInList(id int, listJSON string) bool {

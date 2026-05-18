@@ -24,29 +24,31 @@ const (
 
 // ModelGrade 模型分级定义
 type ModelGrade struct {
-	Model   string
-	Tier    ModelTier
-	CostIdx float64 // 相对成本指数，economy=1.0
+	Model       string
+	Tier        ModelTier
+	CostIdx     float64 // 相对成本指数，economy=1.0
+	Vendor      string
+	Description string
+	SortOrder   int
 }
 
-// modelGrades 模型分级表（从 DB/配置加载，此处为默认值）
-// 按成本从低到高排列
-var modelGrades = []ModelGrade{
-	// economy
-	{"qwen3-coder-flash", TierEconomy, 1.0},
-	{"qwen-turbo", TierEconomy, 1.0},
-	{"gpt-4o-mini", TierEconomy, 1.5},
-	// standard
-	{"qwen-plus-2025-07-28", TierStandard, 3.0},
-	{"qwen-plus", TierStandard, 3.0},
-	{"gpt-4o", TierStandard, 5.0},
-	{"deepseek-chat", TierStandard, 2.0},
-	// premium
-	{"qwen3.6-plus", TierPremium, 8.0},
-	{"qwen-max", TierPremium, 10.0},
-	{"o1", TierPremium, 15.0},
-	{"o1-mini", TierPremium, 8.0},
-	{"claude-sonnet-4", TierPremium, 12.0},
+// modelGrades 模型分级表（运行时从 DB 动态加载，可热刷新）
+// 按 sort_order 从低到高排列
+var modelGrades []ModelGrade
+
+// RefreshModelGrades 从 DB 重新加载模型分级（热刷新，由 /admin/reload_model_grades 触发）
+func RefreshModelGrades() error {
+	grades, err := LoadModelGrades()
+	if err != nil {
+		return err
+	}
+	if len(grades) == 0 {
+		LogWarn("RefreshModelGrades: DB returned no grades, keeping existing")
+		return nil
+	}
+	modelGrades = grades
+	LogInfo("RefreshModelGrades: %d model grades loaded from DB", len(grades))
+	return nil
 }
 
 // ── 复杂度评估 ──
@@ -71,6 +73,208 @@ type ComplexityScore struct {
 	HasTools   bool
 }
 
+// ── 六维度复杂度配置 ──
+
+// ComplexityConfig 六维度复杂度评估配置（从 DB 加载）
+type ComplexityConfig struct {
+	SimpleMax  float64
+	ModerateMax float64
+
+	InputLengthEnabled bool
+	InputLengthLevels  []struct {
+		MaxChars int
+		Score    float64
+	}
+
+	MultiTurnEnabled bool
+	MultiTurnLevels  []struct {
+		MaxMsgs int
+		Score   float64
+	}
+
+	CodeDetectionEnabled bool
+	CodeDetectionScore   float64
+	CodeKeywords         []string
+
+	ToolsDetectionEnabled bool
+	ToolsScore            float64
+	FunctionsScore        float64
+
+	ReasoningEnabled bool
+	ReasoningScore   float64
+	ReasoningKeywords []string
+
+	SystemPromptEnabled  bool
+	SystemPromptThreshold int
+	SystemPromptScore     float64
+}
+
+// complexityConfig 全局复杂度配置（运行时加载）
+var complexityConfig ComplexityConfig
+
+// LoadComplexityConfig 从 DB 加载六维度复杂度配置
+func LoadComplexityConfig() {
+	v := LoadSetting("smart_complexity_config", nil)
+	if v == nil {
+		LogWarn("LoadComplexityConfig: no config in DB, using defaults")
+		setDefaultComplexityConfig()
+		return
+	}
+
+	raw, err := json.Marshal(v)
+	if err != nil {
+		LogError("LoadComplexityConfig: marshal error: %v, using defaults", err)
+		setDefaultComplexityConfig()
+		return
+	}
+
+	var cfg struct {
+		TierThresholds struct {
+			SimpleMax  float64 `json:"simple_max"`
+			ModerateMax float64 `json:"moderate_max"`
+		} `json:"tier_thresholds"`
+		InputLength struct {
+			Enabled bool `json:"enabled"`
+			Levels  []struct {
+				MaxChars float64 `json:"max_chars"`
+				Score    float64 `json:"score"`
+			} `json:"levels"`
+		} `json:"input_length"`
+		MultiTurn struct {
+			Enabled bool `json:"enabled"`
+			Levels  []struct {
+				MaxMsgs float64 `json:"max_msgs"`
+				Score   float64 `json:"score"`
+			} `json:"levels"`
+		} `json:"multi_turn"`
+		CodeDetection struct {
+			Enabled  bool     `json:"enabled"`
+			Score    float64  `json:"score"`
+			Keywords []string `json:"keywords"`
+		} `json:"code_detection"`
+		ToolsDetection struct {
+			Enabled    bool    `json:"enabled"`
+			ToolsScore float64 `json:"tools_score"`
+			FuncsScore float64 `json:"functions_score"`
+		} `json:"tools_detection"`
+		Reasoning struct {
+			Enabled  bool     `json:"enabled"`
+			Score    float64  `json:"score"`
+			Keywords []string `json:"keywords"`
+		} `json:"reasoning_keywords"`
+		SystemPrompt struct {
+			Enabled    bool    `json:"enabled"`
+			MaxChars   float64 `json:"threshold_chars"`
+			Score      float64 `json:"score"`
+		} `json:"system_prompt"`
+	}
+
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		LogError("LoadComplexityConfig: unmarshal error: %v, using defaults", err)
+		setDefaultComplexityConfig()
+		return
+	}
+
+	complexityConfig = ComplexityConfig{
+		SimpleMax:   cfg.TierThresholds.SimpleMax,
+		ModerateMax: cfg.TierThresholds.ModerateMax,
+	}
+
+	if cfg.InputLength.Enabled && len(cfg.InputLength.Levels) > 0 {
+		complexityConfig.InputLengthEnabled = true
+		for _, l := range cfg.InputLength.Levels {
+			complexityConfig.InputLengthLevels = append(complexityConfig.InputLengthLevels, struct {
+				MaxChars int
+				Score    float64
+			}{MaxChars: int(l.MaxChars), Score: l.Score})
+		}
+	}
+
+	if cfg.MultiTurn.Enabled && len(cfg.MultiTurn.Levels) > 0 {
+		complexityConfig.MultiTurnEnabled = true
+		for _, l := range cfg.MultiTurn.Levels {
+			complexityConfig.MultiTurnLevels = append(complexityConfig.MultiTurnLevels, struct {
+				MaxMsgs int
+				Score   float64
+			}{MaxMsgs: int(l.MaxMsgs), Score: l.Score})
+		}
+	}
+
+	if cfg.CodeDetection.Enabled {
+		complexityConfig.CodeDetectionEnabled = true
+		complexityConfig.CodeDetectionScore = cfg.CodeDetection.Score
+		complexityConfig.CodeKeywords = cfg.CodeDetection.Keywords
+	}
+
+	if cfg.ToolsDetection.Enabled {
+		complexityConfig.ToolsDetectionEnabled = true
+		complexityConfig.ToolsScore = cfg.ToolsDetection.ToolsScore
+		complexityConfig.FunctionsScore = cfg.ToolsDetection.FuncsScore
+	}
+
+	if cfg.Reasoning.Enabled {
+		complexityConfig.ReasoningEnabled = true
+		complexityConfig.ReasoningScore = cfg.Reasoning.Score
+		complexityConfig.ReasoningKeywords = cfg.Reasoning.Keywords
+	}
+
+	if cfg.SystemPrompt.Enabled {
+		complexityConfig.SystemPromptEnabled = true
+		complexityConfig.SystemPromptThreshold = int(cfg.SystemPrompt.MaxChars)
+		complexityConfig.SystemPromptScore = cfg.SystemPrompt.Score
+	}
+
+	LogInfo("LoadComplexityConfig: loaded %d input_length levels, %d multi_turn levels, code=%v, tools=%v, reasoning=%v, system_prompt=%v",
+		len(complexityConfig.InputLengthLevels), len(complexityConfig.MultiTurnLevels),
+		complexityConfig.CodeDetectionEnabled, complexityConfig.ToolsDetectionEnabled,
+		complexityConfig.ReasoningEnabled, complexityConfig.SystemPromptEnabled)
+}
+
+// ReloadComplexityConfig 热刷新复杂度配置（由 reload 调用）
+func ReloadComplexityConfig() {
+	LoadComplexityConfig()
+}
+
+// setDefaultComplexityConfig 设置内置默认值（DB 无配置时的兜底）
+func setDefaultComplexityConfig() {
+	complexityConfig = ComplexityConfig{
+		SimpleMax:   0.20,
+		ModerateMax: 0.45,
+		InputLengthEnabled: true,
+		InputLengthLevels: []struct {
+			MaxChars int
+			Score    float64
+		}{
+			{200, 0.05}, {800, 0.12}, {2000, 0.20}, {0, 0.30},
+		},
+		MultiTurnEnabled: true,
+		MultiTurnLevels: []struct {
+			MaxMsgs int
+			Score   float64
+		}{
+			{2, 0.0}, {5, 0.08}, {10, 0.15}, {0, 0.20},
+		},
+		CodeDetectionEnabled: true,
+		CodeDetectionScore:   0.15,
+		CodeKeywords:         []string{"```", "def ", "function ", "class ", "import ", "return "},
+		ToolsDetectionEnabled: true,
+		ToolsScore:            0.20,
+		FunctionsScore:        0.15,
+		ReasoningEnabled:     true,
+		ReasoningScore:       0.12,
+		ReasoningKeywords: []string{
+			"分析", "推理", "证明", "计算", "推导",
+			"explain", "analyze", "reason", "prove", "calculate",
+			"derive", "compare", "evaluate", "critique",
+			"为什么", "原因", "原理", "逻辑",
+			"步骤", "方案", "策略", "设计",
+		},
+		SystemPromptEnabled:   true,
+		SystemPromptThreshold: 500,
+		SystemPromptScore:     0.08,
+	}
+}
+
 // EvalComplexity 评估请求内容的复杂度
 func EvalComplexity(body []byte) ComplexityScore {
 	var req map[string]interface{}
@@ -81,6 +285,7 @@ func EvalComplexity(body []byte) ComplexityScore {
 	score := ComplexityScore{
 		Reasons: make([]string, 0),
 	}
+	cfg := &complexityConfig
 
 	// ── 1. 输入长度 ──
 	totalChars := 0
@@ -97,108 +302,110 @@ func EvalComplexity(body []byte) ComplexityScore {
 	}
 	score.InputChars = totalChars
 
-	// 字数评分：0~0.3
-	charScore := 0.0
-	switch {
-	case totalChars < 200:
-		charScore = 0.05
-	case totalChars < 800:
-		charScore = 0.12
-	case totalChars < 2000:
-		charScore = 0.20
-	default:
-		charScore = 0.30
-	}
-	if totalChars > 200 {
-		score.Reasons = append(score.Reasons, "long_input")
+	// 字数评分
+	lengthScore := 0.0
+	if cfg.InputLengthEnabled {
+		for _, level := range cfg.InputLengthLevels {
+			if level.MaxChars == 0 || totalChars < level.MaxChars {
+				lengthScore = level.Score
+				break
+			}
+		}
+		if totalChars > 200 {
+			score.Reasons = append(score.Reasons, "long_input")
+		}
+	} else {
+		lengthScore = 0.0
 	}
 
 	// ── 2. 多轮对话 ──
 	msgScore := 0.0
-	switch {
-	case score.MsgCount <= 2:
+	if cfg.MultiTurnEnabled {
+		for _, level := range cfg.MultiTurnLevels {
+			if level.MaxMsgs == 0 || score.MsgCount <= level.MaxMsgs {
+				msgScore = level.Score
+				break
+			}
+		}
+		if score.MsgCount > 3 {
+			score.Reasons = append(score.Reasons, "multi_turn")
+		}
+	} else {
 		msgScore = 0.0
-	case score.MsgCount <= 5:
-		msgScore = 0.08
-	case score.MsgCount <= 10:
-		msgScore = 0.15
-	default:
-		msgScore = 0.20
-	}
-	if score.MsgCount > 3 {
-		score.Reasons = append(score.Reasons, "multi_turn")
 	}
 
 	// ── 3. 代码检测 ──
 	codeScore := 0.0
 	fullContent := extractAllContent(messages)
-	if strings.Contains(fullContent, "```") || strings.Contains(fullContent, "def ") ||
-		strings.Contains(fullContent, "function ") || strings.Contains(fullContent, "class ") ||
-		strings.Contains(fullContent, "import ") || strings.Contains(fullContent, "return ") {
-		codeScore = 0.15
-		score.HasCode = true
-		score.Reasons = append(score.Reasons, "has_code")
+	if cfg.CodeDetectionEnabled {
+		for _, kw := range cfg.CodeKeywords {
+			if strings.Contains(fullContent, kw) {
+				codeScore = cfg.CodeDetectionScore
+				score.HasCode = true
+				score.Reasons = append(score.Reasons, "has_code")
+				break
+			}
+		}
 	}
 
 	// ── 4. Tools / Function Calling ──
 	toolsScore := 0.0
-	if _, hasTools := req["tools"]; hasTools {
-		toolsScore = 0.20
-		score.HasTools = true
-		score.Reasons = append(score.Reasons, "has_tools")
-	}
-	if _, hasFunc := req["functions"]; hasFunc {
-		toolsScore = math.Max(toolsScore, 0.15)
-		score.HasTools = true
-		score.Reasons = append(score.Reasons, "has_functions")
+	if cfg.ToolsDetectionEnabled {
+		if _, hasTools := req["tools"]; hasTools {
+			toolsScore = cfg.ToolsScore
+			score.HasTools = true
+			score.Reasons = append(score.Reasons, "has_tools")
+		}
+		if _, hasFunc := req["functions"]; hasFunc {
+			toolsScore = math.Max(toolsScore, cfg.FunctionsScore)
+			score.HasTools = true
+			score.Reasons = append(score.Reasons, "has_functions")
+		}
 	}
 
 	// ── 5. 推理/分析关键词 ──
 	reasonScore := 0.0
-	reasonKeywords := []string{
-		"分析", "推理", "证明", "计算", "推导",
-		"explain", "analyze", "reason", "prove", "calculate",
-		"derive", "compare", "evaluate", "critique",
-		"为什么", "原因", "原理", "逻辑",
-		"步骤", "方案", "策略", "设计",
-	}
-	lastMsg := extractLastUserContent(messages)
-	lowerLast := strings.ToLower(lastMsg)
-	for _, kw := range reasonKeywords {
-		if strings.Contains(lowerLast, kw) {
-			reasonScore = 0.12
-			score.Reasons = append(score.Reasons, "reasoning_keyword")
-			break
+	if cfg.ReasoningEnabled {
+		lastMsg := extractLastUserContent(messages)
+		lowerLast := strings.ToLower(lastMsg)
+		for _, kw := range cfg.ReasoningKeywords {
+			if strings.Contains(lowerLast, kw) {
+				reasonScore = cfg.ReasoningScore
+				score.Reasons = append(score.Reasons, "reasoning_keyword")
+				break
+			}
 		}
 	}
 
 	// ── 6. System Prompt 复杂度 ──
 	sysScore := 0.0
-	for _, m := range messages {
-		msg, ok := m.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		if role == "system" {
-			content, _ := msg["content"].(string)
-			if utf8.RuneCountInString(content) > 500 {
-				sysScore = 0.08
-				score.Reasons = append(score.Reasons, "complex_system_prompt")
+	if cfg.SystemPromptEnabled {
+		for _, m := range messages {
+			msg, ok := m.(map[string]interface{})
+			if !ok {
+				continue
 			}
-			break
+			role, _ := msg["role"].(string)
+			if role == "system" {
+				content, _ := msg["content"].(string)
+				if utf8.RuneCountInString(content) > cfg.SystemPromptThreshold {
+					sysScore = cfg.SystemPromptScore
+					score.Reasons = append(score.Reasons, "complex_system_prompt")
+				}
+				break
+			}
 		}
 	}
 
 	// ── 汇总 ──
-	total := charScore + msgScore + codeScore + toolsScore + reasonScore + sysScore
+	total := lengthScore + msgScore + codeScore + toolsScore + reasonScore + sysScore
 	total = math.Min(total, 1.0)
 	score.Score = total
 
 	switch {
-	case total < 0.20:
+	case total < cfg.SimpleMax:
 		score.Level = ComplexitySimple
-	case total < 0.45:
+	case total < cfg.ModerateMax:
 		score.Level = ComplexityModerate
 	default:
 		score.Level = ComplexityComplex

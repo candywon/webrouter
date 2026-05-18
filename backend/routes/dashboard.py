@@ -104,14 +104,14 @@ def trends():
     })
 
 
-@dashboard_bp.route('/providers')
-def providers():
-    """Provider 列表 + 健康状态 + 额度"""
+@dashboard_bp.route('/channels')
+def channels():
+    """Provider 列表 + 健康状态 + 额度（兼容前端 channels 字段名）"""
     from routes.providers import _provider_full_dict
 
     provider_list = Provider.query.order_by(Provider.priority.desc(), Provider.id.asc()).all()
     return jsonify({
-        'providers': [_provider_full_dict(p) for p in provider_list],
+        'channels': [_provider_full_dict(p) for p in provider_list],
     })
 
 
@@ -169,5 +169,123 @@ def top_models():
             'cost_cents': r.cost_cents,
             'cost_yuan': round(r.cost_cents / 100, 2),
             'avg_latency_ms': round(r.avg_latency or 0, 1),
+        } for r in stats],
+    })
+
+
+@dashboard_bp.route('/cache-hit-rate')
+def cache_hit_rate():
+    """Prompt Cache 命中率统计（按模型/时间段）
+
+    upstream 返回 cached_tokens > 0 表示命中了上游 prompt cache。
+    cache_hit_rate = cached_tokens / (input_tokens + cached_tokens)
+    """
+    hours = req.args.get('hours', 24, type=int)
+    group_by = req.args.get('group_by', 'model')  # 'model' 或 'provider'
+
+    if group_by == 'provider':
+        stats = db.session.query(
+            RequestLog.provider_id,
+            RequestLog.provider_name,
+            func.count(RequestLog.id).label('requests'),
+            func.coalesce(func.sum(RequestLog.input_tokens), 0).label('input_tokens'),
+            func.coalesce(func.sum(RequestLog.cached_tokens), 0).label('cached_tokens'),
+        ).filter(
+            RequestLog.created_at >= func.datetime('now', f'-{hours} hours'),
+            RequestLog.cached_tokens > 0,
+        ).group_by(RequestLog.provider_id, RequestLog.provider_name).order_by(
+            func.sum(RequestLog.cached_tokens).desc()
+        ).all()
+
+        return jsonify({
+            'hours': hours,
+            'group_by': 'provider',
+            'data': [{
+                'provider_id': r.provider_id,
+                'provider_name': r.provider_name,
+                'requests': r.requests,
+                'input_tokens': r.input_tokens,
+                'cached_tokens': r.cached_tokens,
+                'hit_rate': round(r.cached_tokens / max(r.input_tokens + r.cached_tokens, 1) * 100, 2),
+            } for r in stats],
+        })
+    else:
+        # 按模型分组
+        stats = db.session.query(
+            RequestLog.model_name,
+            func.count(RequestLog.id).label('requests'),
+            func.coalesce(func.sum(RequestLog.input_tokens), 0).label('input_tokens'),
+            func.coalesce(func.sum(RequestLog.cached_tokens), 0).label('cached_tokens'),
+        ).filter(
+            RequestLog.created_at >= func.datetime('now', f'-{hours} hours'),
+            RequestLog.cached_tokens > 0,
+        ).group_by(RequestLog.model_name).order_by(
+            func.sum(RequestLog.cached_tokens).desc()
+        ).all()
+
+        # 总体汇总
+        total = db.session.query(
+            func.count(RequestLog.id).label('requests'),
+            func.coalesce(func.sum(RequestLog.input_tokens), 0).label('input_tokens'),
+            func.coalesce(func.sum(RequestLog.cached_tokens), 0).label('cached_tokens'),
+        ).filter(
+            RequestLog.created_at >= func.datetime('now', f'-{hours} hours'),
+            RequestLog.cached_tokens > 0,
+        ).first()
+
+        return jsonify({
+            'hours': hours,
+            'group_by': 'model',
+            'total': {
+                'requests': total.requests or 0,
+                'input_tokens': total.input_tokens or 0,
+                'cached_tokens': total.cached_tokens or 0,
+                'hit_rate': round((total.cached_tokens or 0) / max((total.input_tokens or 0) + (total.cached_tokens or 0), 1) * 100, 2),
+            },
+            'data': [{
+                'model': r.model_name,
+                'requests': r.requests,
+                'input_tokens': r.input_tokens,
+                'cached_tokens': r.cached_tokens,
+                'hit_rate': round(r.cached_tokens / max(r.input_tokens + r.cached_tokens, 1) * 100, 2),
+            } for r in stats],
+        })
+
+
+@dashboard_bp.route('/cache-hit-trend')
+def cache_hit_trend():
+    """Prompt Cache 命中率时序数据（按小时/天聚合，用于折线图）"""
+    hours = req.args.get('hours', 24, type=int)
+    model = req.args.get('model', '')
+
+    # 根据时间范围选择聚合粒度
+    if hours <= 24:
+        time_col = func.strftime('%H:00', RequestLog.created_at).label('time_slot')
+    else:
+        time_col = func.date(RequestLog.created_at).label('time_slot')
+
+    query = db.session.query(
+        time_col,
+        func.count(RequestLog.id).label('requests'),
+        func.coalesce(func.sum(RequestLog.input_tokens), 0).label('input_tokens'),
+        func.coalesce(func.sum(RequestLog.cached_tokens), 0).label('cached_tokens'),
+    ).filter(
+        RequestLog.created_at >= func.datetime('now', f'-{hours} hours'),
+        RequestLog.cached_tokens > 0,
+    )
+    if model:
+        query = query.filter(RequestLog.model_name == model)
+
+    stats = query.group_by(time_col).order_by(time_col).all()
+
+    return jsonify({
+        'hours': hours,
+        'model': model or 'all',
+        'data': [{
+            'time_slot': str(r.time_slot),
+            'requests': r.requests,
+            'input_tokens': r.input_tokens,
+            'cached_tokens': r.cached_tokens,
+            'hit_rate': round(r.cached_tokens / max(r.input_tokens + r.cached_tokens, 1) * 100, 2),
         } for r in stats],
     })

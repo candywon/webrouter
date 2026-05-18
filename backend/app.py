@@ -33,6 +33,8 @@ def create_app(config_class=None):
     from routes.pricing import pricing_bp     # 模型定价管理
     from routes.channel import channel_bp    # Provider 渠道管理
     from routes.desensitize import desensitize_bp  # 脱敏规则管理
+    from routes.modelgrades import modelgrades_bp  # 模型分级管理
+    from routes.modelaliases import modelaliases_bp  # 模型别名管理
 
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(providers_bp, url_prefix='/api/providers')
@@ -46,6 +48,8 @@ def create_app(config_class=None):
     app.register_blueprint(pricing_bp, url_prefix='/api/pricing')
     app.register_blueprint(channel_bp, url_prefix='/api/providers')
     app.register_blueprint(desensitize_bp, url_prefix='/api/desensitize')
+    app.register_blueprint(modelgrades_bp, url_prefix='/api/modelgrades')
+    app.register_blueprint(modelaliases_bp, url_prefix='/api/modelaliases')
 
     # 根路径返回前端页面
     @app.route('/')
@@ -62,15 +66,25 @@ def create_app(config_class=None):
         from models.wr_models import (  # noqa: F401
             WRToken, ProviderExt, ProviderQuota, RequestLog,
             AlertRule, AlertHistory, ChannelHealth, TeamQuota,
+            SystemSetting, ModelGrade, ModelAlias,
         )
         from models.provider import Provider  # noqa: F401
         db.create_all()
 
         # 初始化种子数据（仅首次建表）
-        from models.wr_models import ModelPricing
-        count = ModelPricing.seed_defaults()
-        if count:
-            app.logger.info(f'定价种子数据已初始化: {count} 条')
+        from models.wr_models import ModelPricing, SystemSetting, ModelGrade
+        count1 = ModelPricing.seed_defaults()
+        if count1:
+            app.logger.info(f'定价种子数据已初始化: {count1} 条')
+        count2 = SystemSetting.seed_defaults()
+        if count2:
+            app.logger.info(f'系统设置种子数据已初始化: {count2} 条')
+        count3 = ModelGrade.seed_defaults()
+        if count3:
+            app.logger.info(f'模型分级种子数据已初始化: {count3} 条')
+        count4 = ModelAlias.seed_defaults()
+        if count4:
+            app.logger.info(f'模型别名种子数据已初始化: {count4} 条')
 
     # 启动定时任务
     _init_schedulers(app)
@@ -133,13 +147,33 @@ def _scheduled_alert_evaluate(app):
     with app.app_context():
         try:
             from services.alert_engine import AlertEngine
-            from models.wr_models import ChannelHealth, AlertRule
+            from models.wr_models import ChannelHealth, AlertRule, SystemSetting
             from extensions import db
 
             if AlertRule.query.filter_by(enabled=True).count() == 0:
                 return
 
             engine = AlertEngine(app=app)
+
+            # 读取告警通道配置
+            channel_config = {}
+            wechat_sendkey = SystemSetting.get('alert_wechat_sendkey', '')
+            if wechat_sendkey:
+                channel_config['wechat'] = {'sendkey': wechat_sendkey}
+
+            smtp_host = SystemSetting.get('alert_smtp_host', '')
+            email_to = SystemSetting.get('alert_email_to', '')
+            smtp_port = SystemSetting.get('alert_smtp_port', 587)
+            if smtp_host and email_to:
+                channel_config['email'] = {
+                    'to_addr': email_to,
+                    'smtp_host': smtp_host,
+                    'smtp_port': smtp_port,
+                    'smtp_user': SystemSetting.get('alert_smtp_user', ''),
+                    'smtp_password': SystemSetting.get('alert_smtp_password', ''),
+                    'smtp_use_tls': smtp_port != 465,
+                    'from_addr': SystemSetting.get('alert_smtp_from', ''),
+                }
 
             latest = db.session.query(ChannelHealth).order_by(
                 ChannelHealth.checked_at.desc()
@@ -152,7 +186,7 @@ def _scheduled_alert_evaluate(app):
                         'provider_id': h.provider_id,
                         'status': 'failed',
                     }
-                    engine.evaluate_event(event)
+                    engine.evaluate_event(event, channel_config=channel_config)
 
         except Exception as e:
             app.logger.error(f'告警评估失败: {e}')

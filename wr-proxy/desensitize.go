@@ -67,9 +67,8 @@ var builtinPatterns = []struct {
 	// 邮箱
 	{category: "EMAIL", pattern: `[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`},
 	// 中国手机号：1开头11位 — 必须在身份证之后
-	// 由于 Go regexp 不支持 lookbehind，手机号匹配后在 desensitizeText 中
-	// 通过检查已被替换的位置来避免重复匹配身份证号的子串
-	{category: "PHONE", pattern: `1[3-9]\d{9}`},
+	// 加 \b 避免嵌入长数字串时被误匹配（如 913812345678）
+	{category: "PHONE", pattern: `\b1[3-9]\d{9}\b`},
 	// IPv4地址（排除127.0.0.1等保留地址）
 	{category: "IP", pattern: `\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b`},
 }

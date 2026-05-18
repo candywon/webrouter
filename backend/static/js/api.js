@@ -14,7 +14,14 @@ const API = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!resp.ok) throw new Error(`API Error: ${resp.status}`);
+    if (!resp.ok) {
+      let msg = `API Error: ${resp.status}`;
+      try {
+        const body = await resp.json();
+        msg = body.error || body.message || msg;
+      } catch (_) { /* ignore */ }
+      throw new Error(msg);
+    }
     return resp.json();
   },
 

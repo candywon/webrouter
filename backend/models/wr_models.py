@@ -6,6 +6,44 @@ from datetime import datetime
 
 
 # ============================================================
+#  Org — 组织架构（企业/部门/小组）
+# ============================================================
+
+class Org(db.Model):
+    """组织架构 — 树形结构，支持企业 → 部门 → 小组"""
+    __tablename__ = 'wr_orgs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)           # 组织名称
+    org_type = db.Column(db.String(20), nullable=False, default='department')  # company/department/group
+    parent_id = db.Column(db.Integer, db.ForeignKey('wr_orgs.id'), nullable=True, index=True)  # 父组织
+    quota_total = db.Column(db.BigInteger, default=0)          # 组织总额度（分），0=不限
+    quota_used = db.Column(db.BigInteger, default=0)           # 已用额度（汇总）
+    quota_period = db.Column(db.String(20), default='monthly') # monthly/yearly/none
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    children = db.relationship('Org', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')
+    members = db.relationship('WRToken', backref='org', lazy='dynamic', foreign_keys='WRToken.org_id')
+
+    def to_dict(self, member_count=None):
+        d = {
+            'id': self.id,
+            'name': self.name,
+            'org_type': self.org_type,
+            'parent_id': self.parent_id,
+            'quota_total': self.quota_total,
+            'quota_used': self.quota_used,
+            'quota_period': self.quota_period,
+            'enabled': self.enabled,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if member_count is not None:
+            d['member_count'] = member_count
+        return d
+
+
+# ============================================================
 #  WR Token — 对外 API Key（核心管控单元）
 # ============================================================
 
@@ -16,7 +54,8 @@ class WRToken(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)         # Token 名称（如"张三-研发部"）
     key = db.Column(db.String(64), nullable=False, unique=True)  # sk-wr-xxxxxxxxxxxx
-    user_id = db.Column(db.Integer, default=0)               # 关联团队用户
+    org_id = db.Column(db.Integer, db.ForeignKey('wr_orgs.id'), nullable=True, index=True)  # 所属组织
+    member_email = db.Column(db.String(100), default='')      # 成员邮箱（用于通知）
     models = db.Column(db.Text, default='')                   # JSON: ["gpt-4o","claude-3"]
     provider_ids = db.Column(db.Text, default='')             # JSON: [1,3]
     quota_total = db.Column(db.BigInteger, default=0)        # 总额度(分), 0=不限
@@ -77,7 +116,9 @@ class WRToken(db.Model):
             'id': self.id,
             'name': self.name,
             'key_prefix': self.key[:10] + '...' if self.key else '',
-            'user_id': self.user_id,
+            'org_id': self.org_id,
+            'org_name': self.org.name if self.org else None,
+            'member_email': self.member_email,
             'models': self.models_list,
             'provider_ids': self.provider_ids_list,
             'quota_total': self.quota_total,
@@ -195,6 +236,7 @@ class RequestLog(db.Model):
     is_retry = db.Column(db.Boolean, default=False)
     error_message = db.Column(db.Text, default='')
     error_type = db.Column(db.String(30), default='')    # quota_exhausted/rate_limited/timeout/unknown
+    cached_tokens = db.Column(db.BigInteger, default=0)
     client_ip = db.Column(db.String(45), default='')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
@@ -437,3 +479,254 @@ class DesensitizeRule(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+# ============================================================
+#  Model Grade — 模型分级表（智能选模型用）
+# ============================================================
+
+class ModelGrade(db.Model):
+    """模型分级 — economy/standard/premium，供 auto/smart 降级使用"""
+    __tablename__ = 'wr_model_grades'
+
+    id = db.Column(db.Integer, primary_key=True)
+    model = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    tier = db.Column(db.String(20), nullable=False, index=True)       # economy/standard/premium
+    cost_index = db.Column(db.Float, nullable=False, default=1.0)     # 相对成本指数
+    vendor = db.Column(db.String(50), default='')                     # 厂商标识
+    description = db.Column(db.Text, default='')                      # 描述说明
+    enabled = db.Column(db.Boolean, default=True)                     # 是否参与调度
+    sort_order = db.Column(db.Integer, default=0)                     # 排序
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'model': self.model,
+            'tier': self.tier,
+            'cost_index': self.cost_index,
+            'vendor': self.vendor,
+            'description': self.description,
+            'enabled': self.enabled,
+            'sort_order': self.sort_order,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def seed_defaults(cls):
+        """初始化种子分级数据（仅首次建表时）"""
+        if cls.query.count() > 0:
+            return 0
+
+        seeds = [
+            # economy — 便宜快速
+            cls(model='qwen3-coder-flash', tier='economy', cost_index=1.0, vendor='qwen', description='通义千问编程轻量版', sort_order=1),
+            cls(model='qwen-turbo', tier='economy', cost_index=1.0, vendor='qwen', description='通义千问Turbo', sort_order=2),
+            cls(model='gpt-4o-mini', tier='economy', cost_index=1.5, vendor='openai', description='OpenAI轻量版', sort_order=3),
+            # standard — 中等性价比
+            cls(model='qwen-plus-2025-07-28', tier='standard', cost_index=3.0, vendor='qwen', description='通义千问Plus', sort_order=10),
+            cls(model='qwen-plus', tier='standard', cost_index=3.0, vendor='qwen', description='通义千问Plus', sort_order=11),
+            cls(model='gpt-4o', tier='standard', cost_index=5.0, vendor='openai', description='OpenAI标准版', sort_order=12),
+            cls(model='deepseek-chat', tier='standard', cost_index=2.0, vendor='deepseek', description='DeepSeek对话', sort_order=13),
+            # premium — 最强推理
+            cls(model='qwen3.6-plus', tier='premium', cost_index=8.0, vendor='qwen', description='通义千问旗舰', sort_order=20),
+            cls(model='qwen-max', tier='premium', cost_index=10.0, vendor='qwen', description='通义千问Max', sort_order=21),
+            cls(model='o1', tier='premium', cost_index=15.0, vendor='openai', description='OpenAI推理', sort_order=22),
+            cls(model='o1-mini', tier='premium', cost_index=8.0, vendor='openai', description='OpenAI推理轻量', sort_order=23),
+            cls(model='claude-sonnet-4', tier='premium', cost_index=12.0, vendor='anthropic', description='Claude Sonnet', sort_order=24),
+        ]
+
+        for s in seeds:
+            db.session.add(s)
+        db.session.commit()
+        return len(seeds)
+
+
+# ============================================================
+#  System Setting — 系统设置键值存储
+# ============================================================
+
+class SystemSetting(db.Model):
+    """系统设置 — key-value 存储，value 存 JSON 字符串"""
+    __tablename__ = 'wr_system_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    value = db.Column(db.Text, nullable=False, default='')           # JSON 字符串
+    value_type = db.Column(db.String(20), nullable=False, default='string')  # string/int/float/bool/json
+    description = db.Column(db.String(255), default='')              # 设置项说明
+    category = db.Column(db.String(50), default='general')           # general/proxy/monitor/alert/advanced
+    editable = db.Column(db.Boolean, default=True)                   # 是否允许前端编辑
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @staticmethod
+    def get(key_name, default=None):
+        """获取设置值，不存在返回默认值"""
+        s = SystemSetting.query.filter_by(key=key_name).first()
+        if not s:
+            return default
+        return s.typed_value
+
+    @staticmethod
+    def set(key_name, value, value_type=None, description='', category='general', editable=True):
+        """设置键值，不存在则创建"""
+        s = SystemSetting.query.filter_by(key=key_name).first()
+        if s:
+            s.value = json.dumps(value, ensure_ascii=False)
+            if value_type:
+                s.value_type = value_type
+            s.updated_at = datetime.utcnow()
+        else:
+            if value_type is None:
+                if isinstance(value, bool):
+                    value_type = 'bool'
+                elif isinstance(value, int):
+                    value_type = 'int'
+                elif isinstance(value, float):
+                    value_type = 'float'
+                elif isinstance(value, (dict, list)):
+                    value_type = 'json'
+                else:
+                    value_type = 'string'
+            s = SystemSetting(
+                key=key_name,
+                value=json.dumps(value, ensure_ascii=False),
+                value_type=value_type,
+                description=description,
+                category=category,
+                editable=editable,
+            )
+            db.session.add(s)
+        db.session.commit()
+        return s
+
+    @property
+    def typed_value(self):
+        """根据 value_type 返回对应 Python 类型"""
+        try:
+            raw = json.loads(self.value)
+            if self.value_type == 'bool':
+                return bool(raw)
+            elif self.value_type == 'int':
+                return int(raw)
+            elif self.value_type == 'float':
+                return float(raw)
+            elif self.value_type == 'json':
+                return raw
+            else:
+                return str(raw) if raw is not None else ''
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return self.value
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'value': self.typed_value,
+            'value_type': self.value_type,
+            'description': self.description,
+            'category': self.category,
+            'editable': self.editable,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def seed_defaults(cls):
+        """初始化默认设置（仅首次）"""
+        defaults = [
+            ('proxy_enabled', True, 'bool', '是否启用代理', 'proxy', True),
+            ('proxy_url', 'http://localhost:5051', 'string', '代理服务地址', 'proxy', False),
+            ('gateway_url', 'http://localhost:5051', 'string', '对外网关地址（用于成员邀请邮件）', 'proxy', True),
+            ('health_check_interval', 300, 'int', '健康检测间隔（秒）', 'monitor', True),
+            ('alert_cooldown', 300, 'int', '告警冷却时间（秒）', 'alert', True),
+            ('timezone', 'Asia/Shanghai', 'string', '系统时区', 'general', True),
+            ('routing_strategy', 'smart', 'string', '路由策略（smart/priority/round_robin/least_latency/cost_first）', 'proxy', True),
+            ('default_timeout', 60, 'int', '默认请求超时（秒）', 'proxy', True),
+            ('max_retry_count', 2, 'int', '最大重试次数', 'proxy', True),
+            ('max_failover', 3, 'int', '最大降级次数', 'proxy', True),
+            ('quota_warn_threshold', 0.2, 'float', '额度预警阈值（0-1）', 'alert', True),
+            ('quota_critical_threshold', 0.05, 'float', '额度紧急阈值（0-1）', 'alert', True),
+            ('prediction_days', 7, 'int', '用量预测天数', 'monitor', True),
+            ('idle_conn_timeout', 90, 'int', '连接池空闲超时（秒）', 'advanced', True),
+            ('max_idle_conns', 100, 'int', '连接池最大连接数', 'advanced', True),
+            ('log_retention_days', 30, 'int', '日志保留天数（自动清理过期日志）', 'monitor', True),
+            ('alert_wechat_sendkey', '', 'string', 'Server酱微信推送 sendkey（https://sct.ftqq.com/ 获取）', 'alert', True),
+            ('alert_smtp_host', '', 'string', 'SMTP 服务器地址（如 smtp.gmail.com）', 'alert', True),
+            ('alert_smtp_port', 587, 'int', 'SMTP 端口（TLS:587, SSL:465）', 'alert', True),
+            ('alert_smtp_user', '', 'string', 'SMTP 用户名/邮箱', 'alert', True),
+            ('alert_smtp_password', '', 'string', 'SMTP 密码/应用专用密码', 'alert', True),
+            ('alert_smtp_from', '', 'string', '告警邮件发件人地址（留空则使用 SMTP 用户名）', 'alert', True),
+            ('alert_email_to', '', 'string', '告警邮件收件人地址（逗号分隔多地址）', 'alert', True),
+            ('health_test_configs', [
+                {'domain': 'api.openai.com', 'name': 'OpenAI', 'endpoint': '/v1/chat/completions', 'body': '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'},
+                {'domain': 'api.anthropic.com', 'name': 'Anthropic', 'endpoint': '/v1/messages', 'body': '{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'},
+                {'domain': 'api.deepseek.com', 'name': 'DeepSeek', 'endpoint': '/v1/chat/completions', 'body': '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'},
+                {'domain': 'dashscope.aliyuncs.com', 'name': '通义千问', 'endpoint': '/compatible-mode/v1/chat/completions', 'body': '{"model":"qwen-turbo","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'},
+                {'domain': 'open.bigmodel.cn', 'name': '智谱', 'endpoint': '/v4/chat/completions', 'body': '{"model":"glm-4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":1}'},
+            ], 'json', '厂商健康测试配置（按域名匹配测试端点和模型）', 'monitor', True),
+        ]
+        created = 0
+        for key, value, vtype, desc, cat, editable in defaults:
+            if cls.query.filter_by(key=key).count() == 0:
+                s = cls(
+                    key=key,
+                    value=json.dumps(value, ensure_ascii=False),
+                    value_type=vtype,
+                    description=desc,
+                    category=cat,
+                    editable=editable,
+                )
+                db.session.add(s)
+                created += 1
+        if created > 0:
+            db.session.commit()
+        return created
+
+
+class ModelAlias(db.Model):
+    """模型别名 — 短名称到完整模型名的映射"""
+    __tablename__ = 'wr_model_aliases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    alias = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    target = db.Column(db.String(100), nullable=False)
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'alias': self.alias,
+            'target': self.target,
+            'enabled': self.enabled,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+    @classmethod
+    def seed_defaults(cls):
+        """初始化种子别名数据（仅首次建表时）"""
+        if cls.query.count() > 0:
+            return 0
+
+        seeds = [
+            cls(alias='gpt-4o', target='gpt-4o-2024-05-13'),
+            cls(alias='gpt-4o-mini', target='gpt-4o-mini-2024-07-18'),
+            cls(alias='gpt-3.5-turbo', target='gpt-3.5-turbo-0125'),
+            cls(alias='claude-3-5-sonnet', target='claude-sonnet-4-20250514'),
+            cls(alias='claude-3-opus', target='claude-opus-4-20250414'),
+            cls(alias='qwen-plus', target='qwen-plus-2025-07-28'),
+            cls(alias='qwen-max', target='qwen-max-2025-01-25'),
+            cls(alias='glm-4', target='glm-4-plus'),
+        ]
+        created = 0
+        for s in seeds:
+            if cls.query.filter_by(alias=s.alias).count() == 0:
+                db.session.add(s)
+                created += 1
+        if created > 0:
+            db.session.commit()
+        return created

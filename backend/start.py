@@ -122,7 +122,7 @@ def start_proxy():
 
     log_file = open(LOGS_DIR / "wr-proxy.log", "a")
     env = os.environ.copy()
-    env.setdefault("WR_DB_PATH", str(DATA_DIR / "webrouter.db"))
+    env["WR_DB_PATH"] = str(BACKEND_DIR / "data" / "webrouter.db")
     env.setdefault("WR_PROXY_PORT", str(PROXY_PORT))
 
     proc = subprocess.Popen(
@@ -155,7 +155,7 @@ def start_webrouter():
         print(f"  WebRouter 已在运行 (PID {pid})")
         return True
 
-    db_uri = os.environ.get("DATABASE_URI", f"sqlite:///{DATA_DIR / 'webrouter.db'}")
+    db_uri = os.environ.get("DATABASE_URI", f"sqlite:///{BACKEND_DIR / 'data' / 'webrouter.db'}")
     os.environ["DATABASE_URI"] = db_uri
 
     log_file = open(LOGS_DIR / "webrouter.log", "a")

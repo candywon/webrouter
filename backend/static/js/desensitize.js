@@ -236,12 +236,19 @@ class DesensitizePage {
         }
 
         let html = `<div class="test-summary">共匹配 <strong>${result.total_matches}</strong> 处</div>`;
+
+        // 脱敏后结果预览
+        if (result.sanitized_text) {
+            html += `<div class="sanitized-preview"><strong>脱敏结果：</strong><code>${this.escHtml(result.sanitized_text)}</code></div>`;
+        }
+
         for (const r of result.results) {
             const hasError = r.error;
             html += `
             <div class="test-match-card ${hasError ? 'test-error' : ''}">
                 <div class="test-match-header">
                     <span class="badge badge-info">${this.escHtml(r.category)}</span>
+                    ${r.is_builtin ? '<span class="badge badge-healthy">内置</span>' : ''}
                     <code>${this.escHtml(r.pattern)}</code>
                     <span class="test-match-count">${r.count || 0} 处</span>
                 </div>

@@ -5,11 +5,31 @@ class TokensPage {
     constructor() {
         this.tokens = [];
         this.editingId = null;
+        this.providers = [];
+        this.allModels = []; // 所有可用模型
     }
 
     async load() {
+        await this.loadProviders();
         await this.loadTokens();
         this.bindEvents();
+    }
+
+    async loadProviders() {
+        try {
+            const data = await API.get('/providers/');
+            this.providers = data.providers || [];
+            // 收集所有模型
+            const modelSet = new Set();
+            for (const p of this.providers) {
+                if (p.models && Array.isArray(p.models)) {
+                    p.models.forEach(m => modelSet.add(m));
+                }
+            }
+            this.allModels = Array.from(modelSet).sort();
+        } catch (e) {
+            console.warn('Failed to load providers for token form:', e);
+        }
     }
 
     async loadTokens() {
@@ -69,7 +89,8 @@ class TokensPage {
                     </div>
                     <div class="token-meta">
                         <span class="token-key-prefix" onclick="tokensPage.copyPrefix('${this.escHtml(t.key_prefix)}')" title="点击复制">${this.escHtml(t.key_prefix)}</span>
-                        <span class="token-user">用户: ${this.escHtml(t.user_id || '-')}</span>
+                        <span class="token-org">${t.org_name ? '📁 ' + this.escHtml(t.org_name) : '<span style="color:var(--text-muted)">未分配组织</span>'}</span>
+                        ${t.member_email ? `<span class="token-email">${this.escHtml(t.member_email)}</span>` : ''}
                         ${expiresStr}
                     </div>
                     <div class="token-flags">
@@ -112,16 +133,18 @@ class TokensPage {
                                 <input type="text" id="tf-name" required placeholder="如: 生产环境令牌">
                             </div>
                             <div class="form-group">
-                                <label>用户 ID</label>
-                                <input type="text" id="tf-user-id" placeholder="如: user-001">
+                                <label>所属组织</label>
+                                <select id="tf-org-id">
+                                    <option value="">— 未分配 —</option>
+                                </select>
                             </div>
                             <div class="form-group">
-                                <label>允许模型 (逗号分隔，留空表示全部)</label>
-                                <input type="text" id="tf-models" placeholder="如: gpt-4o,claude-3-opus">
+                                <label>允许模型</label>
+                                <div id="tf-models-select" class="multi-select"></div>
                             </div>
                             <div class="form-group">
-                                <label>数据源 ID (逗号分隔，留空表示全部)</label>
-                                <input type="text" id="tf-provider-ids" placeholder="如: 1,2,3">
+                                <label>数据源</label>
+                                <div id="tf-provider-select" class="multi-select"></div>
                             </div>
                             <div class="form-group">
                                 <label>总额度 (元，0 表示不限)</label>
@@ -278,12 +301,29 @@ class TokensPage {
 
     // ======== 表单相关 ========
 
-    showAddForm() {
+    async loadOrgsForForm(selectedOrgId) {
+        try {
+            const data = await API.get('/team/orgs');
+            const orgs = data.orgs || [];
+            const sel = document.getElementById('tf-org-id');
+            sel.innerHTML = '<option value="">— 未分配 —</option>';
+            for (const o of orgs) {
+                const indent = o.parent_id ? '└ ' : '';
+                sel.innerHTML += `<option value="${o.id}" ${selectedOrgId === o.id ? 'selected' : ''}>${indent}${this.escHtml(o.name)}</option>`;
+            }
+        } catch (e) {
+            console.error('Failed to load orgs:', e);
+        }
+    }
+
+    async showAddForm() {
         this.editingId = null;
         document.getElementById('token-form-title').textContent = '创建令牌';
         document.getElementById('token-form').reset();
         document.getElementById('tf-enabled').checked = true;
         document.getElementById('tf-desensitize-level-group').style.display = 'none';
+        this.renderMultiSelects([], []); // 创建时默认全部
+        await this.loadOrgsForForm();
         document.getElementById('token-form-modal').style.display = 'flex';
 
         const form = document.getElementById('token-form');
@@ -300,9 +340,7 @@ class TokensPage {
         this.editingId = id;
         document.getElementById('token-form-title').textContent = '编辑令牌';
         document.getElementById('tf-name').value = t.name || '';
-        document.getElementById('tf-user-id').value = t.user_id || '';
-        document.getElementById('tf-models').value = (t.models || []).join(', ');
-        document.getElementById('tf-provider-ids').value = (t.provider_ids || []).join(', ');
+        await this.loadOrgsForForm(t.org_id || null);
 
         // quota_total 存储为分，输入框为元
         const quotaYuan = t.quota_total > 0 ? (t.quota_total / 100) : 0;
@@ -323,6 +361,11 @@ class TokensPage {
         } else {
             document.getElementById('tf-expires-at').value = '';
         }
+
+        // 多选框：空数组 = 全部
+        const models = (t.models && t.models.length > 0) ? t.models : [];
+        const providerIds = (t.provider_ids && t.provider_ids.length > 0) ? t.provider_ids : [];
+        this.renderMultiSelects(models, providerIds);
 
         document.getElementById('token-form-modal').style.display = 'flex';
 
@@ -353,13 +396,8 @@ class TokensPage {
         const quotaYuan = parseFloat(document.getElementById('tf-quota-total').value) || 0;
         const quotaTotalCents = Math.round(quotaYuan * 100);
 
-        const modelsStr = document.getElementById('tf-models').value.trim();
-        const models = modelsStr ? modelsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
-
-        const providerIdsStr = document.getElementById('tf-provider-ids').value.trim();
-        const providerIds = providerIdsStr
-            ? providerIdsStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
-            : [];
+        const models = this.getSelectedModels();
+        const providerIds = this.getSelectedProviderIds();
 
         const subnetStr = document.getElementById('tf-subnet-whitelist').value.trim();
         const subnetWhitelist = subnetStr ? subnetStr.split(',').map(s => s.trim()).filter(Boolean) : [];
@@ -371,7 +409,7 @@ class TokensPage {
 
         const data = {
             name: document.getElementById('tf-name').value.trim(),
-            user_id: document.getElementById('tf-user-id').value.trim() || null,
+            org_id: document.getElementById('tf-org-id').value ? parseInt(document.getElementById('tf-org-id').value) : null,
             models,
             provider_ids: providerIds,
             quota_total: quotaTotalCents,
@@ -512,7 +550,8 @@ class TokensPage {
                 <table class="detail-table">
                     <tr><td style="width:140px">名称</td><td>${this.escHtml(t.name)}</td></tr>
                     <tr><td>Key 前缀</td><td><code>${this.escHtml(t.key_prefix)}</code></td></tr>
-                    <tr><td>用户 ID</td><td>${this.escHtml(t.user_id || '-')}</td></tr>
+                    <tr><td>所属组织</td><td>${t.org_name ? this.escHtml(t.org_name) : '未分配'}</td></tr>
+                    <tr><td>成员邮箱</td><td>${this.escHtml(t.member_email || '-')}</td></tr>
                     <tr><td>状态</td><td>${statusHtml}</td></tr>
                     <tr><td>启用</td><td>${t.enabled ? '✅ 是' : '❌ 否'}</td></tr>
                     <tr><td>已过期</td><td>${t.is_expired ? '⚠️ 是' : '否'}</td></tr>
@@ -522,7 +561,7 @@ class TokensPage {
                     <tr><td>速率限制</td><td>${t.rate_limit_rpm > 0 ? t.rate_limit_rpm + ' RPM' : '不限'}</td></tr>
                     <tr><td>子网白名单</td><td>${(t.subnet_whitelist || []).length > 0 ? t.subnet_whitelist.join(', ') : '不限'}</td></tr>
                     <tr><td>智能降级</td><td>${t.smart_downgrade ? '✅ 开启' : '关闭'}</td></tr>
-                    <tr><td>脱敏</td><td>${t.desensitize_enabled ? `✅ 开启 (${t.desensitize_level || 'standard'})` : '关闭'}</td></tr>
+                    <tr><td>脱敏</td><td>${t.desensitize_enabled ? (() => { const labels = {off:'关闭',standard:'标准',strict:'严格'}; return `✅ 开启 (${labels[t.desensitize_level] || '标准'})`; })() : '关闭'}</td></tr>
                     <tr><td>创建时间</td><td>${formatDate(t.created_at)}</td></tr>
                     <tr><td>更新时间</td><td>${formatDate(t.updated_at)}</td></tr>
                 </table>
@@ -635,8 +674,167 @@ class TokensPage {
             html += '</table>';
         }
 
+        html += '<p class="text-muted" style="margin-top:12px;font-size:12px;color:var(--text-secondary);">注：此处"成本"为 Token 消耗量的参考值，不代表实际费用，真实成本以厂商计费为准。</p>';
         html += '</div>';
         extra.innerHTML = html;
+    }
+
+    // ======== 多选组件 ========
+
+    /**
+     * 渲染模型和 Provider 多选下拉框
+     * @param {string[]} selectedModels - 已选模型（空=全部）
+     * @param {number[]} selectedProviderIds - 已选 Provider ID（空=全部）
+     */
+    renderMultiSelects(selectedModels, selectedProviderIds) {
+        this._renderModelSelect(selectedModels);
+        this._renderProviderSelect(selectedProviderIds);
+    }
+
+    _renderModelSelect(selected) {
+        const container = document.getElementById('tf-models-select');
+        if (!container) return;
+        const isAll = selected.length === 0;
+        const displayText = isAll ? '全部模型' : selected.join(', ');
+
+        let optionsHtml = '';
+        for (const model of this.allModels) {
+            const checked = isAll ? 'checked disabled' : (selected.includes(model) ? 'checked' : '');
+            optionsHtml += `<label class="ms-item"><input type="checkbox" value="${this.escHtml(model)}" ${checked}><span>${this.escHtml(model)}</span></label>`;
+        }
+
+        container.innerHTML = `
+            <div class="ms-display" onclick="this.parentElement.classList.toggle('ms-open')">
+                <span class="ms-label">${this.escHtml(displayText)}</span>
+                <span class="ms-arrow">▼</span>
+            </div>
+            <div class="ms-dropdown">
+                <label class="ms-item ms-all">
+                    <input type="checkbox" id="ms-models-all" ${isAll ? 'checked' : ''}>
+                    <span>全部</span>
+                </label>
+                <div class="ms-options">${optionsHtml}</div>
+            </div>
+        `;
+
+        // 绑定事件
+        const allCb = container.querySelector('#ms-models-all');
+        allCb.onchange = () => {
+            const items = container.querySelectorAll('.ms-options input[type=checkbox]');
+            items.forEach(cb => { cb.checked = allCb.checked; cb.disabled = allCb.checked; });
+            this._updateModelDisplay(container);
+        };
+
+        container.querySelectorAll('.ms-options input[type=checkbox]').forEach(cb => {
+            cb.onchange = () => {
+                const allChecked = Array.from(container.querySelectorAll('.ms-options input[type=checkbox]')).every(c => c.checked);
+                allCb.checked = allChecked;
+                this._updateModelDisplay(container);
+            };
+        });
+
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', (e) => {
+                if (!container.contains(e.target)) container.classList.remove('ms-open');
+            }, { once: false });
+        }, 100);
+    }
+
+    _renderProviderSelect(selected) {
+        const container = document.getElementById('tf-provider-select');
+        if (!container) return;
+        const isAll = selected.length === 0;
+        const displayText = isAll ? '全部数据源' : selected.map(id => {
+            const p = this.providers.find(x => x.id === id);
+            return p ? p.name : `#${id}`;
+        }).join(', ');
+
+        let optionsHtml = '';
+        for (const p of this.providers) {
+            const checked = isAll ? 'checked disabled' : (selected.includes(p.id) ? 'checked' : '');
+            optionsHtml += `<label class="ms-item"><input type="checkbox" value="${p.id}" ${checked}><span>${this.escHtml(p.name)}</span></label>`;
+        }
+
+        if (this.providers.length === 0) {
+            optionsHtml = '<div style="padding:8px;color:var(--text-muted);font-size:12px">暂无数据源，请先添加</div>';
+        }
+
+        container.innerHTML = `
+            <div class="ms-display" onclick="this.parentElement.classList.toggle('ms-open')">
+                <span class="ms-label">${this.escHtml(displayText)}</span>
+                <span class="ms-arrow">▼</span>
+            </div>
+            <div class="ms-dropdown">
+                <label class="ms-item ms-all">
+                    <input type="checkbox" id="ms-providers-all" ${isAll ? 'checked' : ''}>
+                    <span>全部</span>
+                </label>
+                <div class="ms-options">${optionsHtml}</div>
+            </div>
+        `;
+
+        const allCb = container.querySelector('#ms-providers-all');
+        if (allCb) {
+            allCb.onchange = () => {
+                const items = container.querySelectorAll('.ms-options input[type=checkbox]');
+                items.forEach(cb => { cb.checked = allCb.checked; cb.disabled = allCb.checked; });
+                this._updateProviderDisplay(container);
+            };
+        }
+
+        container.querySelectorAll('.ms-options input[type=checkbox]').forEach(cb => {
+            cb.onchange = () => {
+                const allChecked = Array.from(container.querySelectorAll('.ms-options input[type=checkbox]')).every(c => c.checked);
+                allCb.checked = allChecked;
+                this._updateProviderDisplay(container);
+            };
+        });
+
+        setTimeout(() => {
+            document.addEventListener('click', (e) => {
+                if (!container.contains(e.target)) container.classList.remove('ms-open');
+            }, { once: false });
+        }, 100);
+    }
+
+    _updateModelDisplay(container) {
+        const cbs = container.querySelectorAll('.ms-options input[type=checkbox]');
+        const checked = Array.from(cbs).filter(cb => cb.checked).map(cb => cb.value);
+        const isAll = container.querySelector('#ms-models-all')?.checked || checked.length === 0;
+        const label = container.querySelector('.ms-label');
+        if (label) label.textContent = isAll ? '全部模型' : checked.join(', ');
+    }
+
+    _updateProviderDisplay(container) {
+        const cbs = container.querySelectorAll('.ms-options input[type=checkbox]');
+        const checkedIds = Array.from(cbs).filter(cb => cb.checked).map(cb => parseInt(cb.value, 10));
+        const isAll = container.querySelector('#ms-providers-all')?.checked || checkedIds.length === 0;
+        const label = container.querySelector('.ms-label');
+        if (label) {
+            label.textContent = isAll ? '全部数据源' : checkedIds.map(id => {
+                const p = this.providers.find(x => x.id === id);
+                return p ? p.name : `#${id}`;
+            }).join(', ');
+        }
+    }
+
+    getSelectedModels() {
+        const container = document.getElementById('tf-models-select');
+        if (!container) return [];
+        const isAll = container.querySelector('#ms-models-all')?.checked || false;
+        if (isAll) return [];
+        const cbs = container.querySelectorAll('.ms-options input[type=checkbox]');
+        return Array.from(cbs).filter(cb => cb.checked).map(cb => cb.value);
+    }
+
+    getSelectedProviderIds() {
+        const container = document.getElementById('tf-provider-select');
+        if (!container) return [];
+        const isAll = container.querySelector('#ms-providers-all')?.checked || false;
+        if (isAll) return [];
+        const cbs = container.querySelectorAll('.ms-options input[type=checkbox]');
+        return Array.from(cbs).filter(cb => cb.checked).map(cb => parseInt(cb.value, 10));
     }
 
     // ======== 工具方法 ========
