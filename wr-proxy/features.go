@@ -19,16 +19,27 @@ var FeatureToggles struct {
 	SessionCompression bool // 会话压缩
 }
 
+// ProxyEnabled 代理网关总开关（控制用户端 API 请求是否可用）
+var ProxyEnabled = true
+
 // LoadFeatureToggles 从 DB 加载特性开关状态
 func LoadFeatureToggles() {
 	FeatureToggles.DynamicContentLast = LoadSetting("feature_dynamic_content_last", false).(bool)
 	FeatureToggles.TokenCompression = LoadSetting("feature_token_compression", false).(bool)
 	FeatureToggles.SessionCompression = LoadSetting("feature_session_compression", false).(bool)
 
-	LogInfo("Feature toggles: dynamic_content_last=%v, token_compression=%v, session_compression=%v",
+	// 代理网关总开关
+	prev := ProxyEnabled
+	ProxyEnabled = LoadSetting("proxy_enabled", true).(bool)
+	if prev != ProxyEnabled {
+		LogInfo("Proxy gateway %s (proxy_enabled=%v)", map[bool]string{true: "ENABLED", false: "DISABLED"}[ProxyEnabled], ProxyEnabled)
+	}
+
+	LogInfo("Feature toggles: dynamic_content_last=%v, token_compression=%v, session_compression=%v, proxy_enabled=%v",
 		FeatureToggles.DynamicContentLast,
 		FeatureToggles.TokenCompression,
-		FeatureToggles.SessionCompression)
+		FeatureToggles.SessionCompression,
+		ProxyEnabled)
 }
 
 // ApplyFeatureTransforms 根据特性开关对请求 body 进行预处理

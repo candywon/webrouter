@@ -87,6 +87,7 @@ class SettingsPage {
     renderGatewayCard() {
         const proxyEnabled = this.settings.find(s => s.key === 'proxy_enabled');
         const proxyUrl = this.settings.find(s => s.key === 'proxy_url');
+        const gatewayUrl = this.settings.find(s => s.key === 'gateway_url');
         const routingStrategy = this.settings.find(s => s.key === 'routing_strategy');
         const defaultTimeout = this.settings.find(s => s.key === 'default_timeout');
         const maxFailover = this.settings.find(s => s.key === 'max_failover');
@@ -100,18 +101,27 @@ class SettingsPage {
                 <span class="card-title">🚪 代理网关设置</span>
                 <label class="toggle-switch">
                     <input type="checkbox" ${proxyOn ? 'checked' : ''}
-                           onchange="settingsPage.toggleBool('proxy_enabled', this.checked)">
+                           onchange="settingsPage.toggleProxySwitch(this.checked)">
                     <span class="toggle-slider"></span>
                     <span class="toggle-label">${proxyOn ? '已开启' : '已关闭'}</span>
                 </label>
             </div>
             <div style="padding:16px;">
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">管理后台与 wr-proxy 通信地址，以及对外用户调用的 API 网关地址。</p>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div class="form-group">
-                        <label>代理服务 URL</label>
+                        <label>管理后台通信 URL</label>
                         <input type="text" id="gw-proxy-url" value="${this.escHtml(proxyUrl ? proxyUrl.value : '')}"
                                onchange="settingsPage.updateString('proxy_url', this.value)"
                                placeholder="http://localhost:5051">
+                        <span style="font-size:11px;color:var(--text-muted);">Flask 内部连接 wr-proxy 的地址</span>
+                    </div>
+                    <div class="form-group">
+                        <label>对外网关地址</label>
+                        <input type="text" id="gw-gateway-url" value="${this.escHtml(gatewayUrl ? gatewayUrl.value : '')}"
+                               onchange="settingsPage.updateString('gateway_url', this.value)"
+                               placeholder="http://公网IP或域名:5051">
+                        <span style="font-size:11px;color:var(--text-muted);">成员邀请邮件和文档中展示的 API 地址</span>
                     </div>
                     <div class="form-group">
                         <label>路由策略</label>
@@ -119,7 +129,6 @@ class SettingsPage {
                             ${['smart','priority','round_robin','least_latency','cost_first'].map(s =>
                                 `<option value="${s}" ${routingStrategy && routingStrategy.value === s ? 'selected' : ''}>${this.ROUTING_STRATEGY_LABELS[s]}</option>`
                             ).join('')}
-                        </select>
                     </div>
                     <div class="form-group">
                         <label>默认超时（秒）</label>
@@ -309,11 +318,11 @@ class SettingsPage {
                     <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
                         <label class="toggle-switch">
                             <input type="checkbox" ${enabled ? 'checked' : ''}
-                                   onchange="settingsPage.toggleFeature('${feat.key}', this.checked)">
+                                   onchange="settingsPage.toggleFeatureState('${feat.key}', this.checked, this)">
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="font-weight:600;font-size:14px;${enabled ? 'color:var(--success)' : ''}">${feat.title}</span>
-                        <span style="margin-left:auto;font-size:12px;color:${enabled ? 'var(--success)' : 'var(--text-muted)'};">${enabled ? '已开启' : '已关闭'}</span>
+                        <span class="state-label" style="margin-left:auto;font-size:12px;color:${enabled ? 'var(--success)' : 'var(--text-muted)'};">${enabled ? '已开启' : '已关闭'}</span>
                     </div>
                     <p style="color:var(--text-muted);font-size:13px;margin:0 0 6px 0;">${this.escHtml(feat.shortDesc)}</p>
                     <details style="color:var(--text-secondary);font-size:12px;margin:0;">
@@ -507,7 +516,7 @@ class SettingsPage {
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="font-weight:600;font-size:14px;">${dim.icon} ${dim.title}</span>
-                        <span style="font-size:12px;color:${accentColor};margin-left:auto;">${on ? '已启用' : '已禁用'}</span>
+                        <span class="state-label" style="font-size:12px;color:${accentColor};margin-left:auto;">${on ? '已启用' : '已禁用'}</span>
                     </div>
                     ${on ? contentHtml : ''}
                     <details style="margin-top:6px;color:var(--text-muted);font-size:12px;">
@@ -530,7 +539,8 @@ class SettingsPage {
                 <span class="card-title">🎯 智能模型选择 — 复杂度评估配置</span>
                 <div>
                     <button class="btn-secondary btn-sm" onclick="settingsPage.resetComplexityConfig()" style="margin-right:8px;">↩️ 恢复默认</button>
-                    <button class="btn-primary btn-sm" onclick="settingsPage.saveComplexityConfig()">💾 保存配置</button>
+                    <button class="btn-primary btn-sm" onclick="settingsPage.saveComplexityConfig()" style="margin-right:8px;">💾 保存配置</button>
+                    <button class="btn-secondary btn-sm" onclick="settingsPage.reloadProxy()">🔄 Reload</button>
                 </div>
             </div>
             <div style="padding:16px;">
@@ -547,6 +557,7 @@ class SettingsPage {
         const s = this.settings.find(x => x.key === 'smart_complexity_config');
         if (!s) return;
         await this.saveSetting('smart_complexity_config', s.value);
+        await this.loadSettings();
         showToast('复杂度配置已保存，请点击 Reload wr-proxy 生效');
     }
 
@@ -568,6 +579,8 @@ class SettingsPage {
             "system_prompt": { "enabled": true, "threshold_chars": 500, "score": 0.08 },
         };
         await this.saveSetting('smart_complexity_config', defaults);
+        await this.loadSettings();
+        showToast('已恢复默认复杂度配置');
     }
 
     updateComplexityTier(field, value) {
@@ -619,6 +632,15 @@ class SettingsPage {
 
     async toggleFeature(key, value) {
         await this.saveSetting(key, value);
+    }
+
+    async toggleFeatureState(key, value, el) {
+        const label = el.closest('label').parentElement.querySelector('.state-label');
+        if (label) {
+            label.textContent = value ? '已开启' : '已关闭';
+            label.style.color = value ? 'var(--success)' : 'var(--text-muted)';
+        }
+        await this.toggleFeature(key, value);
     }
 
     async reloadProxy() {
@@ -764,6 +786,7 @@ class SettingsPage {
             s.key !== 'health_test_configs' &&
             s.key !== 'proxy_enabled' &&
             s.key !== 'proxy_url' &&
+            s.key !== 'gateway_url' &&
             s.key !== 'routing_strategy' &&
             s.key !== 'default_timeout' &&
             s.key !== 'max_failover' &&
@@ -827,7 +850,7 @@ class SettingsPage {
                 return `
                     <label class="toggle-switch ${compact ? 'compact' : ''}">
                         <input type="checkbox" ${val ? 'checked' : ''}
-                               onchange="settingsPage.toggleBool('${key}', this.checked)"
+                               onchange="this.closest('label').querySelector('.toggle-label').textContent=this.checked?'开启':'关闭';settingsPage.toggleBool('${key}',this.checked)"
                                ${setting.editable ? '' : 'disabled'}>
                         <span class="toggle-slider"></span>
                         <span class="toggle-label">${val ? '开启' : '关闭'}</span>
@@ -879,6 +902,14 @@ class SettingsPage {
 
     async toggleBool(key, value) {
         await this.saveSetting(key, value);
+    }
+
+    async toggleProxySwitch(value) {
+        const label = document.querySelector('#page-settings .card-header .toggle-label');
+        if (label) label.textContent = value ? '已开启' : '已关闭';
+        await this.saveSetting('proxy_enabled', value);
+        showToast(`代理网关已${value ? '开启' : '关闭'}，正在重载 wr-proxy...`);
+        await this.reloadProxy();
     }
 
     async updateNumber(key, rawValue, type) {

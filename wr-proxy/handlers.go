@@ -47,8 +47,25 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/features", handleAdminFeatures)
 }
 
+// checkProxyEnabled 代理网关总开关检查，关闭时返回 503 + 提示信息
+func checkProxyEnabled(w http.ResponseWriter) bool {
+	if ProxyEnabled {
+		return true
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+		"error": map[string]string{
+			"message": "代理网关已关闭，请联系管理员",
+			"type":    "service_unavailable",
+		},
+	})
+	return false
+}
+
 // handleProxy 代理转发主逻辑
 func handleProxy(w http.ResponseWriter, r *http.Request) {
+	if !checkProxyEnabled(w) {
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 		return
@@ -330,6 +347,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 // handleModels 聚合模型列表
 func handleModels(w http.ResponseWriter, r *http.Request) {
+	if !checkProxyEnabled(w) {
+		return
+	}
 	token, authErr := authenticateRequest(r)
 	if authErr != nil {
 		writeJSON(w, authErr.StatusCode, map[string]interface{}{
@@ -418,9 +438,10 @@ func handleReload(w http.ResponseWriter, r *http.Request) {
 	// 同时刷新优化特性开关
 	ReloadFeatures()
 	writeJSON(w, 200, map[string]interface{}{
-		"message":   "Providers, desensitize rules, model grades, aliases, vendor configs, feature toggles and complexity config reloaded",
-		"count":     len(router.GetProviders()),
-		"timestamp": time.Now().UTC(),
+		"message":       "Providers, desensitize rules, model grades, aliases, vendor configs, feature toggles and complexity config reloaded",
+		"proxy_enabled": ProxyEnabled,
+		"count":         len(router.GetProviders()),
+		"timestamp":     time.Now().UTC(),
 	})
 }
 
@@ -726,6 +747,9 @@ func modelFromJSON(body []byte) string {
 // handleBinaryProxy 二进制/多媒体快速转发
 // 跳过 SmartModelSelect、脱敏、sanitize，直接选 Provider 转发
 func handleBinaryProxy(w http.ResponseWriter, r *http.Request, endpoint string) {
+	if !checkProxyEnabled(w) {
+		return
+	}
 	token, authErr := authenticateRequest(r)
 	if authErr != nil {
 		writeJSON(w, authErr.StatusCode, map[string]interface{}{

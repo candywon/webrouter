@@ -206,6 +206,8 @@ a:hover { color: var(--accent-hover); }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 .card-title {
@@ -948,7 +950,7 @@ tr:hover { background: var(--bg-hover); }
   display: inline-block;
   width: 36px;
   height: 20px;
-  margin-left: auto;
+  cursor: pointer;
 }
 .toggle-switch input { opacity: 0; width: 0; height: 0; }
 .toggle-slider {
@@ -1146,14 +1148,14 @@ tr:hover { background: var(--bg-hover); }
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
   position: relative;
-  min-width: 90px;
+  margin-right: 30px;
 }
 .toggle-switch input {
   display: none;
 }
 .toggle-slider {
+  cursor: pointer;
   width: 40px;
   height: 22px;
   background: var(--bg-hover);
@@ -1162,6 +1164,7 @@ tr:hover { background: var(--bg-hover); }
   position: relative;
   transition: all 0.2s;
   flex-shrink: 0;
+  cursor: pointer;
 }
 .toggle-slider::after {
   content: '';

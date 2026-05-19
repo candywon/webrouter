@@ -22,6 +22,7 @@ def get_settings():
 
     settings_map = {
         'proxy_url': lambda: f"http://localhost:{app.config.get('PROXY_PORT', 5051)}",
+        'gateway_url': lambda: f"http://localhost:{app.config.get('PROXY_PORT', 5051)}",
         'proxy_enabled': lambda: True,
         'health_check_interval': lambda: app.config.get('HEALTH_CHECK_INTERVAL', 300),
         'alert_cooldown': lambda: app.config.get('ALERT_COOLDOWN', 300),
@@ -153,7 +154,7 @@ def update_single_setting(key):
 @settings_bp.route('/<string:key>', methods=['DELETE'], strict_slashes=False)
 def delete_setting(key):
     """删除自定义设置项（种子设置不可删）"""
-    seed_keys = ['proxy_enabled', 'proxy_url', 'health_check_interval', 'alert_cooldown', 'timezone',
+    seed_keys = ['proxy_enabled', 'proxy_url', 'gateway_url', 'health_check_interval', 'alert_cooldown', 'timezone',
                  'routing_strategy', 'default_timeout', 'max_retry_count', 'max_failover',
                  'quota_warn_threshold', 'quota_critical_threshold', 'prediction_days',
                  'idle_conn_timeout', 'max_idle_conns',
@@ -408,9 +409,10 @@ def test_email():
 @settings_bp.route('/reload-proxy', methods=['POST'])
 def reload_proxy():
     """重新加载 wr-proxy（Provider、特性开关、定价等）"""
+    import os
     proxy_url = SystemSetting.get('proxy_url')
     if not proxy_url:
-        proxy_url = f"http://localhost:{current_app.config.get('PROXY_PORT', 5051)}"
+        proxy_url = os.environ.get('WR_PROXY_URL', f"http://localhost:{current_app.config.get('PROXY_PORT', 5051)}")
     try:
         resp = _requests.post(f"{proxy_url}/admin/reload", timeout=10)
         data = resp.json() if resp.ok else {}
@@ -435,9 +437,10 @@ def test_proxy():
     if not api_key:
         return jsonify({'error': 'api_key required'}), 400
 
+    import os
     proxy_url = SystemSetting.get('proxy_url')
     if not proxy_url:
-        proxy_url = f"http://localhost:{current_app.config.get('PROXY_PORT', 5051)}"
+        proxy_url = os.environ.get('WR_PROXY_URL', f"http://localhost:{current_app.config.get('PROXY_PORT', 5051)}")
 
     body = {
         'model': data.get('model', 'auto'),

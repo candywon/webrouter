@@ -441,10 +441,19 @@ def auto_detect():
 #  通知 wr-proxy 刷新 Provider 列表
 # ============================================================
 
+def _get_proxy_url():
+    """获取 wr-proxy 地址：优先读数据库设置，fallback 到环境变量"""
+    from models.wr_models import SystemSetting
+    proxy_url = SystemSetting.get('proxy_url')
+    if proxy_url:
+        return proxy_url
+    import os
+    return os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+
+
 def _notify_proxy_reload():
     """通知 wr-proxy 重新加载 Provider 列表"""
-    import os
-    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    proxy_url = _get_proxy_url()
     try:
         http.post(f"{proxy_url}/admin/reload", timeout=3)
     except Exception:
@@ -453,8 +462,7 @@ def _notify_proxy_reload():
 
 def _notify_clear_cooldown(provider_id):
     """通知 wr-proxy 清除指定 Provider 的冷却状态"""
-    import os
-    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    proxy_url = _get_proxy_url()
     try:
         http.post(f"{proxy_url}/admin/clear_cooldown/{provider_id}", timeout=3)
     except Exception:
@@ -468,8 +476,7 @@ def _notify_clear_cooldown(provider_id):
 @providers_bp.route('/cooldowns')
 def list_cooldowns():
     """列出所有冷却中的 Provider（查询 wr-proxy 运行时状态）"""
-    import os
-    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    proxy_url = _get_proxy_url()
     try:
         resp = http.get(f"{proxy_url}/admin/cooldowns", timeout=3)
         return jsonify(resp.json())
@@ -487,8 +494,7 @@ def clear_cooldown(provider_id):
 @providers_bp.route('/request_cache')
 def list_request_cache():
     """列出 wr-proxy 请求 Hash 缓存"""
-    import os
-    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    proxy_url = _get_proxy_url()
     try:
         resp = http.get(f"{proxy_url}/admin/request_cache", timeout=3)
         return jsonify(resp.json())
@@ -499,8 +505,7 @@ def list_request_cache():
 @providers_bp.route('/request_cache', methods=['DELETE'])
 def clear_request_cache():
     """清空 wr-proxy 请求 Hash 缓存"""
-    import os
-    proxy_url = os.environ.get('WR_PROXY_URL', 'http://localhost:5051')
+    proxy_url = _get_proxy_url()
     try:
         resp = http.delete(f"{proxy_url}/admin/request_cache", timeout=3)
         return jsonify(resp.json())
