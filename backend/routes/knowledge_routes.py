@@ -379,3 +379,41 @@ def get_analysis(task_id):
     if not item:
         return jsonify({'error': 'Not found'}), 404
     return jsonify(item.to_dict())
+
+
+# ============================================================
+# 知识分析
+# ============================================================
+
+@knowledge_bp.route('/analyze', methods=['POST'])
+def analyze_knowledge():
+    """发起知识分析（调用 wr-proxy 的 /admin/knowledge_analyze）"""
+    import os
+    import requests as req_lib
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
+
+    domain_code = data.get('domain_code', '').strip()
+    if not domain_code:
+        return jsonify({'error': 'domain_code 不能为空'}), 400
+
+    # 调用 wr-proxy 的分析端点
+    proxy_url = os.environ.get('WR_PROXY_URL', 'http://127.0.0.1:5051')
+    try:
+        resp = req_lib.post(
+            f'{proxy_url}/admin/knowledge_analyze',
+            json=data,
+            timeout=120,
+        )
+        result = resp.json()
+        return jsonify(result), resp.status_code
+    except Exception as e:
+        # wr-proxy 不可用时，返回本地统计
+        items = KnowledgeItem.query.filter_by(domain_code=domain_code).all()
+        return jsonify({
+            'result': f'分析服务暂不可用。该域目前有 {len(items)} 条知识。',
+            'status': 'local_fallback',
+            'item_count': len(items),
+        })

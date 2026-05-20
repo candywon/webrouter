@@ -47,6 +47,13 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/features", handleAdminFeatures)
 	mux.HandleFunc("/admin/knowledge_stats", handleKnowledgeStats)
 	mux.HandleFunc("/admin/knowledge_prompt_preview", handleKnowledgePromptPreview)
+
+	// MCP 端点（Agent 可连接）
+	mux.HandleFunc("/mcp", handleMCP)
+
+	// 知识分析（Flask 调用）
+	mux.HandleFunc("/admin/knowledge_analyze", handleKnowledgeAnalyze)
+	mux.HandleFunc("/admin/knowledge_analyze/", handleKnowledgeAnalyze)
 }
 
 // checkProxyEnabled 代理网关总开关检查，关闭时返回 503 + 提示信息

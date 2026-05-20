@@ -102,3 +102,44 @@ func handleKnowledgePromptPreview(w http.ResponseWriter, r *http.Request) {
 		"department":    token.KnowledgeDepartment,
 	})
 }
+
+// handleKnowledgeAnalyze 知识分析 API（Flask 调用）
+func handleKnowledgeAnalyze(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	var req KnowledgeAnalyzeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	if req.DomainCode == "" {
+		writeJSON(w, 400, map[string]string{"error": "domain_code is required"})
+		return
+	}
+
+	if req.AnalysisType == "" {
+		req.AnalysisType = "domain_overview"
+	}
+
+	startTime := time.Now()
+	result, err := analyzeKnowledge(req)
+	duration := time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		writeJSON(w, 500, map[string]interface{}{
+			"error":   err.Error(),
+			"status":  "failed",
+		})
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"result":      result,
+		"status":      "completed",
+		"duration_ms": duration,
+	})
+}

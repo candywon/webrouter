@@ -1,0 +1,358 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+// registerKnowledgeMCPTools 注册知识库相关 MCP 工具
+func registerKnowledgeMCPTools() {
+	registerMCPTool(MCPToolDef{
+		Name:        "knowledge_search",
+		Description: "搜索企业知识库中的知识条目和原始对话，支持关键词模糊匹配。返回匹配的知识条目摘要。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"keyword": map[string]interface{}{
+					"type":        "string",
+					"description": "搜索关键词，支持中英文",
+				},
+				"domain": map[string]interface{}{
+					"type":        "string",
+					"description": "可选：限定业务域（如 legal, finance, tech 等）",
+				},
+			},
+			"required": []string{"keyword"},
+		},
+		Handler: mcpToolKnowledgeSearch,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "knowledge_get_detail",
+		Description: "获取单条知识条目的详细内容，包括标题、摘要、来源引用、数据点和置信度。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"id": map[string]interface{}{
+					"type":        "integer",
+					"description": "知识条目 ID",
+				},
+			},
+			"required": []string{"id"},
+		},
+		Handler: mcpToolKnowledgeGetDetail,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "knowledge_list_domains",
+		Description: "列出所有已注册的业务域及其部门归属、状态、风险等级。",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler: mcpToolKnowledgeListDomains,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "knowledge_list_items",
+		Description: "列出知识条目，支持按域/部门/类型/验证状态筛选。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"domain": map[string]interface{}{
+					"type":        "string",
+					"description": "业务域代码",
+				},
+				"type": map[string]interface{}{
+					"type":        "string",
+					"description": "知识类型: factual/analytical/procedural",
+				},
+				"verification": map[string]interface{}{
+					"type":        "string",
+					"description": "验证状态: auto/pending/verified/rejected",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "返回条数上限，默认10",
+				},
+			},
+		},
+		Handler: mcpToolKnowledgeListItems,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "knowledge_stats",
+		Description: "获取知识库统计信息：原始对话数量、知识条目数量、各域分布等。",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler: mcpToolKnowledgeStats,
+	})
+}
+
+// mcpToolKnowledgeSearch 知识搜索
+func mcpToolKnowledgeSearch(args map[string]interface{}) (string, error) {
+	keyword, ok := args["keyword"].(string)
+	if !ok || keyword == "" {
+		return "", fmt.Errorf("keyword parameter is required")
+	}
+
+	domain, _ := args["domain"].(string)
+
+	// 搜索知识条目
+	var query string
+	var queryArgs []interface{}
+	if domain != "" {
+		query = `SELECT id, type, title, summary, domain_code, confidence, verification, created_at
+			FROM wr_knowledge_items
+			WHERE domain_code = ? AND (title LIKE ? OR summary LIKE ? OR source_quote LIKE ?)
+			ORDER BY confidence DESC LIMIT 10`
+		queryArgs = append(queryArgs, domain, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+	} else {
+		query = `SELECT id, type, title, summary, domain_code, confidence, verification, created_at
+			FROM wr_knowledge_items
+			WHERE title LIKE ? OR summary LIKE ? OR source_quote LIKE ?
+			ORDER BY confidence DESC LIMIT 10`
+		queryArgs = append(queryArgs, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
+	}
+
+	rows, err := db.Query(query, queryArgs...)
+	if err != nil {
+		return "", fmt.Errorf("search failed: %w", err)
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var id int
+		var typ, title, summary, domainCode, verification, createdAt string
+		var confidence float64
+		if err := rows.Scan(&id, &typ, &title, &summary, &domainCode, &confidence, &verification, &createdAt); err != nil {
+			continue
+		}
+		results = append(results, fmt.Sprintf(
+			"[%d] [%s] %s (域: %s, 置信度: %.0f%%, 状态: %s)\n  %s",
+			id, typ, title, domainCode, confidence*100, verification,
+			truncate(summary, 120),
+		))
+	}
+
+	// 同时搜索 raw 表数量
+	var rawCount int
+	rawQuery := `SELECT COUNT(*) FROM wr_knowledge_raw WHERE status != 'skipped' AND (prompt LIKE ? OR response LIKE ?)`
+	db.QueryRow(rawQuery, "%"+keyword+"%", "%"+keyword+"%").Scan(&rawCount)
+
+	if len(results) == 0 && rawCount == 0 {
+		return fmt.Sprintf("未找到包含「%s」的知识条目或原始对话。", keyword), nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("搜索「%s」：找到 %d 条知识，%d 条原始对话。\n\n", keyword, len(results), rawCount))
+	for _, r := range results {
+		sb.WriteString(r + "\n\n")
+	}
+	return sb.String(), nil
+}
+
+// mcpToolKnowledgeGetDetail 获取知识详情
+func mcpToolKnowledgeGetDetail(args map[string]interface{}) (string, error) {
+	idFloat, ok := args["id"].(float64)
+	if !ok {
+		return "", fmt.Errorf("id parameter is required (integer)")
+	}
+	id := int(idFloat)
+
+	var typ, title, summary, domainCode, department, sourceQuote, sourceReqID, dataPoints, tokenName, modelName, sensitivity string
+	var confidence float64
+	var verification, createdAt, updatedAt string
+	var turnIndex, charStart, charEnd int
+
+	err := db.QueryRow(`
+		SELECT id, type, title, summary, domain_code, department, source_request_id,
+		       source_turn_index, source_quote, source_char_start, source_char_end,
+		       data_points, confidence, verification, token_name, model_name,
+		       sensitivity, created_at, updated_at
+		FROM wr_knowledge_items WHERE id = ?`, id,
+	).Scan(&id, &typ, &title, &summary, &domainCode, &department, &sourceReqID,
+		&turnIndex, &sourceQuote, &charStart, &charEnd,
+		&dataPoints, &confidence, &verification, &tokenName, &modelName,
+		&sensitivity, &createdAt, &updatedAt)
+	if err != nil {
+		return "", fmt.Errorf("知识条目 #%d 不存在", id)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("# %s\n\n", title))
+	sb.WriteString(fmt.Sprintf("- **类型**: %s\n", typ))
+	sb.WriteString(fmt.Sprintf("- **业务域**: %s (%s)\n", domainCode, department))
+	sb.WriteString(fmt.Sprintf("- **置信度**: %.0f%%\n", confidence*100))
+	sb.WriteString(fmt.Sprintf("- **验证状态**: %s\n", verification))
+	sb.WriteString(fmt.Sprintf("- **敏感度**: %s\n", sensitivity))
+	sb.WriteString(fmt.Sprintf("- **来源**: Token=%s, Model=%s\n", tokenName, modelName))
+	sb.WriteString(fmt.Sprintf("- **创建时间**: %s\n\n", createdAt))
+	sb.WriteString(fmt.Sprintf("## 摘要\n%s\n\n", summary))
+	sb.WriteString(fmt.Sprintf("## 来源引用\n> %s\n\n", truncate(sourceQuote, 300)))
+	if dataPoints != "" {
+		sb.WriteString(fmt.Sprintf("## 数据点\n%s\n", dataPoints))
+	}
+	return sb.String(), nil
+}
+
+// mcpToolKnowledgeListDomains 列出业务域
+func mcpToolKnowledgeListDomains(args map[string]interface{}) (string, error) {
+	rows, err := db.Query(`
+		SELECT d.domain_code, d.domain_name, d.department, d.status, d.sample_count,
+		       COALESCE(r.risk_level, 'unknown') as risk_level,
+		       COALESCE(r.min_verification, 'auto') as min_verification,
+		       COALESCE(r.max_age_days, 180) as max_age_days
+		FROM wr_knowledge_domains d
+		LEFT JOIN wr_knowledge_domain_risk r ON d.domain_code = r.domain_code
+		ORDER BY d.id ASC`)
+	if err != nil {
+		return "", fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	sb.WriteString("## 业务域列表\n\n")
+	sb.WriteString("| 代码 | 名称 | 部门 | 状态 | 样本数 | 风险 | 最小验证 | 最长有效期 |\n")
+	sb.WriteString("|------|------|------|------|--------|------|----------|------------|\n")
+
+	count := 0
+	for rows.Next() {
+		var code, name, dept, status, risk, minVer string
+		var sampleCount, maxAge int
+		if err := rows.Scan(&code, &name, &dept, &status, &sampleCount, &risk, &minVer, &maxAge); err != nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %d | %s | %s | %d天 |\n",
+			code, name, dept, status, sampleCount, risk, minVer, maxAge))
+		count++
+	}
+
+	if count == 0 {
+		sb.WriteString("暂无业务域数据。\n")
+	}
+	return sb.String(), nil
+}
+
+// mcpToolKnowledgeListItems 列出知识条目
+func mcpToolKnowledgeListItems(args map[string]interface{}) (string, error) {
+	limit := 10
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	var conditions []string
+	var queryArgs []interface{}
+
+	if domain, ok := args["domain"].(string); ok && domain != "" {
+		conditions = append(conditions, "domain_code = ?")
+		queryArgs = append(queryArgs, domain)
+	}
+	if typ, ok := args["type"].(string); ok && typ != "" {
+		conditions = append(conditions, "type = ?")
+		queryArgs = append(queryArgs, typ)
+	}
+	if ver, ok := args["verification"].(string); ok && ver != "" {
+		conditions = append(conditions, "verification = ?")
+		queryArgs = append(queryArgs, ver)
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, type, title, summary, domain_code, confidence, verification, created_at
+		FROM wr_knowledge_items %s ORDER BY created_at DESC LIMIT %d`, where, limit)
+
+	rows, err := db.Query(query, queryArgs...)
+	if err != nil {
+		return "", fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var sb strings.Builder
+	sb.WriteString("## 知识条目\n\n")
+
+	count := 0
+	for rows.Next() {
+		var id int
+		var typ, title, summary, domainCode, verification, createdAt string
+		var confidence float64
+		if err := rows.Scan(&id, &typ, &title, &summary, &domainCode, &confidence, &verification, &createdAt); err != nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("- **[%d]** [%s] %s (域: %s, 置信度: %.0f%%)\n  %s\n\n",
+			id, typ, title, domainCode, confidence*100, truncate(summary, 100)))
+		count++
+	}
+
+	if count == 0 {
+		sb.WriteString("暂无匹配的知识条目。\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("\n共返回 %d 条。", count))
+	}
+	return sb.String(), nil
+}
+
+// mcpToolKnowledgeStats 知识统计
+func mcpToolKnowledgeStats(args map[string]interface{}) (string, error) {
+	var totalRaw, pendingRaw, doneRaw int
+	db.QueryRow("SELECT COUNT(*) FROM wr_knowledge_raw").Scan(&totalRaw)
+	db.QueryRow("SELECT COUNT(*) FROM wr_knowledge_raw WHERE status = 'pending'").Scan(&pendingRaw)
+	db.QueryRow("SELECT COUNT(*) FROM wr_knowledge_raw WHERE status = 'done'").Scan(&doneRaw)
+
+	var totalItems int
+	db.QueryRow("SELECT COUNT(*) FROM wr_knowledge_items").Scan(&totalItems)
+
+	// 按类型统计
+	typeCount := make(map[string]int)
+	rows, _ := db.Query("SELECT type, COUNT(*) FROM wr_knowledge_items GROUP BY type")
+	for rows != nil && rows.Next() {
+		var typ string
+		var cnt int
+		if err := rows.Scan(&typ, &cnt); err == nil {
+			typeCount[typ] = cnt
+		}
+	}
+
+	// 按域统计
+	domainCount := make(map[string]int)
+	rows2, _ := db.Query("SELECT domain_code, COUNT(*) FROM wr_knowledge_items WHERE domain_code != '' GROUP BY domain_code")
+	for rows2 != nil && rows2.Next() {
+		var code string
+		var cnt int
+		if err := rows2.Scan(&code, &cnt); err == nil {
+			domainCount[code] = cnt
+		}
+	}
+
+	var totalDomains int
+	db.QueryRow("SELECT COUNT(*) FROM wr_knowledge_domains").Scan(&totalDomains)
+
+	var sb strings.Builder
+	sb.WriteString("## 知识库统计\n\n")
+	sb.WriteString(fmt.Sprintf("- 原始对话: %d 条 (待处理: %d, 已处理: %d)\n", totalRaw, pendingRaw, doneRaw))
+	sb.WriteString(fmt.Sprintf("- 知识条目: %d 条\n", totalItems))
+	sb.WriteString(fmt.Sprintf("- 业务域: %d 个\n", totalDomains))
+	sb.WriteString("\n### 按类型\n")
+	for t, c := range typeCount {
+		sb.WriteString(fmt.Sprintf("- %s: %d 条\n", t, c))
+	}
+	sb.WriteString("\n### 按领域\n")
+	for d, c := range domainCount {
+		sb.WriteString(fmt.Sprintf("- %s: %d 条\n", d, c))
+	}
+	return sb.String(), nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}

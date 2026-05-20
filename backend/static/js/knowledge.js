@@ -17,6 +17,8 @@ const KnowledgePage = {
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('raw')">原始对话</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('items')">知识条目</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('domains')">业务域</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyze')">单域分析</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyses')">分析记录</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('search')">搜索</button>
         </div>
       </div>
@@ -32,6 +34,8 @@ const KnowledgePage = {
       case 'raw': this.loadRaw(1); break;
       case 'items': this.loadItems(1); break;
       case 'domains': this.loadDomains(); break;
+      case 'analyze': this.renderAnalyze(); break;
+      case 'analyses': this.loadAnalyses(); break;
       case 'search': this.renderSearch(); break;
     }
   },
@@ -259,6 +263,118 @@ const KnowledgePage = {
                   <td>${r.max_age_days || '-'}</td>
                 </tr>`;
               }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } catch (e) {
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+    }
+  },
+
+  // ============================================================
+  // 单域分析
+  // ============================================================
+  async renderAnalyze() {
+    // 先加载域名列表
+    let domains = [];
+    try {
+      const res = await fetch('/api/knowledge/domains');
+      const data = await res.json();
+      domains = data.domains || [];
+    } catch (e) {}
+
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span class="card-title">单域分析</span></div>
+        <div style="padding:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">业务域 *</label>
+              <select id="analyze-domain" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
+                <option value="">请选择业务域</option>
+                ${domains.map(d => `<option value="${d.domain_code}">${d.domain_name} (${d.domain_code})</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">分析类型</label>
+              <select id="analyze-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
+                <option value="domain_overview">领域概览</option>
+                <option value="trend">趋势分析</option>
+                <option value="gap">知识缺口分析</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn" onclick="KnowledgePage.runAnalysis()">开始分析</button>
+          <div id="analyze-result" style="margin-top:16px"></div>
+        </div>
+      </div>
+    `;
+  },
+
+  async runAnalysis() {
+    const domain = document.getElementById('analyze-domain').value;
+    const analysisType = document.getElementById('analyze-type').value;
+    const el = document.getElementById('analyze-result');
+
+    if (!domain) {
+      el.innerHTML = '<p style="color:var(--color-danger)">请选择业务域</p>';
+      return;
+    }
+
+    el.innerHTML = '<p class="text-muted">分析中，请稍候...</p>';
+    try {
+      const res = await fetch('/api/knowledge/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          domain_code: domain,
+          analysis_type: analysisType,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        el.innerHTML = `<p style="color:var(--color-danger)">分析失败：${data.error}</p>`;
+        return;
+      }
+      // 简单 markdown 渲染
+      const result = (data.result || '').replace(/\n/g, '<br>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+      el.innerHTML = `<div style="padding:16px;background:var(--bg-secondary);border-radius:8px;white-space:pre-wrap;line-height:1.8">${result}</div>`;
+    } catch (e) {
+      el.innerHTML = `<p style="color:var(--color-danger)">请求失败：${e.message}</p>`;
+    }
+  },
+
+  // ============================================================
+  // 分析记录
+  // ============================================================
+  async loadAnalyses(page = 1) {
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    try {
+      const res = await fetch(`/api/knowledge/analyses?page=${page}&per_page=20`);
+      const data = await res.json();
+      if (!data.items.length) {
+        el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无分析记录</p></div>';
+        return;
+      }
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header"><span class="card-title">分析记录 (${data.total})</span></div>
+          <table class="table">
+            <thead><tr>
+              <th>任务ID</th><th>领域</th><th>类型</th><th>条数</th><th>状态</th><th>时间</th>
+            </tr></thead>
+            <tbody>
+              ${data.items.map(i => `<tr>
+                <td><code class="text-sm">${i.task_id ? i.task_id.slice(0,24)+'...' : '-'}</code></td>
+                <td>${i.domains || '-'}</td>
+                <td>${i.analysis_type || '-'}</td>
+                <td>${i.item_count || 0}</td>
+                <td><span class="badge badge-${i.status === 'completed' ? 'success' : i.status === 'failed' ? 'danger' : 'warning'}">${i.status}</span></td>
+                <td class="text-sm text-muted">${i.created_at ? i.created_at.slice(0, 19) : '-'}</td>
+              </tr>`).join('')}
             </tbody>
           </table>
         </div>
