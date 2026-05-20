@@ -15,6 +15,7 @@
   Router.register('/cli', CLIPage);
   Router.register('/reqcache', reqCachePage);
   Router.register('/api-test', ApiTestPage);
+  Router.register('/knowledge', KnowledgePage);
   Router.register('/settings', settingsPage);
   Router.init();
 })();

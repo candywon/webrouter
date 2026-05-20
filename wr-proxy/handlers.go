@@ -46,6 +46,7 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/session_sticky", handleSessionSticky)
 	mux.HandleFunc("/admin/features", handleAdminFeatures)
 	mux.HandleFunc("/admin/knowledge_stats", handleKnowledgeStats)
+	mux.HandleFunc("/admin/knowledge_prompt_preview", handleKnowledgePromptPreview)
 }
 
 // checkProxyEnabled 代理网关总开关检查，关闭时返回 503 + 提示信息
@@ -148,6 +149,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	// 如果智能选择替换了模型，需要更新 body 中的 model 字段
 	if smartResult.Downgraded {
 		body = replaceModelInBody(body, originalModel, model)
+	}
+
+	// 3.9 知识增强 System Prompt 注入
+	if token.KnowledgeCaptureEnabled || token.RAGEnabled || token.SystemPromptKnowledge != "" {
+		body = injectKnowledgeSystemPrompt(body, token)
 	}
 
 	var excludeIDs []int

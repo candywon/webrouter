@@ -1,9 +1,64 @@
+"""WebRouter Flask 应用工厂"""
 from flask import Flask
 from extensions import db, cors
 from config import get_config
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+
+# 知识库8个初始业务域种子数据
+_KNOWLEDGE_DOMAINS = [
+    ('legal', '法务', '法务部'),
+    ('finance', '财务', '财务部'),
+    ('hr', '人力资源', '人事部'),
+    ('admin', '行政', '行政部'),
+    ('sales', '销售', '销售部'),
+    ('service', '客服', '客服部'),
+    ('tech', '技术', '技术部'),
+    ('strategy', '战略', '战略部'),
+]
+
+
+def seed_knowledge_domains():
+    """插入初始知识库业务域（仅首次）"""
+    try:
+        from models.knowledge import KnowledgeDomain, KnowledgeDomainRisk
+        count = 0
+        for code, name, dept in _KNOWLEDGE_DOMAINS:
+            existing = KnowledgeDomain.query.filter_by(domain_code=code).first()
+            if not existing:
+                d = KnowledgeDomain(domain_code=code, domain_name=name, department=dept, status='active')
+                db.session.add(d)
+                count += 1
+        db.session.commit()
+
+        # 领域风险配置种子
+        risk_defaults = {
+            'legal': ('high', 'verified', 90, '【注意】以下法务信息仅供参考，不构成法律意见。', True, False, True),
+            'finance': ('high', 'verified', 90, '【注意】以下财务数据仅供参考，正式报告以财务部官方数据为准。', True, True, False),
+            'hr': ('medium', 'auto', 180, '【提示】以下人事信息请以最新公司制度为准。', True, False, True),
+            'admin': ('medium', 'auto', 180, '【提示】以下行政信息请以最新公司制度为准。', True, False, True),
+            'strategy': ('medium', 'auto', 180, '【提示】以下战略信息供内部参考。', False, True, False),
+            'sales': ('low', 'auto', 365, '', True, True, True),
+            'service': ('low', 'auto', 365, '', True, True, True),
+            'tech': ('low', 'auto', 365, '', True, True, True),
+        }
+        for code, (risk, min_ver, age, disclaimer, factual, analytical, procedural) in risk_defaults.items():
+            existing = KnowledgeDomainRisk.query.get(code)
+            if not existing:
+                r = KnowledgeDomainRisk(
+                    domain_code=code, risk_level=risk, min_verification=min_ver,
+                    max_age_days=age, disclaimer_template=disclaimer,
+                    allow_factual_injection=factual, allow_analytical_injection=analytical,
+                    allow_procedural_injection=procedural,
+                )
+                db.session.add(r)
+                count += 1
+        db.session.commit()
+        return count
+    except Exception:
+        db.session.rollback()
+        return 0
 
 
 def create_app(config_class=None):
@@ -35,6 +90,7 @@ def create_app(config_class=None):
     from routes.desensitize import desensitize_bp  # 脱敏规则管理
     from routes.modelgrades import modelgrades_bp  # 模型分级管理
     from routes.modelaliases import modelaliases_bp  # 模型别名管理
+    from routes.knowledge_routes import knowledge_bp  # 企业知识库
 
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(providers_bp, url_prefix='/api/providers')
@@ -50,6 +106,7 @@ def create_app(config_class=None):
     app.register_blueprint(desensitize_bp, url_prefix='/api/desensitize')
     app.register_blueprint(modelgrades_bp, url_prefix='/api/modelgrades')
     app.register_blueprint(modelaliases_bp, url_prefix='/api/modelaliases')
+    app.register_blueprint(knowledge_bp, url_prefix='/api/knowledge')
 
     # 根路径返回前端页面
     @app.route('/')
@@ -69,7 +126,28 @@ def create_app(config_class=None):
             SystemSetting, ModelGrade, ModelAlias,
         )
         from models.provider import Provider  # noqa: F401
+        from models.knowledge import (  # noqa: F401
+            KnowledgeRaw, KnowledgeItem, KnowledgeDomain,
+            KnowledgeDomainRisk, KnowledgeAnalysis,
+        )
         db.create_all()
+
+        # 知识库字段迁移：为已存在的 wr_tokens 表添加新列
+        from sqlalchemy import text
+        knowledge_cols = [
+            ('knowledge_capture_enabled', 'BOOLEAN DEFAULT 0'),
+            ('knowledge_department', 'VARCHAR(100) DEFAULT \'\''),
+            ('rag_enabled', 'BOOLEAN DEFAULT 0'),
+            ('rag_min_relevance', 'FLOAT DEFAULT 0.7'),
+            ('rag_top_k', 'INTEGER DEFAULT 3'),
+            ('system_prompt_knowledge', 'TEXT DEFAULT \'\''),
+        ]
+        for col, ctype in knowledge_cols:
+            try:
+                db.session.execute(text(f'ALTER TABLE wr_tokens ADD COLUMN {col} {ctype}'))
+            except Exception:
+                pass  # 列已存在
+        db.session.commit()
 
         # 初始化种子数据（仅首次建表）
         from models.wr_models import ModelPricing, SystemSetting, ModelGrade
@@ -85,6 +163,9 @@ def create_app(config_class=None):
         count4 = ModelAlias.seed_defaults()
         if count4:
             app.logger.info(f'模型别名种子数据已初始化: {count4} 条')
+        count5 = seed_knowledge_domains()
+        if count5:
+            app.logger.info(f'知识库域种子数据已初始化: {count5} 条')
 
     # 启动定时任务
     _init_schedulers(app)

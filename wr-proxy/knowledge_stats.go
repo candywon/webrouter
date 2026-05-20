@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -60,5 +61,44 @@ func handleKnowledgeStats(w http.ResponseWriter, r *http.Request) {
 		"pending_processing": pendingCount,
 		"total_items":        itemCount,
 		"capture_enabled":    knowledgeEnabled,
+	})
+}
+
+// handleKnowledgePromptPreview 预览 Token 的知识增强 System Prompt
+func handleKnowledgePromptPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	var req struct {
+		TokenID                 int    `json:"token_id"`
+		KnowledgeCaptureEnabled bool   `json:"knowledge_capture_enabled"`
+		KnowledgeDepartment     string `json:"knowledge_department"`
+		RAGEnabled              bool   `json:"rag_enabled"`
+		RAGMinRelevance         float64 `json:"rag_min_relevance"`
+		RAGTopK                 int    `json:"rag_top_k"`
+		SystemPromptKnowledge   string `json:"system_prompt_knowledge"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	// 构造临时 Token 用于预览
+	token := &Token{
+		ID:                      req.TokenID,
+		KnowledgeCaptureEnabled: req.KnowledgeCaptureEnabled,
+		KnowledgeDepartment:     req.KnowledgeDepartment,
+		RAGEnabled:              req.RAGEnabled,
+		SystemPromptKnowledge:   req.SystemPromptKnowledge,
+	}
+
+	prompt := GetKnowledgeSystemPrompt(token)
+
+	writeJSON(w, 200, map[string]interface{}{
+		"system_prompt": prompt,
+		"enabled":       token.KnowledgeCaptureEnabled || token.RAGEnabled || token.SystemPromptKnowledge != "",
+		"department":    token.KnowledgeDepartment,
 	})
 }

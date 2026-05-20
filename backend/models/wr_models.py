@@ -65,6 +65,13 @@ class WRToken(db.Model):
     smart_downgrade = db.Column(db.Boolean, default=False)   # 允许智能降级（强模型→便宜模型）
     desensitize_enabled = db.Column(db.Boolean, default=False)  # 是否启用脱敏
     desensitize_level = db.Column(db.String(20), default='standard')  # 脱敏级别：off/standard/strict
+    # 知识库相关字段
+    knowledge_capture_enabled = db.Column(db.Boolean, default=False)  # 是否开启知识捕获
+    knowledge_department = db.Column(db.String(100), default='')       # 所属部门（用于知识分类）
+    rag_enabled = db.Column(db.Boolean, default=False)                 # 是否开启 RAG 注入
+    rag_min_relevance = db.Column(db.Float, default=0.7)              # RAG 最低相关度
+    rag_top_k = db.Column(db.Integer, default=3)                      # RAG 召回条数
+    system_prompt_knowledge = db.Column(db.Text, default='')           # 知识增强 System Prompt
     enabled = db.Column(db.Boolean, default=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -130,6 +137,12 @@ class WRToken(db.Model):
             'smart_downgrade': self.smart_downgrade,
             'desensitize_enabled': self.desensitize_enabled,
             'desensitize_level': self.desensitize_level,
+            'knowledge_capture_enabled': self.knowledge_capture_enabled,
+            'knowledge_department': self.knowledge_department,
+            'rag_enabled': self.rag_enabled,
+            'rag_min_relevance': self.rag_min_relevance,
+            'rag_top_k': self.rag_top_k,
+            'system_prompt_knowledge': self.system_prompt_knowledge,
             'enabled': self.enabled,
             'is_expired': self.is_expired,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,

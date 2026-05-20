@@ -70,6 +70,7 @@ const Router = {
       '/cli': 'CLI 对接',
       '/reqcache': '请求缓存',
       '/api-test': 'API 测试',
+      '/knowledge': '知识库',
       '/settings': '系统设置',
     };
     document.getElementById('header-title').textContent = titles[path] || 'AI-API综合管理平台';

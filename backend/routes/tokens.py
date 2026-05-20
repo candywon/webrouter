@@ -60,6 +60,19 @@ def create_token():
         if level not in ('off', 'standard', 'strict'):
             return jsonify({'error': 'desensitize_level 必须为 off/standard/strict'}), 400
         token.desensitize_level = level
+    # 知识库相关字段
+    if 'knowledge_capture_enabled' in data:
+        token.knowledge_capture_enabled = bool(data['knowledge_capture_enabled'])
+    if 'knowledge_department' in data:
+        token.knowledge_department = data['knowledge_department'].strip()
+    if 'rag_enabled' in data:
+        token.rag_enabled = bool(data['rag_enabled'])
+    if 'rag_min_relevance' in data:
+        token.rag_min_relevance = float(data['rag_min_relevance'])
+    if 'rag_top_k' in data:
+        token.rag_top_k = int(data['rag_top_k'])
+    if 'system_prompt_knowledge' in data:
+        token.system_prompt_knowledge = data['system_prompt_knowledge']
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data and data['expires_at']:
@@ -159,6 +172,19 @@ def update_token(token_id):
         if level not in ('off', 'standard', 'strict'):
             return jsonify({'error': 'desensitize_level 必须为 off/standard/strict'}), 400
         token.desensitize_level = level
+    # 知识库相关字段
+    if 'knowledge_capture_enabled' in data:
+        token.knowledge_capture_enabled = bool(data['knowledge_capture_enabled'])
+    if 'knowledge_department' in data:
+        token.knowledge_department = data['knowledge_department'].strip()
+    if 'rag_enabled' in data:
+        token.rag_enabled = bool(data['rag_enabled'])
+    if 'rag_min_relevance' in data:
+        token.rag_min_relevance = float(data['rag_min_relevance'])
+    if 'rag_top_k' in data:
+        token.rag_top_k = int(data['rag_top_k'])
+    if 'system_prompt_knowledge' in data:
+        token.system_prompt_knowledge = data['system_prompt_knowledge']
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data:
