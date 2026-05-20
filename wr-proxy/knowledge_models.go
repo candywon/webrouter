@@ -31,7 +31,7 @@ type KnowledgeDomain struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// 初始预设的 8 个业务域
+// 初始预设的 9 个业务域
 var initialDomains = []struct {
 	Code, Name string
 }{
@@ -43,6 +43,7 @@ var initialDomains = []struct {
 	{"service", "售后客服"},
 	{"tech", "技术研发"},
 	{"strategy", "战略决策"},
+	{"marketing", "市场营销"},
 }
 
 // DomainRiskConfig 领域风险配置

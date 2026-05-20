@@ -16,6 +16,7 @@ _KNOWLEDGE_DOMAINS = [
     ('service', '客服', '客服部'),
     ('tech', '技术', '技术部'),
     ('strategy', '战略', '战略部'),
+    ('marketing', '市场', '市场部'),
 ]
 
 
@@ -40,6 +41,7 @@ def seed_knowledge_domains():
             'admin': ('medium', 'auto', 180, '【提示】以下行政信息请以最新公司制度为准。', True, False, True),
             'strategy': ('medium', 'auto', 180, '【提示】以下战略信息供内部参考。', False, True, False),
             'sales': ('low', 'auto', 365, '', True, True, True),
+            'marketing': ('low', 'auto', 365, '', True, True, True),
             'service': ('low', 'auto', 365, '', True, True, True),
             'tech': ('low', 'auto', 365, '', True, True, True),
         }

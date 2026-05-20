@@ -179,6 +179,7 @@ func seedInitialDomainRisk() error {
 		{"admin", "medium", "auto", 180, "【提示】以下行政信息请以最新公司制度为准。", true, false, true},
 		{"strategy", "medium", "auto", 180, "【提示】以下战略信息供内部参考。", false, true, false},
 		{"sales", "low", "auto", 365, "", true, true, true},
+		{"marketing", "low", "auto", 365, "", true, true, true},
 		{"service", "low", "auto", 365, "", true, true, true},
 		{"tech", "low", "auto", 365, "", true, true, true},
 	}
