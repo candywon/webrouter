@@ -33,8 +33,15 @@ func buildRAGContext(body []byte, token *Token) (string, error) {
 	}
 
 	if len(results) == 0 {
+		RecordRAGMiss()
 		return "", nil
 	}
+
+	// 记录反馈
+	minSim := results[len(results)-1].Similarity
+	maxSim := results[0].Similarity
+	RecordRAGHit()
+	buildRAGFeedbackFromResults(token, query, results, minSim, maxSim)
 
 	// 3. 质量控制过滤
 	filtered, disclaimers := ApplyRAGFilter(results)
@@ -48,7 +55,7 @@ func buildRAGContext(body []byte, token *Token) (string, error) {
 
 	// 5. 追加免责声明
 	if len(disclaimers) > 0 {
-		ctx += "\n\n" + joinStrings(disclaimers, "\n")
+		ctx += "\n" + joinStrings(disclaimers, "\n")
 	}
 
 	return ctx, nil

@@ -96,7 +96,17 @@ func main() {
 		InitEmbedding()
 		InitVectorCache()
 		go startEmbeddingBackfillScheduler()
+		// 启动记忆层
+		InitMemoryWorker()
+		go startMemoryCleanup()
+		// RAG 反馈清理
+		go startRAGFeedbackCleanup()
 		LogInfo("Knowledge capture: ENABLED")
+	}
+
+	// 4.7 初始化记忆表
+	if err := InitMemoryTables(); err != nil {
+		LogWarn("Memory tables init failed: %v", err)
 	}
 
 	// 5. 启动健康检测

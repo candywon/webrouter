@@ -591,3 +591,105 @@ func TestFormatRAGContext(t *testing.T) {
 		t.Error("context should contain similarity percentage")
 	}
 }
+
+// --- Week 7+8: 记忆/压缩/反馈测试 ---
+
+func TestContainsAny(t *testing.T) {
+	if !containsAny("我通常使用Python", []string{"我通常", "我喜欢"}) {
+		t.Error("should detect 我通常")
+	}
+	if containsAny("今天天气不错", []string{"我通常", "我喜欢"}) {
+		t.Error("should not detect preference in neutral text")
+	}
+	if !containsAny("请记住这个规则", []string{"请记住", "注意"}) {
+		t.Error("should detect 请记住")
+	}
+}
+
+func TestExtractMemoriesSimple_Preference(t *testing.T) {
+	// Skip if DB not initialized (unit tests don't have DB)
+	if db == nil {
+		t.Skip("DB not initialized, skipping")
+	}
+	token := &Token{ID: 999, Name: "test"}
+	extractMemoriesSimple(token, "", "我通常使用Go语言开发", "好的，我会记住这个偏好。")
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM wr_agent_memory WHERE token_id = 999 AND category = 'preference'").Scan(&count)
+	if count == 0 {
+		t.Error("should have saved a preference memory")
+	}
+	db.Exec("DELETE FROM wr_agent_memory WHERE token_id = 999")
+}
+
+func TestExtractMemoriesSimple_Fact(t *testing.T) {
+	if db == nil {
+		t.Skip("DB not initialized, skipping")
+	}
+	token := &Token{ID: 998, Name: "test"}
+	extractMemoriesSimple(token, "", "请记住我们的规定：所有代码必须经过Code Review", "好的，已记录。")
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM wr_agent_memory WHERE token_id = 998 AND category = 'fact'").Scan(&count)
+	if count == 0 {
+		t.Error("should have saved a fact memory")
+	}
+	db.Exec("DELETE FROM wr_agent_memory WHERE token_id = 998")
+}
+
+func TestRAGFeedback_RecordAndStats(t *testing.T) {
+	// Reset
+	ragFeedbacksMu.Lock()
+	ragFeedbacks = nil
+	ragFeedbacksMu.Unlock()
+
+	RecordRAGFeedback(ragFeedback{
+		TokenID:       1,
+		TokenName:     "test",
+		DomainCode:    "finance",
+		Query:         "Q3财报",
+		HitCount:      3,
+		MinSimilarity: 0.72,
+		MaxSimilarity: 0.95,
+		Timestamp:     "2026-05-20 15:00:00",
+	})
+
+	stats := GetRAGFeedbackStats()
+	if stats["total_feedbacks"] != 1 {
+		t.Errorf("should have 1 feedback, got %v", stats["total_feedbacks"])
+	}
+}
+
+func TestNeedsCompression(t *testing.T) {
+	// Under threshold
+	msgs := make([]map[string]interface{}, 5)
+	for i := range msgs {
+		msgs[i] = map[string]interface{}{"role": "user", "content": "short"}
+	}
+	if needsCompression(msgs) {
+		t.Error("5 short messages should not need compression")
+	}
+
+	// Over threshold
+	msgs = make([]map[string]interface{}, 35)
+	for i := range msgs {
+		msgs[i] = map[string]interface{}{"role": "user", "content": "hello"}
+	}
+	if !needsCompression(msgs) {
+		t.Error("35 messages should need compression (max is 30)")
+	}
+}
+
+func TestParseCompressResponse_NoJSON(t *testing.T) {
+	result := parseCompressResponse("this is not json")
+	if result.Compressed != "this is not json" {
+		t.Error("non-json should return raw text as compressed")
+	}
+}
+
+func TestRoundTo(t *testing.T) {
+	if roundTo(0.12345, 3) != 0.123 {
+		t.Errorf("roundTo failed: %.3f", roundTo(0.12345, 3))
+	}
+	if roundTo(0.9999, 2) != 1.0 {
+		t.Errorf("roundTo failed: %.2f", roundTo(0.9999, 2))
+	}
+}

@@ -61,6 +61,19 @@ func RegisterHandlers(mux *http.ServeMux) {
 	// Embedding + RAG（Flask 调用）
 	mux.HandleFunc("/admin/knowledge_embedding_backfill", handleEmbeddingBackfill)
 	mux.HandleFunc("/admin/knowledge_rag_stats", handleRAGStats)
+
+	// RAG 反馈（Flask 调用）
+	mux.HandleFunc("/admin/rag_feedback_submit", handleRAGFeedbackSubmit)
+	mux.HandleFunc("/admin/rag_feedback_stats", handleRAGFeedbackStats)
+
+	// 记忆管理（Flask 调用）
+	mux.HandleFunc("/admin/memory_list", handleMemoryList)
+
+	// 知识导出（Flask 调用）
+	mux.HandleFunc("/admin/knowledge_export", handleKnowledgeExport)
+
+	// 对话压缩（Flask 调用）
+	mux.HandleFunc("/admin/conversation_compress", handleConversationCompress)
 }
 
 // checkProxyEnabled 代理网关总开关检查，关闭时返回 503 + 提示信息

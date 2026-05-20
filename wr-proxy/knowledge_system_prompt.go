@@ -27,7 +27,7 @@ func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 		parts = append(parts, "【部门标识】你正在为 "+token.KnowledgeDepartment+" 提供服务。")
 	}
 
-	// 2. RAG 上下文（NEW）
+	// 2. RAG 上下文
 	if token.RAGEnabled {
 		ragCtx, err := buildRAGContext(body, token)
 		if err != nil {
@@ -35,9 +35,6 @@ func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 		}
 		if ragCtx != "" {
 			parts = append(parts, ragCtx)
-			RecordRAGHit()
-		} else {
-			RecordRAGMiss()
 		}
 	}
 

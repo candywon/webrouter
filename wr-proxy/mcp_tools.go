@@ -89,9 +89,66 @@ func registerKnowledgeMCPTools() {
 		},
 		Handler: mcpToolKnowledgeStats,
 	})
+
+	// 持久记忆工具
+	registerMCPTool(MCPToolDef{
+		Name:        "memory_save",
+		Description: "保存一条持久化记忆。用于记住用户偏好、事实、目标等跨会话信息。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"category": map[string]interface{}{
+					"type":        "string",
+					"description": "记忆类别: preference/fact/context/goal/constraint",
+				},
+				"title": map[string]interface{}{
+					"type":        "string",
+					"description": "记忆标题",
+				},
+				"content": map[string]interface{}{
+					"type":        "string",
+					"description": "记忆内容",
+				},
+				"tags": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]string{"type": "string"},
+					"description": "标签列表",
+				},
+				"priority": map[string]interface{}{
+					"type":        "integer",
+					"description": "优先级 1-5，5最重要",
+				},
+				"expires_at": map[string]interface{}{
+					"type":        "string",
+					"description": "过期时间（可选），格式: 2006-01-02 15:04:05",
+				},
+			},
+			"required": []string{"category", "title", "content"},
+		},
+		Handler: mcpToolMemorySave,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "memory_recall",
+		Description: "检索持久化记忆。支持按类别过滤，返回相关历史信息。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"category": map[string]interface{}{
+					"type":        "string",
+					"description": "可选：按类别过滤",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "返回条数上限，默认10",
+				},
+			},
+		},
+		Handler: mcpToolMemoryRecall,
+	})
 }
 
-// mcpToolKnowledgeSearch 知识搜索
+// mcpToolKnowledgeSearch 知识搜索（支持部门权限过滤）
 func mcpToolKnowledgeSearch(args map[string]interface{}) (string, error) {
 	keyword, ok := args["keyword"].(string)
 	if !ok || keyword == "" {
@@ -99,6 +156,7 @@ func mcpToolKnowledgeSearch(args map[string]interface{}) (string, error) {
 	}
 
 	domain, _ := args["domain"].(string)
+	department, _ := args["department"].(string)
 
 	// 搜索知识条目
 	var query string
@@ -106,16 +164,22 @@ func mcpToolKnowledgeSearch(args map[string]interface{}) (string, error) {
 	if domain != "" {
 		query = `SELECT id, type, title, summary, domain_code, confidence, verification, created_at
 			FROM wr_knowledge_items
-			WHERE domain_code = ? AND (title LIKE ? OR summary LIKE ? OR source_quote LIKE ?)
-			ORDER BY confidence DESC LIMIT 10`
+			WHERE domain_code = ? AND (title LIKE ? OR summary LIKE ? OR source_quote LIKE ?)`
 		queryArgs = append(queryArgs, domain, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	} else {
 		query = `SELECT id, type, title, summary, domain_code, confidence, verification, created_at
 			FROM wr_knowledge_items
-			WHERE title LIKE ? OR summary LIKE ? OR source_quote LIKE ?
-			ORDER BY confidence DESC LIMIT 10`
+			WHERE title LIKE ? OR summary LIKE ? OR source_quote LIKE ?`
 		queryArgs = append(queryArgs, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 	}
+
+	// 部门权限过滤
+	if department != "" {
+		query += " AND (department = ? OR department = '')"
+		queryArgs = append(queryArgs, department)
+	}
+
+	query += " ORDER BY confidence DESC LIMIT 10"
 
 	rows, err := db.Query(query, queryArgs...)
 	if err != nil {
@@ -259,6 +323,10 @@ func mcpToolKnowledgeListItems(args map[string]interface{}) (string, error) {
 		conditions = append(conditions, "verification = ?")
 		queryArgs = append(queryArgs, ver)
 	}
+	if dept, ok := args["department"].(string); ok && dept != "" {
+		conditions = append(conditions, "(department = ? OR department = '')")
+		queryArgs = append(queryArgs, dept)
+	}
 
 	where := ""
 	if len(conditions) > 0 {
@@ -346,6 +414,91 @@ func mcpToolKnowledgeStats(args map[string]interface{}) (string, error) {
 	sb.WriteString("\n### 按领域\n")
 	for d, c := range domainCount {
 		sb.WriteString(fmt.Sprintf("- %s: %d 条\n", d, c))
+	}
+	return sb.String(), nil
+}
+
+// mcpToolMemorySave 保存持久记忆
+func mcpToolMemorySave(args map[string]interface{}) (string, error) {
+	category, ok := args["category"].(string)
+	if !ok || category == "" {
+		return "", fmt.Errorf("category is required")
+	}
+	title, _ := args["title"].(string)
+	content, _ := args["content"].(string)
+	if content == "" {
+		return "", fmt.Errorf("content is required")
+	}
+
+	tokenID := 0
+	if tid, ok := args["token_id"].(float64); ok {
+		tokenID = int(tid)
+	}
+	tokenName := ""
+	if tn, ok := args["token_name"].(string); ok {
+		tokenName = tn
+	}
+
+	priority := 3
+	if p, ok := args["priority"].(float64); ok && p >= 1 && p <= 5 {
+		priority = int(p)
+	}
+
+	expiresAt := ""
+	if exp, ok := args["expires_at"].(string); ok {
+		expiresAt = exp
+	}
+
+	var tags []string
+	if t, ok := args["tags"].([]interface{}); ok {
+		for _, v := range t {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	}
+
+	token := &Token{ID: tokenID, Name: tokenName}
+	id, err := SaveMemory(token, "", category, title, content, tags, priority, expiresAt)
+	if err != nil {
+		return "", fmt.Errorf("save memory failed: %w", err)
+	}
+
+	return fmt.Sprintf("记忆已保存 (ID: %d, 类别: %s)", id, category), nil
+}
+
+// mcpToolMemoryRecall 检索持久记忆
+func mcpToolMemoryRecall(args map[string]interface{}) (string, error) {
+	limit := 10
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	category, _ := args["category"].(string)
+	tokenID := 0
+	if tid, ok := args["token_id"].(float64); ok {
+		tokenID = int(tid)
+	}
+
+	token := &Token{ID: tokenID}
+	memories, err := RecallMemories(token, "", category, limit)
+	if err != nil {
+		return "", fmt.Errorf("recall failed: %w", err)
+	}
+
+	if len(memories) == 0 {
+		return "未找到相关记忆。", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("## 记忆 (%d 条)\n\n", len(memories)))
+	for _, m := range memories {
+		sb.WriteString(fmt.Sprintf("- **[%s]** %s (优先级: %d)\n", m.Category, m.Title, m.Priority))
+		sb.WriteString(fmt.Sprintf("  %s\n", truncate(m.Content, 200)))
+		if m.Tags != "" && m.Tags != "[]" {
+			sb.WriteString(fmt.Sprintf("  标签: %s\n", m.Tags))
+		}
+		sb.WriteString(fmt.Sprintf("  创建于: %s\n\n", m.CreatedAt))
 	}
 	return sb.String(), nil
 }

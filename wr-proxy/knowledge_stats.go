@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -277,5 +278,124 @@ func handleRAGStats(w http.ResponseWriter, r *http.Request) {
 			"hits":   ragHits,
 			"misses": ragMisses,
 		},
+	})
+}
+
+// handleKnowledgeExport 导出知识条目（JSON格式）
+func handleKnowledgeExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	domain := r.URL.Query().Get("domain")
+	department := r.URL.Query().Get("department")
+	itemType := r.URL.Query().Get("type")
+	sensitivity := r.URL.Query().Get("sensitivity")
+
+	var conditions []string
+	var args []interface{}
+
+	if domain != "" {
+		conditions = append(conditions, "domain_code = ?")
+		args = append(args, domain)
+	}
+	if department != "" {
+		conditions = append(conditions, "department = ?")
+		args = append(args, department)
+	}
+	if itemType != "" {
+		conditions = append(conditions, "type = ?")
+		args = append(args, itemType)
+	}
+	if sensitivity != "" {
+		conditions = append(conditions, "sensitivity = ?")
+		args = append(args, sensitivity)
+	}
+
+	where := ""
+	if len(conditions) > 0 {
+		where = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, type, title, summary, domain_code, department, source_quote,
+		       data_points, confidence, verification, sensitivity, token_name,
+		       model_name, created_at
+		FROM wr_knowledge_items %s ORDER BY created_at DESC`, where)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "query failed: " + err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type exportItem struct {
+		ID          int     `json:"id"`
+		Type        string  `json:"type"`
+		Title       string  `json:"title"`
+		Summary     string  `json:"summary"`
+		DomainCode  string  `json:"domain_code"`
+		Department  string  `json:"department"`
+		SourceQuote string  `json:"source_quote"`
+		DataPoints  string  `json:"data_points"`
+		Confidence  float64 `json:"confidence"`
+		Verification string `json:"verification"`
+		Sensitivity string  `json:"sensitivity"`
+		TokenName   string  `json:"token_name"`
+		ModelName   string  `json:"model_name"`
+		CreatedAt   string  `json:"created_at"`
+	}
+
+	var items []exportItem
+	for rows.Next() {
+		var it exportItem
+		if err := rows.Scan(&it.ID, &it.Type, &it.Title, &it.Summary, &it.DomainCode,
+			&it.Department, &it.SourceQuote, &it.DataPoints, &it.Confidence,
+			&it.Verification, &it.Sensitivity, &it.TokenName, &it.ModelName, &it.CreatedAt); err != nil {
+			continue
+		}
+		items = append(items, it)
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"total": len(items),
+		"domain": domain,
+		"department": department,
+		"type": itemType,
+		"items": items,
+	})
+}
+
+// handleMemoryList 记忆列表 API
+func handleMemoryList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	tokenID := 0
+	category := ""
+	limit := 50
+
+	if q := r.URL.Query().Get("token_id"); q != "" {
+		fmt.Sscanf(q, "%d", &tokenID)
+	}
+	category = r.URL.Query().Get("category")
+	if q := r.URL.Query().Get("limit"); q != "" {
+		fmt.Sscanf(q, "%d", &limit)
+	}
+
+	token := &Token{ID: tokenID}
+	memories, err := RecallMemories(token, "", category, limit)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"memories": memories,
+		"total":    len(memories),
 	})
 }
