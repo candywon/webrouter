@@ -22,6 +22,7 @@ const KnowledgePage = {
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyses')">分析记录</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('extract')">知识提取</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('search')">搜索</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('memories')">记忆管理</button>
         </div>
       </div>
       <div id="knowledge-tab-content"></div>
@@ -41,6 +42,7 @@ const KnowledgePage = {
       case 'analyses': this.loadAnalyses(); break;
       case 'extract': this.renderExtract(); break;
       case 'search': this.renderSearch(); break;
+      case 'memories': this.loadMemories(1); break;
     }
   },
 
@@ -183,10 +185,24 @@ const KnowledgePage = {
   // 知识条目
   // ============================================================
   async loadItems(page = 1) {
-    const el = document.getElementById('knowledge-tab-content');
-    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    // 先加载部门列表
+    let departments = [];
     try {
-      const res = await fetch(`/api/knowledge/items?page=${page}&per_page=20`);
+      const res = await fetch('/api/knowledge/domains');
+      const data = await res.json();
+      departments = [...new Set((data.domains || []).filter(d => d.department).map(d => d.department))];
+    } catch (e) {}
+
+    const el = document.getElementById('knowledge-tab-content');
+    const deptFilter = departments.length ? `<label style="font-size:12px;color:var(--text-muted)">部门:</label>
+      <select id="items-dept-filter" onchange="KnowledgePage.loadItems(1)" style="padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
+        <option value="">全部</option>
+        ${departments.map(d => `<option value="${d}">${d}</option>`).join('')}
+      </select>` : '';
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>`;
+    try {
+      const dept = document.getElementById('items-dept-filter')?.value || '';
+      const res = await fetch(`/api/knowledge/items?page=${page}&per_page=20${dept ? '&department=' + encodeURIComponent(dept) : ''}`);
       const data = await res.json();
       if (!data.items.length) {
         el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无知识条目</p></div>';
@@ -196,16 +212,18 @@ const KnowledgePage = {
         <div class="card">
           <div class="card-header">
             <span class="card-title">知识条目 (${data.total} 条)</span>
+            ${deptFilter ? '<div style="display:flex;gap:8px;align-items:center">' + deptFilter + '</div>' : ''}
           </div>
           <table class="table">
             <thead><tr>
-              <th>ID</th><th>类型</th><th>标题</th><th>领域</th><th>置信度</th><th>验证</th><th>时间</th>
+              <th>ID</th><th>类型</th><th>标题</th><th>部门</th><th>领域</th><th>置信度</th><th>验证</th><th>时间</th>
             </tr></thead>
             <tbody>
               ${data.items.map(i => `<tr>
                 <td>${i.id}</td>
                 <td><span class="badge badge-${this.typeColor(i.type)}">${i.type}</span></td>
                 <td>${this.escapeHtml(i.title)}</td>
+                <td>${i.department || '-'}</td>
                 <td>${i.domain_code || '-'}</td>
                 <td>${(i.confidence * 100).toFixed(0)}%</td>
                 <td><span class="badge badge-${this.verificationColor(i.verification)}">${i.verification}</span></td>
@@ -840,6 +858,205 @@ const KnowledgePage = {
     } catch (e) {
       el.innerHTML = `<p style="color:var(--color-danger)">搜索失败：${e.message}</p>`;
     }
+  },
+
+  // ============================================================
+  // 记忆管理
+  // ============================================================
+  async loadMemories(page = 1) {
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span class="card-title">记忆管理</span></div>
+        <div style="padding:20px">
+          <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+            <label style="font-size:12px;color:var(--text-muted)">Token ID:</label>
+            <input type="number" id="mem-token-id" value="0" min="0"
+              style="width:80px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+            <label style="font-size:12px;color:var(--text-muted)">分类:</label>
+            <select id="mem-category"
+              style="padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
+              <option value="">全部分类</option>
+              <option value="preference">偏好 (preference)</option>
+              <option value="fact">事实 (fact)</option>
+              <option value="context">上下文 (context)</option>
+              <option value="goal">目标 (goal)</option>
+              <option value="constraint">约束 (constraint)</option>
+            </select>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadMemories(1)">查询</button>
+          </div>
+          <div id="memories-table-container"></div>
+        </div>
+      </div>
+    `;
+    // 自动加载
+    this.fetchMemoriesTable();
+  },
+
+  async fetchMemoriesTable() {
+    const tokenId = document.getElementById('mem-token-id').value;
+    const category = document.getElementById('mem-category').value;
+    const container = document.getElementById('memories-table-container');
+    container.innerHTML = '<p class="text-muted">加载中...</p>';
+    try {
+      let url = `/api/knowledge/memory_list?limit=50`;
+      if (tokenId && tokenId !== '0') url += `&token_id=${tokenId}`;
+      if (category) url += `&category=${category}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const memories = data.memories || [];
+      if (!memories.length) {
+        container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无记忆数据</p></div>';
+        return;
+      }
+      container.innerHTML = `
+        <table class="table">
+          <thead><tr>
+            <th>ID</th><th>Token</th><th>分类</th><th>标题</th><th>内容</th><th>优先级</th><th>过期时间</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+            ${memories.map(m => `<tr>
+              <td>${m.id}</td>
+              <td class="text-sm">${m.token_name || '-'}</td>
+              <td><span class="badge badge-${this.memCategoryColor(m.category)}">${m.category}</span></td>
+              <td>${this.escapeHtml(m.title)}</td>
+              <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${this.escapeHtml(m.content)}">${this.escapeHtml(m.content.slice(0, 80))}${m.content.length > 80 ? '...' : ''}</td>
+              <td>${'⭐'.repeat(m.priority || 3)}</td>
+              <td class="text-sm text-muted">${m.expires_at ? m.expires_at.slice(0, 16) : '永久'}</td>
+              <td>
+                <button class="btn btn-sm" onclick="KnowledgePage.showMemoryDetail(${m.id})">详情</button>
+                <button class="btn btn-sm" style="color:var(--color-danger)" onclick="KnowledgePage.deleteMemory(${m.id})">删除</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <p class="text-sm text-muted" style="padding:8px 0">共 ${memories.length} 条记忆</p>
+      `;
+    } catch (e) {
+      container.innerHTML = `<p style="color:var(--color-danger)">加载失败：${e.message}</p>`;
+    }
+  },
+
+  memCategoryColor(c) {
+    return { preference: 'info', fact: 'success', context: 'default', goal: 'warning', constraint: 'danger' }[c] || 'default';
+  },
+
+  async showMemoryDetail(id) {
+    // 通过 memory_list API 查找单条记忆（遍历）
+    const tokenId = document.getElementById('mem-token-id').value || '0';
+    try {
+      const res = await fetch(`/api/knowledge/memory_list?token_id=${tokenId}&limit=200`);
+      const data = await res.json();
+      const mem = (data.memories || []).find(m => m.id === id);
+      if (!mem) { alert('记忆条目未找到'); return; }
+      const el = document.getElementById('knowledge-tab-content');
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">记忆详情 #${mem.id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadMemories(1)">返回列表</button>
+          </div>
+          <div style="padding:20px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+              <p><b>Token:</b> ${mem.token_name} (ID: ${mem.token_id})</p>
+              <p><b>分类:</b> <span class="badge badge-${this.memCategoryColor(mem.category)}">${mem.category}</span></p>
+              <p><b>会话:</b> ${mem.session_id || '全局'}</p>
+              <p><b>优先级:</b> ${'⭐'.repeat(mem.priority || 3)} (${mem.priority || 3}/5)</p>
+              <p><b>创建时间:</b> ${mem.created_at ? mem.created_at.slice(0, 19) : '-'}</p>
+              <p><b>过期时间:</b> ${mem.expires_at ? mem.expires_at.slice(0, 19) : '永久'}</p>
+            </div>
+            <hr>
+            <p><b>标题:</b> ${this.escapeHtml(mem.title)}</p>
+            <p style="margin-top:8px"><b>内容:</b></p>
+            <pre style="white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:13px">${this.escapeHtml(mem.content)}</pre>
+            <p style="margin-top:8px"><b>标签:</b> ${mem.tags || '[]'}</p>
+            <hr style="margin:16px 0;border-color:var(--border)">
+            <div style="display:flex;gap:8px">
+              <button class="btn" onclick="KnowledgePage.showMemoryEdit(${mem.id})">编辑</button>
+              <button class="btn" style="color:var(--color-danger)" onclick="KnowledgePage.deleteMemory(${mem.id})">删除</button>
+            </div>
+          </div>
+        </div>
+      `;
+    } catch (e) { alert('加载详情失败：' + e.message); }
+  },
+
+  async showMemoryEdit(id) {
+    const tokenId = document.getElementById('mem-token-id').value || '0';
+    try {
+      const res = await fetch(`/api/knowledge/memory_list?token_id=${tokenId}&limit=200`);
+      const data = await res.json();
+      const mem = (data.memories || []).find(m => m.id === id);
+      if (!mem) { alert('记忆条目未找到'); return; }
+      const el = document.getElementById('knowledge-tab-content');
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">编辑记忆 #${id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.showMemoryDetail(${id})">返回</button>
+          </div>
+          <div style="padding:20px">
+            <div style="margin-bottom:12px">
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">标题</label>
+              <input type="text" id="edit-mem-title" value="${this.escapeHtml(mem.title)}"
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+            </div>
+            <div style="margin-bottom:12px">
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">内容</label>
+              <textarea id="edit-mem-content" rows="6"
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">${this.escapeHtml(mem.content)}</textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">优先级 (1-5)</label>
+                <input type="number" id="edit-mem-priority" value="${mem.priority || 3}" min="1" max="5"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">过期时间（可选）</label>
+                <input type="datetime-local" id="edit-mem-expires" value="${mem.expires_at ? mem.expires_at.slice(0, 16) : ''}"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+              </div>
+            </div>
+            <button class="btn" onclick="KnowledgePage.saveMemoryEdit(${id})">保存</button>
+          </div>
+        </div>
+      `;
+    } catch (e) { alert('加载编辑失败：' + e.message); }
+  },
+
+  async saveMemoryEdit(id) {
+    const title = document.getElementById('edit-mem-title').value;
+    const content = document.getElementById('edit-mem-content').value;
+    const priority = parseInt(document.getElementById('edit-mem-priority').value);
+    const expiresAt = document.getElementById('edit-mem-expires').value || null;
+    const tokenId = document.getElementById('mem-token-id').value || '0';
+    if (!title || !content) { alert('标题和内容不能为空'); return; }
+    try {
+      const body = { title, content, priority };
+      if (expiresAt) body.expires_at = expiresAt;
+      const res = await fetch(`/api/knowledge/memory/${id}?token_id=${tokenId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.error) { alert('保存失败：' + data.error); return; }
+      alert('已保存');
+      this.showMemoryDetail(id);
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  async deleteMemory(id) {
+    if (!confirm('确认删除该记忆条目？')) return;
+    const tokenId = document.getElementById('mem-token-id').value || '0';
+    try {
+      const res = await fetch(`/api/knowledge/memory/${id}?token_id=${tokenId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.error) { alert('删除失败：' + data.error); return; }
+      alert('已删除');
+      this.fetchMemoriesTable();
+    } catch (e) { alert('请求失败：' + e.message); }
   },
 
   escapeHtml(s) {

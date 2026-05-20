@@ -137,10 +137,10 @@ def list_items():
     keyword = request.args.get('keyword', '')
 
     q = KnowledgeItem.query
-    if domain:
-        q = q.filter(KnowledgeItem.domain_code == domain)
     if department:
         q = q.filter(KnowledgeItem.department == department)
+    if domain:
+        q = q.filter(KnowledgeItem.domain_code == domain)
     if item_type:
         q = q.filter(KnowledgeItem.type == item_type)
     if verification:
