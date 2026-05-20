@@ -638,3 +638,142 @@ def batch_approve():
 
     db.session.commit()
     return jsonify({'message': f'已批量通过 {count} 条', 'count': count})
+
+
+# ============================================================
+# Week 7+8: RAG 反馈 / 记忆 / 导出 / 压缩
+# ============================================================
+
+def _proxy_url(path):
+    """构造 wr-proxy URL"""
+    import os
+    base = os.environ.get('WR_PROXY_URL', 'http://127.0.0.1:5051')
+    return f'{base}{path}'
+
+
+@knowledge_bp.route('/rag_feedback', methods=['POST'])
+def rag_feedback():
+    """提交 RAG 反馈（代理到 wr-proxy）"""
+    import requests as req_lib
+    try:
+        resp = req_lib.post(
+            _proxy_url('/admin/knowledge/rag_feedback'),
+            json=request.get_json(),
+            timeout=10,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'RAG 反馈服务不可用: {e}'}), 503
+
+
+@knowledge_bp.route('/rag_feedback_stats')
+def rag_feedback_stats():
+    """RAG 反馈统计"""
+    import requests as req_lib
+    try:
+        resp = req_lib.get(_proxy_url('/admin/knowledge/rag_feedback_stats'), timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'RAG 统计服务不可用: {e}'}), 503
+
+
+@knowledge_bp.route('/memory_list')
+def memory_list():
+    """记忆列表"""
+    import requests as req_lib
+    try:
+        params = {k: v for k, v in request.args.items()}
+        resp = req_lib.get(_proxy_url('/admin/knowledge/memory_list'), params=params, timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'记忆服务不可用: {e}'}), 503
+
+
+@knowledge_bp.route('/memory/<int:memory_id>', methods=['DELETE'])
+def memory_delete(memory_id):
+    """删除记忆（本地 DB 操作）"""
+    from models.knowledge import AgentMemory
+    token_id = request.args.get('token_id', 0, type=int)
+    mem = AgentMemory.query.get(memory_id)
+    if not mem or (token_id and mem.token_id != token_id):
+        return jsonify({'error': 'Not found'}), 404
+    db.session.delete(mem)
+    db.session.commit()
+    return jsonify({'message': '记忆已删除'})
+
+
+@knowledge_bp.route('/memory/<int:memory_id>', methods=['PUT'])
+def memory_update(memory_id):
+    """更新记忆（本地 DB 操作）"""
+    from models.knowledge import AgentMemory
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
+    token_id = request.args.get('token_id', 0, type=int)
+    mem = AgentMemory.query.get(memory_id)
+    if not mem or (token_id and mem.token_id != token_id):
+        return jsonify({'error': 'Not found'}), 404
+    if 'content' in data:
+        mem.content = data['content']
+    if 'title' in data:
+        mem.title = data['title'].strip()
+    if 'priority' in data:
+        mem.priority = int(data['priority'])
+    if 'expires_at' in data and data['expires_at']:
+        mem.expires_at = data['expires_at']
+    db.session.commit()
+    return jsonify({'message': '记忆已更新', 'memory': mem.to_dict()})
+
+
+@knowledge_bp.route('/knowledge_export')
+def knowledge_export():
+    """知识导出（代理到 wr-proxy）"""
+    import requests as req_lib
+    try:
+        params = {k: v for k, v in request.args.items()}
+        resp = req_lib.get(_proxy_url('/admin/knowledge/export'), params=params, timeout=30)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'导出服务不可用: {e}'}), 503
+
+
+@knowledge_bp.route('/conversation_compress', methods=['POST'])
+def conversation_compress():
+    """对话压缩（代理到 wr-proxy）"""
+    import requests as req_lib
+    try:
+        resp = req_lib.post(
+            _proxy_url('/admin/knowledge/conversation_compress'),
+            json=request.get_json(),
+            timeout=60,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'压缩服务不可用: {e}'}), 503
+
+
+@knowledge_bp.route('/rag_stats')
+def rag_stats():
+    """RAG 向量缓存 + 注入统计（代理到 wr-proxy）"""
+    import requests as req_lib
+    try:
+        resp = req_lib.get(_proxy_url('/admin/knowledge/rag_stats'), timeout=10)
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'RAG 统计服务不可用: {e}'}), 503
+
+
+@knowledge_bp.route('/embedding_backfill', methods=['POST'])
+def embedding_backfill():
+    """向量批量生成（代理到 wr-proxy）"""
+    import requests as req_lib
+    data = request.get_json() or {}
+    try:
+        resp = req_lib.post(
+            _proxy_url('/admin/knowledge/embedding_backfill'),
+            json=data,
+            timeout=300,
+        )
+        return jsonify(resp.json()), resp.status_code
+    except Exception as e:
+        return jsonify({'error': f'向量服务不可用: {e}'}), 503

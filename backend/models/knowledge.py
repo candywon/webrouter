@@ -148,6 +148,40 @@ class KnowledgeDomainRisk(db.Model):
         }
 
 
+class AgentMemory(db.Model):
+    """持久记忆表 — wr-proxy 对话记忆"""
+    __tablename__ = 'wr_agent_memory'
+
+    id = db.Column(db.Integer, primary_key=True)
+    token_id = db.Column(db.Integer, nullable=False, index=True)
+    token_name = db.Column(db.String(100), default='')
+    session_id = db.Column(db.String(100), default='', index=True)
+    category = db.Column(db.String(20), default='context')  # preference/fact/context/goal/constraint
+    title = db.Column(db.String(200), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    tags = db.Column(db.Text, default='[]')  # JSON array
+    priority = db.Column(db.Integer, default=3)  # 1-5
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    expires_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'token_id': self.token_id,
+            'token_name': self.token_name,
+            'session_id': self.session_id,
+            'category': self.category,
+            'title': self.title,
+            'content': self.content,
+            'tags': self.tags,
+            'priority': self.priority,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+        }
+
+
 class KnowledgeAnalysis(db.Model):
     """分析记录表"""
     __tablename__ = 'wr_knowledge_analyses'
