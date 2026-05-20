@@ -132,6 +132,11 @@ func ExtractRawToKnowledge() (processed int, err error) {
 			continue
 		}
 
+		// 2.4.1 投递 embedding 任务（异步，非阻塞）
+		if result.Summary != "" {
+			QueueEmbedding(int(itemID), result.Summary)
+		}
+
 		// 2.5 标记为 done
 		db.Exec(`UPDATE wr_knowledge_raw SET status = 'done', processed_at = ? WHERE id = ?`,
 			time.Now().UTC().Format("2006-01-02 15:04:05"), entry.ID)

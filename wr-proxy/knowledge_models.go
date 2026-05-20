@@ -67,3 +67,12 @@ type CaptureStats struct {
 	TodayFiltered int64 `json:"today_filtered"`
 	TodaySaved    int64 `json:"today_saved"`
 }
+
+// KnowledgeVector 知识条目向量嵌入
+type KnowledgeVector struct {
+	ItemID    int     `json:"item_id"`
+	Vector    string  `json:"vector"` // JSON array of float64
+	Model     string  `json:"model"`
+	Dimension int     `json:"dimension"`
+	CreatedAt string  `json:"created_at"`
+}

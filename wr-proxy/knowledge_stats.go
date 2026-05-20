@@ -57,6 +57,27 @@ func startKnowledgeExtractScheduler() {
 	}
 }
 
+// startEmbeddingBackfillScheduler 定时检查并补全缺失的 embedding
+func startEmbeddingBackfillScheduler() {
+	if !embeddingCfg.enabled {
+		return
+	}
+	// 首次启动后 3 分钟执行
+	time.Sleep(3 * time.Minute)
+
+	ticker := time.NewTicker(15 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		processed, err := EmbeddingBackfill(10)
+		if err != nil {
+			LogWarn("[embedding] backfill scheduler failed: %v", err)
+		} else if processed > 0 {
+			LogInfo("[embedding] backfill scheduler: processed %d entries", processed)
+		}
+	}
+}
+
 // handleKnowledgeStats 知识捕获统计 API（Flask 调用）
 func handleKnowledgeStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -197,5 +218,64 @@ func handleKnowledgeExtract(w http.ResponseWriter, r *http.Request) {
 		"processed":   processed,
 		"duration_ms": duration,
 		"message":     fmt.Sprintf("成功提取 %d 条知识", processed),
+	})
+}
+
+// handleEmbeddingBackfill 手动触发 embedding 批量生成
+func handleEmbeddingBackfill(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	var req struct {
+		Limit int `json:"limit"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	startTime := time.Now()
+	processed, err := EmbeddingBackfill(req.Limit)
+	duration := time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		writeJSON(w, 500, map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"processed":   processed,
+		"duration_ms": duration,
+		"message":     fmt.Sprintf("已为 %d 条知识生成向量", processed),
+	})
+}
+
+// handleRAGStats 返回 RAG 和向量缓存统计
+func handleRAGStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	cacheCount, cacheLoaded := GetVectorCacheStats()
+	ragHits, ragMisses := GetRAGStats()
+
+	var pendingEmbed int64
+	db.QueryRow(`
+		SELECT COUNT(*) FROM wr_knowledge_items i
+		LEFT JOIN wr_knowledge_vectors v ON v.item_id = i.id
+		WHERE v.item_id IS NULL`).Scan(&pendingEmbed)
+
+	writeJSON(w, 200, map[string]interface{}{
+		"vector_cache": map[string]interface{}{
+			"count":        cacheCount,
+			"last_loaded":  cacheLoaded,
+			"pending_fill": pendingEmbed,
+		},
+		"rag_inject": map[string]interface{}{
+			"hits":   ragHits,
+			"misses": ragMisses,
+		},
 	})
 }

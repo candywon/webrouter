@@ -92,6 +92,10 @@ func main() {
 		go startKnowledgeDailyReset()
 		// 启动知识提取定时任务（每5分钟检查一次）
 		go startKnowledgeExtractScheduler()
+		// 启动 embedding 异步 worker + 向量缓存
+		InitEmbedding()
+		InitVectorCache()
+		go startEmbeddingBackfillScheduler()
 		LogInfo("Knowledge capture: ENABLED")
 	}
 

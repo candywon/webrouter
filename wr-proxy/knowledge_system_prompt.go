@@ -8,7 +8,7 @@ import (
 
 // injectKnowledgeSystemPrompt 在请求体中注入知识增强 System Prompt
 // 当 Token 开启了 knowledge_capture_enabled 或 rag_enabled 时生效
-// 注入内容：部门标识 + 自定义知识提示词
+// 注入内容：部门标识 + RAG上下文（如果启用）+ 自定义知识提示词
 func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 	if token == nil {
 		return body
@@ -27,7 +27,21 @@ func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 		parts = append(parts, "【部门标识】你正在为 "+token.KnowledgeDepartment+" 提供服务。")
 	}
 
-	// 2. 自定义知识提示词
+	// 2. RAG 上下文（NEW）
+	if token.RAGEnabled {
+		ragCtx, err := buildRAGContext(body, token)
+		if err != nil {
+			LogWarn("[RAG] build context failed: %v", err)
+		}
+		if ragCtx != "" {
+			parts = append(parts, ragCtx)
+			RecordRAGHit()
+		} else {
+			RecordRAGMiss()
+		}
+	}
+
+	// 3. 自定义知识提示词
 	if token.SystemPromptKnowledge != "" {
 		parts = append(parts, "【知识提示】"+token.SystemPromptKnowledge)
 	}

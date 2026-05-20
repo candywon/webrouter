@@ -477,3 +477,117 @@ func TestVerifyDataPoint_KeywordMatch(t *testing.T) {
 		t.Errorf("keyword match should pass: %s", reason)
 	}
 }
+
+// --- Embedding + 向量检索测试 ---
+
+func TestNormalizeVec(t *testing.T) {
+	// Zero vector — should return as-is
+	zero := normalizeVec([]float64{0, 0, 0})
+	for _, v := range zero {
+		if v != 0 {
+			t.Error("zero vector should stay zero")
+		}
+	}
+
+	// Simple unit vector
+	unit := normalizeVec([]float64{3, 4})
+	norm := 0.0
+	for _, v := range unit {
+		norm += v * v
+	}
+	if norm < 0.99 || norm > 1.01 {
+		t.Errorf("normalized vector norm should be ~1, got %.4f", norm)
+	}
+}
+
+func TestDotProduct_Identical(t *testing.T) {
+	a := normalizeVec([]float64{0.6, 0.8})
+	b := normalizeVec([]float64{0.6, 0.8})
+	sim := dotProduct(a, b)
+	if sim < 0.99 {
+		t.Errorf("identical vectors should have dot ~1, got %.4f", sim)
+	}
+}
+
+func TestDotProduct_Orthogonal(t *testing.T) {
+	a := normalizeVec([]float64{1, 0})
+	b := normalizeVec([]float64{0, 1})
+	sim := dotProduct(a, b)
+	if sim > 0.01 {
+		t.Errorf("orthogonal vectors should have dot ~0, got %.4f", sim)
+	}
+}
+
+func TestDotProduct_Opposite(t *testing.T) {
+	a := normalizeVec([]float64{1, 0})
+	b := normalizeVec([]float64{-1, 0})
+	sim := dotProduct(a, b)
+	if sim > -0.99 {
+		t.Errorf("opposite vectors should have dot ~-1, got %.4f", sim)
+	}
+}
+
+func TestDotProduct_MismatchedLength(t *testing.T) {
+	a := []float64{1, 0, 0}
+	b := []float64{1, 0}
+	sim := dotProduct(a, b)
+	if sim != 0 {
+		t.Errorf("mismatched length should return 0, got %.4f", sim)
+	}
+}
+
+func TestDotProduct_Empty(t *testing.T) {
+	sim := dotProduct([]float64{}, []float64{})
+	if sim != 0 {
+		t.Errorf("empty vectors should return 0, got %.4f", sim)
+	}
+}
+
+func TestExtractUserQuery_LastUser(t *testing.T) {
+	body := []byte(`{"messages":[
+		{"role":"user","content":"hello"},
+		{"role":"assistant","content":"hi"},
+		{"role":"user","content":"what is the Q3 revenue?"}
+	]}`)
+	q := extractUserQuery(body)
+	if q != "what is the Q3 revenue?" {
+		t.Errorf("should extract last user message, got: %s", q)
+	}
+}
+
+func TestExtractUserQuery_NoUser(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"assistant","content":"hello"}]}`)
+	q := extractUserQuery(body)
+	if q != "" {
+		t.Errorf("no user message should return empty, got: %s", q)
+	}
+}
+
+func TestExtractUserQuery_Truncate(t *testing.T) {
+	long := strings.Repeat("a", 600)
+	body, _ := json.Marshal(map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": long},
+		},
+	})
+	q := extractUserQuery(body)
+	if len(q) > 500 {
+		t.Errorf("query should be truncated to 500, got %d chars", len(q))
+	}
+}
+
+func TestFormatRAGContext(t *testing.T) {
+	results := []SearchResult{
+		{ItemID: 1, Title: "Q3财报分析", Summary: "毛利率18.7%", DomainCode: "finance", Type: "factual", Similarity: 0.92},
+	}
+	ctx := formatRAGContext(results)
+	if !strings.Contains(ctx, "Q3财报分析") {
+		t.Error("context should contain title")
+	}
+	if !strings.Contains(ctx, "毛利率18.7%") {
+		t.Error("context should contain summary")
+	}
+	if !strings.Contains(ctx, "92%") {
+		t.Error("context should contain similarity percentage")
+	}
+}

@@ -114,6 +114,17 @@ func InitKnowledgeTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_kanalyses_token ON wr_knowledge_analyses(token_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_kanalyses_status ON wr_knowledge_analyses(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_kanalyses_created ON wr_knowledge_analyses(created_at)`,
+
+		// 向量嵌入表（二期C Embedding使用）
+		`CREATE TABLE IF NOT EXISTS wr_knowledge_vectors (
+			item_id INTEGER PRIMARY KEY,
+			vector TEXT NOT NULL,
+			model TEXT DEFAULT 'text-embedding-v3',
+			dimension INTEGER DEFAULT 1024,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (item_id) REFERENCES wr_knowledge_items(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_kvec_model ON wr_knowledge_vectors(model)`,
 	}
 
 	for _, m := range migrations {
