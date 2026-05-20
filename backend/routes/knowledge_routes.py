@@ -292,6 +292,88 @@ def update_domain(domain_code):
     return jsonify({'message': '业务域已更新', 'domain': domain.to_dict()})
 
 
+@knowledge_bp.route('/domains/<domain_code>/confirm', methods=['POST'])
+def confirm_domain(domain_code):
+    """确认业务域（pending → active）"""
+    domain = KnowledgeDomain.query.get(domain_code)
+    if not domain:
+        return jsonify({'error': 'Not found'}), 404
+
+    domain.status = 'active'
+    domain.confirmed_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({'message': '业务域已确认', 'domain': domain.to_dict()})
+
+
+@knowledge_bp.route('/domains/<domain_code>/merge', methods=['POST'])
+def merge_domain(domain_code):
+    """合并业务域：将当前域合并到目标域"""
+    domain = KnowledgeDomain.query.get(domain_code)
+    if not domain:
+        return jsonify({'error': 'Not found'}), 404
+
+    data = request.get_json()
+    target_code = data.get('target_code', '').strip()
+    if not target_code:
+        return jsonify({'error': 'target_code 不能为空'}), 400
+
+    target = KnowledgeDomain.query.get(target_code)
+    if not target:
+        return jsonify({'error': f'目标域 {target_code} 不存在'}), 404
+
+    # 将该域下的知识条目迁移到目标域
+    migrated = KnowledgeItem.query.filter_by(domain_code=domain_code).update(
+        {'domain_code': target_code}, synchronize_session='fetch'
+    )
+
+    # 标记当前域为 merged
+    domain.status = 'merged'
+    domain.merged_into = target.id
+    domain.sample_count = 0
+    db.session.commit()
+
+    return jsonify({
+        'message': f'已合并到 {target.domain_name}，迁移 {migrated} 条知识',
+        'migrated': migrated,
+        'domain': domain.to_dict(),
+    })
+
+
+@knowledge_bp.route('/domains/<domain_code>/stats')
+def domain_stats(domain_code):
+    """业务域统计信息"""
+    domain = KnowledgeDomain.query.get(domain_code)
+    if not domain:
+        return jsonify({'error': 'Not found'}), 404
+
+    # 知识条目统计
+    from sqlalchemy import func
+
+    total = KnowledgeItem.query.filter_by(domain_code=domain_code).count()
+    by_type = db.session.query(
+        KnowledgeItem.type, func.count(KnowledgeItem.id)
+    ).filter_by(domain_code=domain_code).group_by(KnowledgeItem.type).all()
+    by_verification = db.session.query(
+        KnowledgeItem.verification, func.count(KnowledgeItem.id)
+    ).filter_by(domain_code=domain_code).group_by(KnowledgeItem.verification).all()
+    raw_count = db.session.query(
+        func.count(KnowledgeRaw.id)
+    ).filter(
+        KnowledgeRaw.status.in_(['pending', 'processing'])
+    ).scalar() or 0
+
+    return jsonify({
+        'domain': domain.to_dict(),
+        'items': {
+            'total': total,
+            'by_type': {t: c for t, c in by_type},
+            'by_verification': {v: c for v, c in by_verification},
+        },
+        'raw_pending': raw_count,
+    })
+
+
 # ============================================================
 # 领域风险配置
 # ============================================================
@@ -441,3 +523,118 @@ def extract_knowledge():
         return jsonify({
             'error': f'提取服务不可用: {e}',
         }), 503
+
+
+# ============================================================
+# 审核队列
+# ============================================================
+
+@knowledge_bp.route('/reviews')
+def list_reviews():
+    """审核队列：pending 知识条目列表"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    domain = request.args.get('domain', '')
+    item_type = request.args.get('type', '')
+
+    q = KnowledgeItem.query.filter_by(verification='pending')
+    if domain:
+        q = q.filter(KnowledgeItem.domain_code == domain)
+    if item_type:
+        q = q.filter(KnowledgeItem.type == item_type)
+
+    total = q.count()
+    items = q.order_by(KnowledgeItem.id.asc()).offset(
+        (page - 1) * per_page
+    ).limit(per_page).all()
+
+    return jsonify({
+        'items': [i.to_dict() for i in items],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
+
+
+@knowledge_bp.route('/reviews/<int:item_id>/approve', methods=['POST'])
+def approve_item(item_id):
+    """审核通过：标记为 verified"""
+    item = KnowledgeItem.query.get(item_id)
+    if not item:
+        return jsonify({'error': 'Not found'}), 404
+
+    data = request.get_json() or {}
+
+    # 可选：编辑标题/摘要/数据点
+    if 'title' in data:
+        item.title = data['title'].strip()
+    if 'summary' in data:
+        item.summary = data['summary']
+    if 'data_points' in data:
+        item.data_points = json.dumps(data['data_points']) if isinstance(data['data_points'], list) else data['data_points']
+
+    item.verification = 'verified'
+    item.verified_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({'message': '已审核通过', 'item': item.to_dict()})
+
+
+@knowledge_bp.route('/reviews/<int:item_id>/reject', methods=['POST'])
+def reject_item(item_id):
+    """审核拒绝：标记为 rejected"""
+    item = KnowledgeItem.query.get(item_id)
+    if not item:
+        return jsonify({'error': 'Not found'}), 404
+
+    item.verification = 'rejected'
+    item.verified_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({'message': '已拒绝', 'item': item.to_dict()})
+
+
+@knowledge_bp.route('/reviews/<int:item_id>/edit', methods=['PUT'])
+def edit_review_item(item_id):
+    """编辑审核中的知识条目"""
+    item = KnowledgeItem.query.get(item_id)
+    if not item:
+        return jsonify({'error': 'Not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data'}), 400
+
+    if 'title' in data:
+        item.title = data['title'].strip()
+    if 'summary' in data:
+        item.summary = data['summary']
+    if 'data_points' in data:
+        item.data_points = json.dumps(data['data_points']) if isinstance(data['data_points'], list) else data['data_points']
+    if 'confidence' in data:
+        item.confidence = float(data['confidence'])
+    if 'type' in data:
+        item.type = data['type']
+
+    db.session.commit()
+    return jsonify({'message': '已更新', 'item': item.to_dict()})
+
+
+@knowledge_bp.route('/reviews/batch-approve', methods=['POST'])
+def batch_approve():
+    """批量审核通过"""
+    data = request.get_json()
+    if not data or 'ids' not in data:
+        return jsonify({'error': 'ids 不能为空'}), 400
+
+    ids = data.get('ids', [])
+    count = KnowledgeItem.query.filter(
+        KnowledgeItem.id.in_(ids),
+        KnowledgeItem.verification == 'pending'
+    ).update({
+        'verification': 'verified',
+        'verified_at': datetime.utcnow(),
+    }, synchronize_session='fetch')
+
+    db.session.commit()
+    return jsonify({'message': f'已批量通过 {count} 条', 'count': count})

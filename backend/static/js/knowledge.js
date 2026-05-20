@@ -16,6 +16,7 @@ const KnowledgePage = {
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('stats')">捕获统计</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('raw')">原始对话</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('items')">知识条目</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('reviews')">审核队列</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('domains')">业务域</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyze')">单域分析</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyses')">分析记录</button>
@@ -34,6 +35,7 @@ const KnowledgePage = {
       case 'stats': this.loadStats(); break;
       case 'raw': this.loadRaw(1); break;
       case 'items': this.loadItems(1); break;
+      case 'reviews': this.loadReviews(1); break;
       case 'domains': this.loadDomains(); break;
       case 'analyze': this.renderAnalyze(); break;
       case 'analyses': this.loadAnalyses(); break;
@@ -230,6 +232,178 @@ const KnowledgePage = {
   },
 
   // ============================================================
+  // 审核队列
+  // ============================================================
+  async loadReviews(page = 1) {
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    try {
+      const res = await fetch(`/api/knowledge/reviews?page=${page}&per_page=20`);
+      const data = await res.json();
+      if (!data.items.length) {
+        el.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>审核队列为空，所有知识条目已审核完毕</p></div>';
+        return;
+      }
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">审核队列 (${data.total} 条待审)</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.batchApprove()" style="color:#10b981">批量通过</button>
+          </div>
+          <table class="table">
+            <thead><tr>
+              <th><input type="checkbox" id="review-select-all" onchange="KnowledgePage.toggleAllReviews(this.checked)"/></th>
+              <th>ID</th><th>类型</th><th>标题</th><th>领域</th><th>置信度</th><th>时间</th><th>操作</th>
+            </tr></thead>
+            <tbody>
+              ${data.items.map(i => `<tr>
+                <td><input type="checkbox" class="review-checkbox" value="${i.id}"/></td>
+                <td>${i.id}</td>
+                <td><span class="badge badge-${this.typeColor(i.type)}">${i.type}</span></td>
+                <td>${this.escapeHtml(i.title)}</td>
+                <td>${i.domain_code || '-'}</td>
+                <td>${(i.confidence * 100).toFixed(0)}%</td>
+                <td class="text-sm text-muted">${i.created_at ? i.created_at.slice(0, 10) : '-'}</td>
+                <td>
+                  <button class="btn btn-sm" onclick="KnowledgePage.showReviewEdit(${i.id})">编辑</button>
+                  <button class="btn btn-sm" style="color:#10b981" onclick="KnowledgePage.approveItem(${i.id})">通过</button>
+                  <button class="btn btn-sm" style="color:var(--color-danger)" onclick="KnowledgePage.rejectItem(${i.id})">拒绝</button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          <div style="padding:12px 20px;display:flex;gap:8px;justify-content:center">
+            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadReviews(${data.page - 1})">上一页</button>` : ''}
+            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadReviews(${data.page + 1})">下一页</button>` : ''}
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+    }
+  },
+
+  toggleAllReviews(checked) {
+    document.querySelectorAll('.review-checkbox').forEach(cb => { cb.checked = checked; });
+  },
+
+  getSelectedReviewIds() {
+    return Array.from(document.querySelectorAll('.review-checkbox:checked')).map(cb => parseInt(cb.value));
+  },
+
+  async approveItem(id) {
+    if (!confirm('确认通过该知识条目？')) return;
+    try {
+      const res = await fetch(`/api/knowledge/reviews/${id}/approve`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error) { alert('审核失败：' + data.error); return; }
+      alert('已通过');
+      this.loadReviews(1);
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  async rejectItem(id) {
+    if (!confirm('确认拒绝该知识条目？')) return;
+    try {
+      const res = await fetch(`/api/knowledge/reviews/${id}/reject`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error) { alert('操作失败：' + data.error); return; }
+      alert('已拒绝');
+      this.loadReviews(1);
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  async showReviewEdit(id) {
+    try {
+      const res = await fetch(`/api/knowledge/items/${id}`);
+      const item = await res.json();
+      const el = document.getElementById('knowledge-tab-content');
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">编辑知识条目 #${id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadReviews(1)">返回</button>
+          </div>
+          <div style="padding:20px">
+            <div style="margin-bottom:12px">
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">标题</label>
+              <input type="text" id="edit-item-title" value="${this.escapeHtml(item.title)}"
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+            </div>
+            <div style="margin-bottom:12px">
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">摘要</label>
+              <textarea id="edit-item-summary" rows="4"
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">${this.escapeHtml(item.summary)}</textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">类型</label>
+                <select id="edit-item-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
+                  <option value="factual" ${item.type==='factual'?'selected':''}>factual</option>
+                  <option value="analytical" ${item.type==='analytical'?'selected':''}>analytical</option>
+                  <option value="procedural" ${item.type==='procedural'?'selected':''}>procedural</option>
+                </select>
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">置信度</label>
+                <input type="number" id="edit-item-confidence" value="${item.confidence}" min="0" max="1" step="0.01"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">领域</label>
+                <input type="text" id="edit-item-domain" value="${item.domain_code || ''}"
+                  style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+              </div>
+            </div>
+            <hr style="margin:16px 0;border-color:var(--border)"/>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">原始引用：</p>
+            <pre style="max-height:200px;overflow:auto;white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:12px">${this.escapeHtml(item.source_quote)}</pre>
+            <div style="margin-top:16px;display:flex;gap:8px">
+              <button class="btn" onclick="KnowledgePage.saveReviewEdit(${id})">保存</button>
+              <button class="btn" onclick="KnowledgePage.loadReviews(1)">取消</button>
+            </div>
+          </div>
+        </div>
+      `;
+    } catch (e) { alert('加载失败：' + e.message); }
+  },
+
+  async saveReviewEdit(id) {
+    const title = document.getElementById('edit-item-title').value;
+    const summary = document.getElementById('edit-item-summary').value;
+    const type = document.getElementById('edit-item-type').value;
+    const confidence = parseFloat(document.getElementById('edit-item-confidence').value);
+    try {
+      const res = await fetch(`/api/knowledge/reviews/${id}/edit`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title, summary, type, confidence }),
+      });
+      const data = await res.json();
+      if (data.error) { alert('保存失败：' + data.error); return; }
+      alert('已保存');
+      this.loadReviews(1);
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  async batchApprove() {
+    const ids = this.getSelectedReviewIds();
+    if (!ids.length) { alert('请先勾选要审核通过的条目'); return; }
+    if (!confirm(`确认批量通过 ${ids.length} 条知识？`)) return;
+    try {
+      const res = await fetch('/api/knowledge/reviews/batch-approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json();
+      if (data.error) { alert('批量审核失败：' + data.error); return; }
+      alert(data.message || '批量通过成功');
+      this.loadReviews(1);
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  // ============================================================
   // 业务域管理
   // ============================================================
   async loadDomains() {
@@ -247,31 +421,203 @@ const KnowledgePage = {
 
       el.innerHTML = `
         <div class="card">
-          <div class="card-header"><span class="card-title">业务域 (${domData.total})</span></div>
+          <div class="card-header">
+            <span class="card-title">业务域 (${domData.total})</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.showCreateDomain()">新增业务域</button>
+          </div>
           <table class="table">
             <thead><tr>
-              <th>代码</th><th>名称</th><th>部门</th><th>状态</th><th>风险等级</th><th>最小验证</th><th>过期天数</th>
+              <th>代码</th><th>名称</th><th>部门</th><th>状态</th><th>知识条数</th><th>风险等级</th><th>最小验证</th><th>操作</th>
             </tr></thead>
             <tbody>
               ${domData.domains.map(d => {
                 const r = riskMap[d.domain_code] || {};
-                return `<tr>
+                const isPending = d.status === 'pending';
+                const isMerged = d.status === 'merged';
+                return `<tr style="${isMerged ? 'opacity:0.5' : ''}">
                   <td><code>${d.domain_code}</code></td>
                   <td>${d.domain_name}</td>
                   <td>${d.department || '-'}</td>
-                  <td><span class="badge badge-${d.status === 'active' ? 'success' : 'warning'}">${d.status}</span></td>
+                  <td><span class="badge badge-${d.status === 'active' ? 'success' : isMerged ? 'default' : 'warning'}">${d.status}</span></td>
+                  <td><span id="domain-count-${d.domain_code}">-</span></td>
                   <td>${r.risk_level || '-'}</td>
                   <td>${r.min_verification || '-'}</td>
-                  <td>${r.max_age_days || '-'}</td>
+                  <td>
+                    ${isPending ? `<button class="btn btn-sm" style="color:#10b981" onclick="KnowledgePage.confirmDomain('${d.domain_code}')">确认</button>` : ''}
+                    ${!isPending && !isMerged ? `<button class="btn btn-sm" onclick="KnowledgePage.showDomainStats('${d.domain_code}')">统计</button>
+                    <button class="btn btn-sm" onclick="KnowledgePage.showMergeDomain('${d.domain_code}')">合并</button>` : ''}
+                    ${isMerged ? `<span class="text-sm text-muted">已合并</span>` : ''}
+                  </td>
                 </tr>`;
               }).join('')}
             </tbody>
           </table>
         </div>
+        <div id="domain-action-panel" style="margin-top:16px"></div>
       `;
+
+      // 异步加载各域的知识条数
+      domData.domains.forEach(d => {
+        if (d.status !== 'merged') {
+          this.fetchDomainCount(d.domain_code);
+        }
+      });
     } catch (e) {
       el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
     }
+  },
+
+  async fetchDomainCount(code) {
+    try {
+      const res = await fetch(`/api/knowledge/items?page=1&per_page=1&domain=${code}`);
+      const data = await res.json();
+      const el = document.getElementById(`domain-count-${code}`);
+      if (el) el.textContent = data.total || 0;
+    } catch (e) {}
+  },
+
+  async confirmDomain(code) {
+    if (!confirm(`确认将业务域 "${code}" 标记为 active？`)) return;
+    try {
+      const res = await fetch(`/api/knowledge/domains/${code}/confirm`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error) { alert('操作失败：' + data.error); return; }
+      alert('已确认');
+      this.loadDomains();
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  async showCreateDomain() {
+    const panel = document.getElementById('domain-action-panel');
+    panel.innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">新增业务域</span>
+          <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">关闭</button>
+        </div>
+        <div style="padding:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">域代码 *</label>
+              <input type="text" id="new-domain-code" placeholder="如: legal"
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+            </div>
+            <div>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">域名称 *</label>
+              <input type="text" id="new-domain-name" placeholder="如: 法务部"
+                style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+            </div>
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">部门</label>
+            <input type="text" id="new-domain-dept" placeholder="如: 法务合规部"
+              style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
+          </div>
+          <div style="margin-bottom:16px">
+            <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">描述</label>
+            <textarea id="new-domain-desc" rows="2"
+              style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"></textarea>
+          </div>
+          <button class="btn" onclick="KnowledgePage.createDomain()">创建</button>
+        </div>
+      </div>
+    `;
+  },
+
+  async createDomain() {
+    const code = document.getElementById('new-domain-code').value.trim();
+    const name = document.getElementById('new-domain-name').value.trim();
+    const dept = document.getElementById('new-domain-dept').value.trim();
+    const desc = document.getElementById('new-domain-desc').value.trim();
+    if (!code || !name) { alert('域代码和名称不能为空'); return; }
+    try {
+      const res = await fetch('/api/knowledge/domains', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ domain_code: code, domain_name: name, department: dept, description: desc }),
+      });
+      const data = await res.json();
+      if (data.error) { alert('创建失败：' + data.error); return; }
+      alert('创建成功');
+      this.loadDomains();
+    } catch (e) { alert('请求失败：' + e.message); }
+  },
+
+  async showDomainStats(code) {
+    const panel = document.getElementById('domain-action-panel');
+    panel.innerHTML = '<div class="card"><div style="padding:20px"><p class="text-muted">加载中...</p></div></div>';
+    try {
+      const res = await fetch(`/api/knowledge/domains/${code}/stats`);
+      const data = await res.json();
+      if (data.error) { panel.innerHTML = `<div class="card"><div style="padding:20px"><p style="color:var(--color-danger)">${data.error}</p></div></div>`; return; }
+      const d = data.domain;
+      const ibt = Object.entries(data.items.by_type || {}).map(([k,v]) => `${k}: ${v}`).join('、') || '无';
+      const ibv = Object.entries(data.items.by_verification || {}).map(([k,v]) => `${k}: ${v}`).join('、') || '无';
+      panel.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">业务域统计 — ${d.domain_name} (${code})</span>
+            <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">关闭</button>
+          </div>
+          <div style="padding:20px">
+            <div class="stats-grid" style="margin-bottom:16px">
+              <div class="stat-card"><div class="stat-value">${data.items.total}</div><div class="stat-label">知识条目</div></div>
+              <div class="stat-card"><div class="stat-value" style="color:#f59e0b">${data.raw_pending}</div><div class="stat-label">待处理 Raw</div></div>
+              <div class="stat-card"><div class="stat-value">${d.sample_count || 0}</div><div class="stat-label">样本数</div></div>
+            </div>
+            <p><b>按类型：</b>${ibt}</p>
+            <p style="margin-top:8px"><b>按验证状态：</b>${ibv}</p>
+            <p style="margin-top:8px"><b>状态：</b><span class="badge badge-${d.status === 'active' ? 'success' : 'warning'}">${d.status}</span></p>
+          </div>
+        </div>
+      `;
+    } catch (e) { panel.innerHTML = `<div class="card"><div style="padding:20px"><p style="color:var(--color-danger)">加载失败：${e.message}</p></div></div>`; }
+  },
+
+  async showMergeDomain(code) {
+    // 先加载可选目标域
+    try {
+      const res = await fetch('/api/knowledge/domains');
+      const data = await res.json();
+      const options = data.domains.filter(d => d.domain_code !== code && d.status !== 'merged')
+        .map(d => `<option value="${d.domain_code}">${d.domain_name} (${d.domain_code})</option>`).join('');
+      const panel = document.getElementById('domain-action-panel');
+      panel.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">合并业务域 — 将 "${code}" 合并到</span>
+            <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">关闭</button>
+          </div>
+          <div style="padding:20px">
+            <p class="text-muted" style="margin-bottom:12px">合并后，"${code}" 下的所有知识条目将迁移到目标域，当前域将被标记为 merged。</p>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
+              <select id="merge-target" style="padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
+                <option value="">请选择目标域</option>
+                ${options}
+              </select>
+              <button class="btn" onclick="KnowledgePage.mergeDomain('${code}')">确认合并</button>
+            </div>
+          </div>
+        </div>
+      `;
+    } catch (e) { alert('加载域列表失败：' + e.message); }
+  },
+
+  async mergeDomain(code) {
+    const target = document.getElementById('merge-target').value;
+    if (!target) { alert('请选择目标域'); return; }
+    if (!confirm(`确认将 "${code}" 合并到 "${target}"？此操作不可撤销。`)) return;
+    try {
+      const res = await fetch(`/api/knowledge/domains/${code}/merge`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ target_code: target }),
+      });
+      const data = await res.json();
+      if (data.error) { alert('合并失败：' + data.error); return; }
+      alert(data.message || '合并成功');
+      this.loadDomains();
+    } catch (e) { alert('请求失败：' + e.message); }
   },
 
   // ============================================================
