@@ -35,6 +35,9 @@ type Config struct {
 
 	// 告警
 	AlertCooldown time.Duration // 同一告警冷却时间，默认 5min
+
+	// 知识捕获
+	KnowledgeCapture bool // 是否开启知识捕获
 }
 
 func LoadConfig() *Config {
@@ -55,6 +58,8 @@ func LoadConfig() *Config {
 		HealthCheckInterval:   envDuration("WR_HEALTH_INTERVAL", 5*time.Minute),
 		HealthTimeout:         envDuration("WR_HEALTH_TIMEOUT", 15*time.Second),
 		AlertCooldown:         envDuration("WR_ALERT_COOLDOWN", 5*time.Minute),
+
+		KnowledgeCapture:      envStr("WR_KNOWLEDGE_CAPTURE", "0") == "1",
 	}
 	return c
 }

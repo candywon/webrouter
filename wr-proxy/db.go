@@ -231,6 +231,11 @@ func migrate() error {
 		}
 	}
 
+	// 知识库表迁移
+	if err := InitKnowledgeTables(); err != nil {
+		return fmt.Errorf("knowledge tables: %w", err)
+	}
+
 	return nil
 }
 
@@ -629,12 +634,17 @@ func LoadTokenByKey(key string) (*Token, error) {
 		       quota_total, quota_used, rate_limit_rpm,
 		       subnet_whitelist, COALESCE(smart_downgrade, 0),
 		       COALESCE(desensitize_enabled, 0), COALESCE(desensitize_level, 'standard'),
+		       COALESCE(knowledge_capture_enabled, 0), COALESCE(knowledge_department, ''),
+		       COALESCE(rag_enabled, 0), COALESCE(rag_min_relevance, 0.7),
+		       COALESCE(rag_top_k, 3), COALESCE(system_prompt_knowledge, ''),
 		       enabled, expires_at, created_at
 		FROM wr_tokens WHERE key = ?`, key,
 	).Scan(&t.ID, &t.Name, &t.Key, &userID, &t.Models, &t.ProviderIDs,
 		&t.QuotaTotal, &t.QuotaUsed, &t.RateLimitRPM,
 		&t.SubnetWhitelist, &t.SmartDowngrade,
 		&t.DesensitizeEnabled, &t.DesensitizeLevel,
+		&t.KnowledgeCaptureEnabled, &t.KnowledgeDepartment,
+		&t.RAGEnabled, &t.RAGMinRelevance, &t.RAGTopK, &t.SystemPromptKnowledge,
 		&t.Enabled, &expiresAt, &t.CreatedAt,
 	)
 

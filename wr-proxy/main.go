@@ -84,6 +84,15 @@ func main() {
 		LogWarn("Failed to load desensitize rules: %v", err)
 	}
 
+	// 4.6 初始化知识捕获模块
+	knowledgeEnabled = cfg.KnowledgeCapture
+	if knowledgeEnabled {
+		InitKnowledge()
+		go startKnowledgeCleanup()
+		go startKnowledgeDailyReset()
+		LogInfo("Knowledge capture: ENABLED")
+	}
+
 	// 5. 启动健康检测
 	healthChecker := NewHealthChecker(cfg.HealthCheckInterval, cfg.HealthTimeout)
 	healthChecker.Start()

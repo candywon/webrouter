@@ -117,6 +117,15 @@ type Token struct {
 	SmartDowngrade      bool       `json:"smart_downgrade"`      // 允许自动降级（强模型→便宜模型）
 	DesensitizeEnabled bool       `json:"desensitize_enabled"` // 是否启用脱敏
 	DesensitizeLevel   string     `json:"desensitize_level"`   // 脱敏级别：off/standard/strict
+
+	// 知识捕获扩展字段
+	KnowledgeCaptureEnabled bool   `json:"knowledge_capture_enabled"` // 是否开启知识捕获
+	KnowledgeDepartment     string `json:"knowledge_department"`      // 归属部门
+	RAGEnabled              bool   `json:"rag_enabled"`               // 是否开启RAG自动注入
+	RAGMinRelevance         float64 `json:"rag_min_relevance"`        // RAG最低相关度阈值
+	RAGTopK                 int    `json:"rag_top_k"`                 // RAG注入最多条数
+	SystemPromptKnowledge   string `json:"system_prompt_knowledge"`   // 自定义System Prompt知识片段
+
 	Enabled            bool       `json:"enabled"`
 	ExpiresAt          *time.Time `json:"expires_at"`
 	CreatedAt          time.Time  `json:"created_at"`

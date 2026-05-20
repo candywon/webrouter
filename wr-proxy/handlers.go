@@ -45,6 +45,7 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/request_cache", handleRequestCache)
 	mux.HandleFunc("/admin/session_sticky", handleSessionSticky)
 	mux.HandleFunc("/admin/features", handleAdminFeatures)
+	mux.HandleFunc("/admin/knowledge_stats", handleKnowledgeStats)
 }
 
 // checkProxyEnabled 代理网关总开关检查，关闭时返回 503 + 提示信息
@@ -301,6 +302,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		meter.RecordRequest(rlog)
 
 		if result.IsStream {
+			// 流式响应：知识捕获暂不支持流式（后续通过压缩阶段捕获）
 			streamResult := StreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 			// 流式完成后检查是否中途被错误中断
 			if streamResult.StreamAborted {
@@ -324,6 +326,18 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
+			// 非流式响应：捕获响应体用于知识投递
+			respBody, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			// 投递知识（使用脱敏后的数据）
+			if readErr == nil && token.KnowledgeCaptureEnabled && knowledgeEnabled {
+				DeliverKnowledge(token, reqID, model, endpoint, clientIP,
+					extractPrompt(body), extractResponse(respBody), body)
+			}
+
+			// 重建响应体供 NonStreamResponse 写入
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			NonStreamResponse(w, resp, reqID, provider, token, model, endpoint, clientIP, desensitizeResult.Mapping)
 		}
 		return
