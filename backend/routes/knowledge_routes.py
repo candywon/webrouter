@@ -417,3 +417,27 @@ def analyze_knowledge():
             'status': 'local_fallback',
             'item_count': len(items),
         })
+
+
+@knowledge_bp.route('/extract', methods=['POST'])
+def extract_knowledge():
+    """触发知识提取（调用 wr-proxy 的 /admin/knowledge_extract）"""
+    import os
+    import requests as req_lib
+
+    data = request.get_json() or {}
+    batch_size = data.get('batch_size', 5)
+
+    proxy_url = os.environ.get('WR_PROXY_URL', 'http://127.0.0.1:5051')
+    try:
+        resp = req_lib.post(
+            f'{proxy_url}/admin/knowledge_extract',
+            json={'batch_size': batch_size},
+            timeout=180,
+        )
+        result = resp.json()
+        return jsonify(result), resp.status_code
+    except Exception as e:
+        return jsonify({
+            'error': f'提取服务不可用: {e}',
+        }), 503

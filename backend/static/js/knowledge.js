@@ -19,6 +19,7 @@ const KnowledgePage = {
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('domains')">业务域</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyze')">单域分析</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyses')">分析记录</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('extract')">知识提取</button>
           <button class="btn btn-sm" onclick="KnowledgePage.switchTab('search')">搜索</button>
         </div>
       </div>
@@ -36,6 +37,7 @@ const KnowledgePage = {
       case 'domains': this.loadDomains(); break;
       case 'analyze': this.renderAnalyze(); break;
       case 'analyses': this.loadAnalyses(); break;
+      case 'extract': this.renderExtract(); break;
       case 'search': this.renderSearch(); break;
     }
   },
@@ -269,6 +271,60 @@ const KnowledgePage = {
       `;
     } catch (e) {
       el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+    }
+  },
+
+  // ============================================================
+  // 知识提取
+  // ============================================================
+  renderExtract() {
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span class="card-title">LLM 知识提取</span></div>
+        <div style="padding:20px">
+          <p class="text-muted" style="margin-bottom:16px">
+            从原始对话（wr_knowledge_raw）中自动提取结构化知识条目。<br>
+            LLM 将评估每条对话的知识价值，并提取为 factual/analytical/procedural 类型知识。
+          </p>
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <input type="number" id="extract-batch-size" value="5" min="1" max="20"
+              style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"
+              placeholder="批量大小"/>
+            <span style="line-height:36px;color:var(--text-muted)">条/批</span>
+            <button class="btn" onclick="KnowledgePage.runExtract()">开始提取</button>
+          </div>
+          <div id="extract-result"></div>
+        </div>
+      </div>
+    `;
+  },
+
+  async runExtract() {
+    const batchSize = parseInt(document.getElementById('extract-batch-size').value) || 5;
+    const el = document.getElementById('extract-result');
+    el.innerHTML = '<p class="text-muted">提取中，请稍候（可能需要几分钟）...</p>';
+    try {
+      const res = await fetch('/api/knowledge/extract', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({batch_size: batchSize}),
+      });
+      const data = await res.json();
+      if (data.error) {
+        el.innerHTML = `<p style="color:var(--color-danger)">提取失败：${data.error}</p>`;
+        return;
+      }
+      el.innerHTML = `
+        <div style="padding:16px;background:var(--bg-secondary);border-radius:8px">
+          <p><b>提取完成</b></p>
+          <p>处理条数：${data.processed || 0}</p>
+          <p>耗时：${data.duration_ms || 0}ms</p>
+          <p>${data.message || ''}</p>
+        </div>
+      `;
+    } catch (e) {
+      el.innerHTML = `<p style="color:var(--color-danger)">请求失败：${e.message}</p>`;
     }
   },
 

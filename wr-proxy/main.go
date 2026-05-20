@@ -90,6 +90,8 @@ func main() {
 		InitKnowledge()
 		go startKnowledgeCleanup()
 		go startKnowledgeDailyReset()
+		// 启动知识提取定时任务（每5分钟检查一次）
+		go startKnowledgeExtractScheduler()
 		LogInfo("Knowledge capture: ENABLED")
 	}
 

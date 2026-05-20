@@ -54,6 +54,9 @@ func RegisterHandlers(mux *http.ServeMux) {
 	// 知识分析（Flask 调用）
 	mux.HandleFunc("/admin/knowledge_analyze", handleKnowledgeAnalyze)
 	mux.HandleFunc("/admin/knowledge_analyze/", handleKnowledgeAnalyze)
+
+	// 知识提取（Flask 调用）
+	mux.HandleFunc("/admin/knowledge_extract", handleKnowledgeExtract)
 }
 
 // checkProxyEnabled 代理网关总开关检查，关闭时返回 503 + 提示信息

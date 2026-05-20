@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -34,6 +35,25 @@ func startKnowledgeDailyReset() {
 
 	for range ticker.C {
 		ResetDailyStats()
+	}
+}
+
+// startKnowledgeExtractScheduler 启动知识提取定时任务
+// 每5分钟检查 pending raw 条目，自动触发 LLM 提炼
+func startKnowledgeExtractScheduler() {
+	// 首次启动后 2 分钟执行第一次
+	time.Sleep(2 * time.Minute)
+
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		processed, err := ExtractRawToKnowledge()
+		if err != nil {
+			LogWarn("[knowledge] extract scheduler failed: %v", err)
+		} else if processed > 0 {
+			LogInfo("[knowledge] extract scheduler: processed %d entries", processed)
+		}
 	}
 }
 
@@ -141,5 +161,41 @@ func handleKnowledgeAnalyze(w http.ResponseWriter, r *http.Request) {
 		"result":      result,
 		"status":      "completed",
 		"duration_ms": duration,
+	})
+}
+
+// handleKnowledgeExtract 触发知识提取（Flask 调用）
+func handleKnowledgeExtract(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, 405, map[string]string{"error": "Method not allowed"})
+		return
+	}
+
+	// 可选：指定批量大小
+	var req struct {
+		BatchSize int `json:"batch_size"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	if req.BatchSize > 0 && req.BatchSize <= 20 {
+		extractBatch.BatchSize = req.BatchSize
+	}
+
+	startTime := time.Now()
+	processed, err := ExtractRawToKnowledge()
+	duration := time.Since(startTime).Milliseconds()
+
+	if err != nil {
+		writeJSON(w, 500, map[string]interface{}{
+			"error":     err.Error(),
+			"processed": processed,
+		})
+		return
+	}
+
+	writeJSON(w, 200, map[string]interface{}{
+		"processed":   processed,
+		"duration_ms": duration,
+		"message":     fmt.Sprintf("成功提取 %d 条知识", processed),
 	})
 }

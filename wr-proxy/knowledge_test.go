@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -408,4 +409,71 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// --- 知识提取引擎测试 ---
+
+func TestExtractJSONFromText(t *testing.T) {
+	// Direct JSON
+	s := `{"has_knowledge": true, "type": "factual"}`
+	if extractJSONFromText(s) != s {
+		t.Error("should return direct JSON as-is")
+	}
+
+	// JSON embedded in text
+	s2 := "好的，这是分析结果：\n" + `{"has_knowledge": true}` + "\n完毕"
+	result := extractJSONFromText(s2)
+	if !strings.Contains(result, "has_knowledge") {
+		t.Errorf("should extract JSON from text, got: %s", result)
+	}
+
+	// No JSON
+	if extractJSONFromText("纯文本，没有JSON") != "" {
+		t.Error("should return empty for non-JSON text")
+	}
+}
+
+func TestAutoMatchDomain(t *testing.T) {
+	cases := []struct {
+		text   string
+		domain string
+	}{
+		{"合同条款需要法务审核，律师意见", "legal"},
+		{"Q3财务审计报告，毛利率收入成本分析", "finance"},
+		{"员工招聘培训计划，人事部门处理", "hr"},
+		{"行政办公用品采购后勤安排", "admin"},
+		{"本季度销售额增长，客户签约订单", "sales"},
+		{"品牌策划营销推广活动方案", "marketing"},
+		{"客户投诉售后工单处理反馈", "service"},
+		{"API接口技术架构开发部署数据库", "tech"},
+		{"公司战略投资规划并购布局", "strategy"},
+	}
+	for _, c := range cases {
+		result := autoMatchDomain(c.text)
+		if result != c.domain {
+			t.Errorf("text=%q: expected domain=%s, got=%s", c.text, c.domain, result)
+		}
+	}
+}
+
+func TestVerifyDataPoint_ExactMatch(t *testing.T) {
+	verified, reason := VerifyDataPoint("Q3毛利率为18.7%", "18.7%")
+	if !verified {
+		t.Errorf("exact match should pass: %s", reason)
+	}
+}
+
+func TestVerifyDataPoint_NumberMismatch(t *testing.T) {
+	verified, _ := VerifyDataPoint("毛利率为18.7%", "毛利率为25.3%")
+	// 25.3 not found in source
+	if verified {
+		t.Error("number mismatch should fail")
+	}
+}
+
+func TestVerifyDataPoint_KeywordMatch(t *testing.T) {
+	verified, reason := VerifyDataPoint("Q3财务分析报告显示毛利率同比收窄", "毛利率收窄")
+	if !verified {
+		t.Errorf("keyword match should pass: %s", reason)
+	}
 }
