@@ -51,7 +51,7 @@
   "billing.byProviderErrorType": "By Data Source + Error Type (Top 20)",
   "billing.byToken": "By Token Statistics",
   "billing.clientIp": "Client IP",
-  "billing.costYuan": "Cost (¥)",
+  "billing.costYuan": "Cost ($)",
   "billing.endpointPath": "Endpoint Path",
   "billing.errorCount": "Error Count",
   "billing.errorType": "Error Type",

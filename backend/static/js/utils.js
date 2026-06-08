@@ -11,8 +11,8 @@ function formatNumber(n) {
 }
 
 function formatYuan(cents) {
-  if (!cents) return '¥0.00';
-  return '¥' + (cents / 100).toFixed(2);
+  if (!cents) return '$0.00';
+  return '$' + (cents / 100).toFixed(2);
 }
 
 function statusBadge(status) {
