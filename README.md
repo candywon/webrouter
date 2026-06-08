@@ -27,7 +27,8 @@
   <img src="https://img.shields.io/badge/Python-3.8+-blue" alt="Python 3.8+" />
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8" alt="Go 1.21+" />
   <img src="https://img.shields.io/badge/License-BSL%201.1-blue" alt="License: BSL 1.1" />
-  <img src="https://img.shields.io/badge/Status-Active-brightgreen" alt="Status: Active" />
+  <img src="https://img.shields.io/github/stars/candywon/webrouter?style=flat&label=Stars" alt="GitHub Stars" />
+  <img src="https://img.shields.io/github/issues/candywon/webrouter?style=flat&label=Issues" alt="GitHub Issues" />
 </p>
 
 ---
