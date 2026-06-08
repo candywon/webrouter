@@ -40,8 +40,9 @@ class PricingPage {
 
     // 分/千token → 元/百万token（×10）
     priceToYuan(centsPerK) {
-        if (centsPerK == null) return '$0';
-        return '$' + (centsPerK * 10).toFixed(2);
+        const sym = (I18n.lang || '').startsWith('zh') ? '¥' : '$';
+        if (centsPerK == null) return sym + '0';
+        return sym + (centsPerK * 10).toFixed(2);
     }
 
     // 元/百万token → 分/千token（÷10）

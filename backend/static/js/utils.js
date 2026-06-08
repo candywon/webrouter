@@ -11,8 +11,9 @@ function formatNumber(n) {
 }
 
 function formatYuan(cents) {
-  if (!cents) return '$0.00';
-  return '$' + (cents / 100).toFixed(2);
+  const sym = (I18n.lang || '').startsWith('zh') ? '¥' : '$';
+  if (!cents) return sym + '0.00';
+  return sym + (cents / 100).toFixed(2);
 }
 
 function statusBadge(status) {

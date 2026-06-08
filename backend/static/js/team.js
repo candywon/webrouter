@@ -187,7 +187,7 @@ const TeamPage = {
         <td><code class="api-key" style="font-size:12px;">${this.esc(m.key_prefix || '-')}</code></td>
         <td style="font-size:12px;">${this.esc(m.member_email || '-')}</td>
         <td>${total > 0 ? this.formatYuan(total) : `<span style="color:var(--text-muted)">${I18n.t('common.unlimited')}</span>`}</td>
-        <td>${remaining > 0 ? this.formatYuan(remaining) : (remaining === 0 ? '$0.00' : '<span style="color:var(--text-muted)">—</span>')}</td>
+        <td>${remaining > 0 ? this.formatYuan(remaining) : (remaining === 0 ? this.formatYuan(0) : '<span style="color:var(--text-muted)">—</span>')}</td>
         <td>${m.rate_limit_rpm > 0 ? m.rate_limit_rpm : `<span style="color:var(--text-muted)">${I18n.t('common.unlimited')}</span>`}</td>
         <td style="font-size:12px;">${m.expires_at ? this.formatDate(m.expires_at) : `<span style="color:var(--text-muted)">${I18n.t('team.permanent')}</span>`}</td>
         <td>
@@ -633,8 +633,9 @@ const TeamPage = {
   // ── 工具函数 ──
 
   formatYuan(cents) {
-    if (!cents) return '$0.00';
-    return '$' + (cents / 100).toFixed(2);
+    const sym = (I18n.lang || '').startsWith('zh') ? '¥' : '$';
+    if (!cents) return sym + '0.00';
+    return sym + (cents / 100).toFixed(2);
   },
 
   formatDate(dateStr) {
