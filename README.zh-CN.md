@@ -70,6 +70,15 @@
 | `litellm` | LiteLLM 代理 | ✅ | ✅ | — |
 | `custom` | 任何 OpenAI 兼容网关 | ✅ | ✅ | — |
 
+### 🔄 对话记忆召回
+客户端通过 `@recall` 或 `X-Recall-Session` 请求头，代理自动恢复并注入对话历史——无需手动管理上下文。
+
+### 📚 知识库与 RAG
+内置企业级检索增强生成。自动捕获对话内容、通过 LLM 提取结构化知识，将相关上下文注入每次请求。
+
+### ⚡ 成本优化
+Token 压缩、会话压缩、动态内容重排序，自动降低上游 Token 消耗并提高 Prompt Cache 命中率。
+
 ### 🛠️ CLI 配置导出
 一键导出 Claude Code、Codex、Cursor、Continue 等工具的环境变量和配置。
 

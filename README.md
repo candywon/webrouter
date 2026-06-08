@@ -70,6 +70,15 @@ The `wr-proxy` Go gateway handles request forwarding, retry with backoff, stream
 | `litellm` | LiteLLM proxy | ✅ | ✅ | — |
 | `custom` | Any OpenAI-compatible gateway | ✅ | ✅ | — |
 
+### 🔄 Session Memory Recall
+Clients can use `@recall` or `X-Recall-Session` header to automatically recover and inject conversation history from the server — no manual context management needed.
+
+### 📚 Knowledge Base & RAG
+Built-in enterprise-grade retrieval-augmented generation. Auto-captures conversations, extracts structured knowledge via LLM, and injects relevant context into every request.
+
+### ⚡ Cost-Saving Optimizations
+Token compression, session compression, and dynamic content reordering reduce upstream token consumption and improve prompt cache hit rates automatically.
+
 ### 🛠️ CLI Config Export
 One-click export of environment variables and config for Claude Code, Codex, Cursor, Continue, and more.
 
