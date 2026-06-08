@@ -22,6 +22,7 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 | **Health Monitoring** | ✓ | ✓ |
 | **wr-proxy (Go Gateway)** | ✓ | ✓ |
 | **Max Concurrent Connections** | 50 | Customizable |
+| **Cache Size** | 64MB | Customizable |
 | **SSO / SAML / OIDC** | — | ✓ |
 | **Advanced Audit Logging** | — | ✓ |
 | **Cluster Deployment** | — | ✓ |
