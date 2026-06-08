@@ -1,0 +1,1 @@
+const s="/screenshots/webrouter-1.png",e="/screenshots/webrouter-2.png",o="/screenshots/webrouter-3.png",r="/screenshots/webrouter-4.png",t="/screenshots/webrouter-5.png";export{s as _,e as a,o as b,r as c,t as d};
