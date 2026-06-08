@@ -57,6 +57,10 @@ export default defineConfig({
                 { text: 'Providers', link: '/guide/providers' },
                 { text: 'Tokens & Teams', link: '/guide/tokens-teams' },
                 { text: 'Smart Routing', link: '/guide/smart-routing' },
+                { text: 'Session Memory Recall', link: '/guide/memory-recall' },
+                { text: 'Multimedia Support', link: '/guide/multimedia' },
+                { text: 'Knowledge Base', link: '/guide/knowledge-base' },
+                { text: 'Optimization Features', link: '/guide/optimization' },
               ],
             },
             {
@@ -109,6 +113,10 @@ export default defineConfig({
                 { text: '数据源管理', link: '/zh/guide/providers' },
                 { text: '令牌与团队', link: '/zh/guide/tokens-teams' },
                 { text: '智能路由', link: '/zh/guide/smart-routing' },
+                { text: '会话记忆召回', link: '/zh/guide/memory-recall' },
+                { text: '多媒体支持', link: '/zh/guide/multimedia' },
+                { text: '知识库', link: '/zh/guide/knowledge-base' },
+                { text: '优化特性', link: '/zh/guide/optimization' },
               ],
             },
             {
