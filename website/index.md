@@ -14,7 +14,7 @@ hero:
       link: /guide/quick-start
     - theme: alt
       text: Live Demo
-      link: https://webrouter-demo.fly.dev
+      link: https://demo.webrouter.tech
 
 features:
   - title: Smart Routing

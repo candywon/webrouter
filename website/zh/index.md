@@ -14,7 +14,7 @@ hero:
       link: /zh/guide/quick-start
     - theme: alt
       text: 在线演示
-      link: https://webrouter-demo.fly.dev
+      link: https://demo.webrouter.tech
 
 features:
   - title: 智能路由
