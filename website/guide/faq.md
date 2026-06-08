@@ -49,7 +49,7 @@ June 1, 2029. After this date, the Community Edition automatically becomes Apach
 
 The Enterprise Edition (EE) uses a proprietary EULA and includes:
 - SSO/SAML/OIDC integration
-- Advanced audit logging
+- Custom audit logging (rules & retention)
 - Cluster deployment
 - Enhanced alerting channels (DingTalk, Feishu, Slack, PagerDuty)
 - Commercial support with SLA

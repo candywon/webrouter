@@ -24,7 +24,8 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 | **Max Concurrent Connections** | 50 | Customizable |
 | **Cache Size** | 64MB | Customizable |
 | **SSO / SAML / OIDC** | — | ✓ |
-| **Advanced Audit Logging** | — | ✓ |
+| **Custom Audit Logging** | Basic | Custom rules & retention |
+| **Custom Metrics & Statistics** | — | ✓ |
 | **Cluster Deployment** | — | ✓ |
 | **Enhanced Alert Channels** | Email only | DingTalk, Feishu, Slack, PagerDuty |
 | **Commercial Support SLA** | — | ✓ |
@@ -36,7 +37,8 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 The Enterprise Edition is designed for organizations that need:
 
 - **SSO Integration** — SAML, OIDC, Azure AD, Okta, Google Workspace
-- **Audit Logging** — Full compliance-grade audit trail of all admin actions
+- **Custom Audit Logging** — Configurable rules and retention policies for compliance
+- **Custom Metrics & Statistics** — Tailored dashboards and reporting
 - **High Availability** — Cluster deployment with load balancing
 - **Multi-Channel Alerts** — DingTalk, Feishu, Slack, PagerDuty, and custom webhooks
 - **SLA Support** — Guaranteed response times and dedicated support engineer
