@@ -35,6 +35,15 @@ features:
   - title: 多数据源类型
     details: "direct、aggregate、litellm、custom——任何 OpenAI 兼容网关均可接入。一把钥匙开所有门。"
     icon: 📡
+  - title: 会话记忆召回
+    details: "客户端丢失上下文？使用 @recall 魔术词或 X-Recall-Session 头，wr-proxy 自动从服务端恢复并注入历史对话。"
+    icon: 🔄
+  - title: 知识库与 RAG
+    details: "自动捕获对话、通过 LLM 提取结构化知识、将相关上下文注入每次请求。企业级检索增强生成，开箱即用。"
+    icon: 📚
+  - title: 成本优化引擎
+    details: "Token 压缩、会话压缩、动态内容重排。自动减少上游 Token 消耗，提升 Prompt 缓存命中率，降低 API 成本。"
+    icon: ⚡
 ---
 
 ## 产品截图

@@ -35,6 +35,15 @@ features:
   - title: Multi-Provider Support
     details: "direct, aggregate, litellm, custom - any OpenAI-compatible provider. One gateway, all your LLMs."
     icon: 📡
+  - title: Session Memory Recall
+    details: "Clients lose context? Just use @recall or X-Recall-Session header. wr-proxy automatically recovers and injects conversation history from the server."
+    icon: 🔄
+  - title: Knowledge Base & RAG
+    details: "Auto-capture conversations, extract structured knowledge via LLM, and inject relevant context into every request. Enterprise-grade retrieval-augmented generation built in."
+    icon: 📚
+  - title: Cost-Saving Optimizations
+    details: "Token compression, session compression, and dynamic content reordering. Reduce upstream token consumption and improve prompt cache hit rates automatically."
+    icon: ⚡
 ---
 
 ## Screenshots
