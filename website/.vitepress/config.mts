@@ -37,6 +37,7 @@ export default defineConfig({
         nav: [
           { text: 'Home', link: '/' },
           { text: 'Docs', link: '/guide/quick-start' },
+          { text: 'Pricing', link: '/pricing' },
           { text: 'Demo', link: 'https://demo.webrouter.tech' },
           { text: 'GitHub', link: 'https://github.com/candywon/webrouter' },
         ],
@@ -93,6 +94,7 @@ export default defineConfig({
         nav: [
           { text: '首页', link: '/zh/' },
           { text: '文档', link: '/zh/guide/quick-start' },
+          { text: '定价', link: '/zh/pricing' },
           { text: '在线演示', link: 'https://demo.webrouter.tech' },
           { text: 'GitHub', link: 'https://github.com/candywon/webrouter' },
         ],
