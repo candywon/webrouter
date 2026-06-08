@@ -21,6 +21,7 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 | **Multi-Tenant (Tokens & Teams)** | ✓ | ✓ |
 | **Health Monitoring** | ✓ | ✓ |
 | **wr-proxy (Go Gateway)** | ✓ | ✓ |
+| **Max Concurrent Connections** | 50 | Customizable |
 | **SSO / SAML / OIDC** | — | ✓ |
 | **Advanced Audit Logging** | — | ✓ |
 | **Cluster Deployment** | — | ✓ |
