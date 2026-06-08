@@ -1,12 +1,13 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
+  base: '/webrouter/',
   title: 'WebRouter',
   description: 'Unified AI API Gateway — Manage all your LLM providers in one place',
   lang: 'en-US',
 
   head: [
-    ['link', { rel: 'icon', href: '/logo.svg' }],
+    ['link', { rel: 'icon', href: '/webrouter/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#2563eb' }],
   ],
 
@@ -19,7 +20,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/<org>/webrouter' },
+      { icon: 'github', link: 'https://github.com/candywon/webrouter' },
     ],
 
     footer: {
@@ -36,8 +37,8 @@ export default defineConfig({
         nav: [
           { text: 'Home', link: '/' },
           { text: 'Docs', link: '/guide/quick-start' },
-          { text: 'Demo', link: 'https://webrouter-demo.fly.dev' },
-          { text: 'GitHub', link: 'https://github.com/<org>/webrouter' },
+          { text: 'Demo', link: 'https://demo.webrouter.tech' },
+          { text: 'GitHub', link: 'https://github.com/candywon/webrouter' },
         ],
         sidebar: {
           '/guide/': [
@@ -88,8 +89,8 @@ export default defineConfig({
         nav: [
           { text: '首页', link: '/zh/' },
           { text: '文档', link: '/zh/guide/quick-start' },
-          { text: '在线演示', link: 'https://webrouter-demo.fly.dev' },
-          { text: 'GitHub', link: 'https://github.com/<org>/webrouter' },
+          { text: '在线演示', link: 'https://demo.webrouter.tech' },
+          { text: 'GitHub', link: 'https://github.com/candywon/webrouter' },
         ],
         sidebar: {
           '/zh/guide/': [
