@@ -15,7 +15,6 @@ Providers represent your AI API sources. WebRouter supports multiple provider ty
 |------|-------------|:------:|:-------:|:---------:|:------------:|
 | `direct` | Official APIs (OpenAI, Anthropic, Google, DeepSeek, etc.) | ✅ | ✅ | — | — |
 | `aggregate` | Aggregator platforms (OpenRouter, API2D, OhMyGPT, etc.) | ✅ | ✅ | Manual | — |
-| `newapi` | Self-hosted New-API / One-API | ✅ | ✅ | ✅ | ✅ |
 | `litellm` | LiteLLM proxy | ✅ | ✅ | — | — |
 | `custom` | Any OpenAI-compatible gateway | ✅ | ✅ | — | — |
 

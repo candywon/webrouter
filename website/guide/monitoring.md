@@ -42,4 +42,3 @@ Click on any provider to see:
 - Current status and latency
 - 14-day health history
 - Recent error messages
-- Channel-level metrics (for `newapi` and `oneapi` types)

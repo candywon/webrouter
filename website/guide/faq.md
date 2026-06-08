@@ -74,7 +74,7 @@ WebRouter generates unique API keys per token. Each token has configurable model
 
 ### What provider types are supported?
 
-`direct`, `aggregate`, `newapi`, `oneapi`, `litellm`, and `custom` — any OpenAI-compatible provider.
+`direct`, `aggregate`, `litellm`, and `custom` — any OpenAI-compatible provider.
 
 ## Troubleshooting
 

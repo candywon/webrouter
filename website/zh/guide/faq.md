@@ -49,7 +49,7 @@ SQLite（默认零配置），也支持 MySQL 和 PostgreSQL。
 
 ### 支持什么 Provider 类型？
 
-`direct`、`aggregate`、`newapi`、`oneapi`、`litellm`、`custom`——任何 OpenAI 兼容的 Provider。
+`direct`、`aggregate`、`litellm`、`custom`——任何 OpenAI 兼容的 Provider。
 
 ## 故障排除
 

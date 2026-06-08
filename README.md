@@ -66,7 +66,6 @@ The `wr-proxy` Go gateway handles request forwarding, retry with backoff, stream
 |------|-------------|:------:|:-------:|:----:|
 | `direct` | Official APIs (OpenAI, Anthropic, Google...) | ✅ | ✅ | — |
 | `aggregate` | Aggregator platforms (OhMyGPT, API2D...) | ✅ | ✅ | Manual |
-| `newapi` | Self-hosted New-API / One-API | ✅ | ✅ | ✅ |
 | `litellm` | LiteLLM proxy | ✅ | ✅ | — |
 | `custom` | Any OpenAI-compatible gateway | ✅ | ✅ | — |
 
@@ -224,7 +223,6 @@ All settings are managed via the `.env` file (auto-generated on first install):
 | `FLASK_HOST` | Listen address | `0.0.0.0` |
 | `FLASK_PORT` | Flask port | `5050` |
 | `WR_PROXY_PORT` | wr-proxy port | `5051` |
-| `NEWAPI_URL` | New-API sidecar URL | `http://localhost:3000` |
 | `ENABLE_SCHEDULER` | Run health checks & alerts on schedule | `0` (off in debug) |
 
 ### Process Management

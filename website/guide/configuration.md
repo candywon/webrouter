@@ -25,7 +25,6 @@ All settings can be configured via `.env` file in the project root or through en
 |----------|-------------|---------|
 | `WR_PORT` | Flask admin panel port | `5050` |
 | `WR_PROXY_PORT` | wr-proxy gateway port | `5051` |
-| `NEWAPI_URL` | New-API sidecar URL | `http://localhost:3000` |
 
 ### Scheduler
 

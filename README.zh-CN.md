@@ -66,7 +66,6 @@
 |------|------|:----:|:----:|:----:|
 | `direct` | 官方直连（OpenAI、Anthropic、Google…） | ✅ | ✅ | — |
 | `aggregate` | 聚合平台（OhMyGPT、API2D…） | ✅ | ✅ | 手动 |
-| `newapi` | 自建 New-API / One-API | ✅ | ✅ | ✅ |
 | `litellm` | LiteLLM 代理 | ✅ | ✅ | — |
 | `custom` | 任何 OpenAI 兼容网关 | ✅ | ✅ | — |
 
@@ -224,7 +223,6 @@ webrouter/
 | `FLASK_HOST` | 监听地址 | `0.0.0.0` |
 | `FLASK_PORT` | Flask 端口 | `5050` |
 | `WR_PROXY_PORT` | wr-proxy 端口 | `5051` |
-| `NEWAPI_URL` | New-API sidecar 地址 | `http://localhost:3000` |
 | `ENABLE_SCHEDULER` | 启用定时健康检测与告警 | `0`（debug 模式关闭） |
 
 ### 进程管理

@@ -33,7 +33,7 @@ features:
     details: "邀请成员、分配额度、限制模型访问。每人一把独立 Key，权限隔离。"
     icon: 👥
   - title: 多数据源类型
-    details: "direct、aggregate、newapi、litellm、custom——任何 OpenAI 兼容网关均可接入。一把钥匙开所有门。"
+    details: "direct、aggregate、litellm、custom——任何 OpenAI 兼容网关均可接入。一把钥匙开所有门。"
     icon: 📡
 ---
 

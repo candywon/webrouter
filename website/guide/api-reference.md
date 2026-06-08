@@ -72,7 +72,7 @@ Trigger a health check for a specific provider.
 
 ### `GET /api/providers/<id>/channels`
 
-List channels for a provider (`newapi` / `oneapi` types).
+List channels for a provider.
 
 ### `POST /api/providers/<provider_id>/channels`
 

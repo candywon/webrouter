@@ -42,4 +42,3 @@ description: Provider 健康状态追踪
 - 当前状态和延迟
 - 14 天健康历史
 - 最新错误信息
-- 渠道级指标（newapi/oneapi 类型）

@@ -23,7 +23,6 @@ description: 环境变量和系统设置参考
 |------|------|--------|
 | `WR_PORT` | Flask 管理面板端口 | `5050` |
 | `WR_PROXY_PORT` | wr-proxy 网关端口 | `5051` |
-| `NEWAPI_URL` | New-API sidecar 地址 | `http://localhost:3000` |
 
 ### 调度器
 

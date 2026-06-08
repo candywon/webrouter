@@ -33,7 +33,7 @@ features:
     details: "Invite team members, assign quotas, restrict model access. Each member gets a unique API key with scoped permissions."
     icon: 👥
   - title: Multi-Provider Support
-    details: "direct, aggregate, newapi, litellm, custom - any OpenAI-compatible provider. One gateway, all your LLMs."
+    details: "direct, aggregate, litellm, custom - any OpenAI-compatible provider. One gateway, all your LLMs."
     icon: 📡
 ---
 

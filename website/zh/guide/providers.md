@@ -11,7 +11,6 @@ description: Provider 类型和配置
 |------|------|:----:|:----:|:----:|:--------:|
 | `direct` | 官方直连（OpenAI、Claude、Gemini、DeepSeek 等） | ✅ | ✅ | — | — |
 | `aggregate` | 聚合平台（OpenRouter、API2D、OhMyGPT 等） | ✅ | ✅ | 手动 | — |
-| `newapi` | 自建 New-API / One-API | ✅ | ✅ | ✅ | ✅ |
 | `litellm` | LiteLLM 代理 | ✅ | ✅ | — | — |
 | `custom` | 任何 OpenAI 兼容网关 | ✅ | ✅ | — | — |
 
