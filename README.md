@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://webrouter-demo.fly.dev">
-    <img src="https://img.shields.io/badge/Try%20Demo-Fly.io-9cf?style=for-the-badge" alt="Try Demo on Fly.io" />
+  <a href="https://demo.webrouter.tech">
+    <img src="https://img.shields.io/badge/Try%20Demo-Online-9cf?style=for-the-badge" alt="Try Live Demo" />
   </a>
 </p>
 
@@ -78,7 +78,7 @@ One-click export of environment variables and config for Claude Code, Codex, Cur
 
 ### Try it Online
 
-Don't want to install anything? Try the live demo at **[webrouter-demo.fly.dev](https://webrouter-demo.fly.dev)** (login: `demo` / `demo123456`).
+Don't want to install anything? Try the live demo at **[demo.webrouter.tech](https://demo.webrouter.tech)** (login: `demo` / `demo123456`).
 
 ### Prerequisites
 

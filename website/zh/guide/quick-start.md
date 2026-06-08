@@ -7,7 +7,7 @@ description: 几分钟内让 WebRouter 运行起来
 
 ## 在线体验
 
-不想安装？立即访问 **[在线演示](https://webrouter-demo.fly.dev)** 体验 WebRouter 管理面板（账号 `demo` / 密码 `demo123456`）。
+不想安装？立即访问 **[在线演示](https://demo.webrouter.tech)** 体验 WebRouter 管理面板（账号 `demo` / 密码 `demo123456`）。
 
 ## 一键安装
 

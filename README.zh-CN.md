@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://webrouter-demo.fly.dev">
-    <img src="https://img.shields.io/badge/在线演示-Fly.io-9cf?style=for-the-badge" alt="在线演示 Fly.io" />
+  <a href="https://demo.webrouter.tech">
+    <img src="https://img.shields.io/badge/在线演示-Demo-9cf?style=for-the-badge" alt="在线演示" />
   </a>
 </p>
 
@@ -78,7 +78,7 @@
 
 ### 在线体验
 
-不想安装？立即访问 **[webrouter-demo.fly.dev](https://webrouter-demo.fly.dev)** 在线体验（账号 `demo` / 密码 `demo123456`）。
+不想安装？立即访问 **[demo.webrouter.tech](https://demo.webrouter.tech)** 在线体验（账号 `demo` / 密码 `demo123456`）。
 
 ### 环境要求
 

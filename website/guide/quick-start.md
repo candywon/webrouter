@@ -7,7 +7,7 @@ description: Get WebRouter running in minutes
 
 ## Try it Online
 
-Don't want to install anything? Visit the **[live demo](https://webrouter-demo.fly.dev)** to explore WebRouter's admin panel (login: `demo` / `demo123456`).
+Don't want to install anything? Visit the **[live demo](https://demo.webrouter.tech)** to explore WebRouter's admin panel (login: `demo` / `demo123456`).
 
 ## One-Click Install
 
