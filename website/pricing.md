@@ -26,6 +26,7 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 | **SSO / SAML / OIDC** | — | ✓ |
 | **Custom Audit Logging** | Basic | Custom rules & retention |
 | **Custom Metrics & Statistics** | — | ✓ |
+| **Custom Knowledge Base** | Basic RAG | Custom data sources & pipelines |
 | **Cluster Deployment** | — | ✓ |
 | **Enhanced Alert Channels** | Email only | DingTalk, Feishu, Slack, PagerDuty |
 | **Commercial Support SLA** | — | ✓ |
