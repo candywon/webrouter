@@ -20,3 +20,6 @@ logs/*.log
 
 # Fly.io
 .fly/
+
+# 内部开发文档（不随开源发布）
+docs/knowledge-base/
