@@ -24,7 +24,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the BSL 1.1 License.',
+      message: 'Released under the BSL 1.1 License. Contact: jianlin@webrouter.tech',
       copyright: 'Copyright 2026 Jianlin Huang',
     },
   },
