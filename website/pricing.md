@@ -15,6 +15,9 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 | **Price** | Free | Contact Us |
 | **Provider Management** | ✓ | ✓ |
 | **Smart Routing** | ✓ | ✓ |
+| **Session Memory Recall** | ✓ | Advanced retention |
+| **Knowledge Base & RAG** | Basic RAG | Custom data sources & pipelines |
+| **Cost Optimization** | Basic | Advanced (token/session compression) |
 | **Cost Tracking & Billing** | ✓ | ✓ |
 | **Desensitization** | ✓ | ✓ |
 | **Alerting** | Email alerts | All channels |
@@ -26,7 +29,6 @@ WebRouter is available in two editions. The Community Edition is free and open-s
 | **SSO / SAML / OIDC** | — | ✓ |
 | **Custom Audit Logging** | Basic | Custom rules & retention |
 | **Custom Metrics & Statistics** | — | ✓ |
-| **Custom Knowledge Base** | Basic RAG | Custom data sources & pipelines |
 | **Cluster Deployment** | — | ✓ |
 | **Enhanced Alert Channels** | Email only | DingTalk, Feishu, Slack, PagerDuty |
 | **Commercial Support SLA** | — | ✓ |
@@ -39,6 +41,9 @@ The Enterprise Edition is designed for organizations that need:
 
 - **SSO Integration** — SAML, OIDC, Azure AD, Okta, Google Workspace
 - **Custom Audit Logging** — Configurable rules and retention policies for compliance
+- **Session Memory Recall** — Long-term retention and advanced retrieval
+- **Knowledge Base & RAG** — Custom data sources and pipelines
+- **Cost Optimization** — Token compression, session compression, dynamic reorder
 - **Custom Metrics & Statistics** — Tailored dashboards and reporting
 - **High Availability** — Cluster deployment with load balancing
 - **Multi-Channel Alerts** — DingTalk, Feishu, Slack, PagerDuty, and custom webhooks
