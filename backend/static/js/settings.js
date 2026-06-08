@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * 系统设置管理页面 JS
  * 功能：查看和编辑系统设置（持久化到 wr_system_settings 表）
@@ -33,7 +36,7 @@ class SettingsPage {
         } catch (e) {
             console.error('Failed to load settings:', e);
             const el = document.getElementById('settings-content');
-            if (el) el.innerHTML = '<div class="empty-state"><p>加载失败，请刷新重试</p></div>';
+            if (el) el.innerHTML = `<div class="empty-state"><p>${I18n.t('common.loadFailedRetry')}</p></div>`;
         }
     }
 
@@ -47,18 +50,18 @@ class SettingsPage {
         if (!container) return;
 
         const categoryLabels = {
-            'general': '通用设置',
-            'proxy': '代理配置',
-            'monitor': '监控检测',
-            'alert': '告警配置',
-            'advanced': '高级设置',
+            'general': I18n.t("settings.general"),
+            'proxy': I18n.t("settings.proxy"),
+            'monitor': I18n.t("settings.monitor"),
+            'alert': I18n.t("settings.alert"),
+            'advanced': I18n.t("settings.advanced"),
         };
 
         let html = `
             <div class="page-header">
-                <h2>⚙️ 系统设置</h2>
+                <h2>${I18n.t('settings.title')}</h2>
                 <div>
-                    <button class="btn-secondary" onclick="settingsPage.loadSettings()">🔄 刷新</button>
+                    <button class="btn-secondary" onclick="settingsPage.loadSettings()">${I18n.t('common.refresh')}</button>
                 </div>
             </div>
 
@@ -67,15 +70,15 @@ class SettingsPage {
             ${this.renderSpecialCards()}
 
             <div class="card">
-                <div class="card-header"><span class="card-title">全部设置</span></div>
+                <div class="card-header"><span class="card-title">${I18n.t('settings.allSettings')}</span></div>
                 ${this.renderSettingsTable()}
             </div>
 
             <div class="card">
-                <div class="card-header"><span class="card-title">数据备份</span></div>
+                <div class="card-header"><span class="card-title">${I18n.t('settings.dataBackup')}</span></div>
                 <div style="display:flex;gap:12px;padding:16px;">
-                    <button class="btn-primary" onclick="settingsPage.backup()">📦 创建备份</button>
-                    <button class="btn-secondary" onclick="settingsPage.showRestoreDialog()">📥 恢复备份</button>
+                    <button class="btn-primary" onclick="settingsPage.backup()">${I18n.t('settings.createBackup')}</button>
+                    <button class="btn-secondary" onclick="settingsPage.showRestoreDialog()">${I18n.t('settings.restoreBackup')}</button>
                 </div>
             </div>
         `;
@@ -98,50 +101,51 @@ class SettingsPage {
         return `
         <div class="card" style="border-left:3px solid ${proxyOn ? 'var(--success)' : 'var(--danger)'};">
             <div class="card-header">
-                <span class="card-title">🚪 代理网关设置</span>
+                <span class="card-title">${I18n.t('settings.gatewaySettings')}</span>
                 <label class="toggle-switch">
                     <input type="checkbox" ${proxyOn ? 'checked' : ''}
                            onchange="settingsPage.toggleProxySwitch(this.checked)">
                     <span class="toggle-slider"></span>
-                    <span class="toggle-label">${proxyOn ? '已开启' : '已关闭'}</span>
+                    <span class="toggle-label">${proxyOn ? I18n.t("settings.enabled") : I18n.t("settings.disabled")}</span>
                 </label>
             </div>
             <div style="padding:16px;">
-                <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">管理后台与 wr-proxy 通信地址，以及对外用户调用的 API 网关地址。</p>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">${I18n.t('settings.gatewayDescription')}</p>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div class="form-group">
-                        <label>管理后台通信 URL</label>
+                        <label>${I18n.t('settings.proxyUrl')}</label>
                         <input type="text" id="gw-proxy-url" value="${this.escHtml(proxyUrl ? proxyUrl.value : '')}"
                                onchange="settingsPage.updateString('proxy_url', this.value)"
                                placeholder="http://localhost:5051">
-                        <span style="font-size:11px;color:var(--text-muted);">Flask 内部连接 wr-proxy 的地址</span>
+                        <span style="font-size:11px;color:var(--text-muted);">${I18n.t('settings.proxyUrlHint')}</span>
                     </div>
                     <div class="form-group">
-                        <label>对外网关地址</label>
+                        <label>${I18n.t('settings.gatewayUrl')}</label>
                         <input type="text" id="gw-gateway-url" value="${this.escHtml(gatewayUrl ? gatewayUrl.value : '')}"
                                onchange="settingsPage.updateString('gateway_url', this.value)"
-                               placeholder="http://公网IP或域名:5051">
-                        <span style="font-size:11px;color:var(--text-muted);">成员邀请邮件和文档中展示的 API 地址</span>
+                               placeholder="http://public-ip-or-domain:5051">
+                        <span style="font-size:11px;color:var(--text-muted);">${I18n.t('settings.gatewayUrlHint')}</span>
                     </div>
                     <div class="form-group">
-                        <label>路由策略</label>
+                        <label>${I18n.t('settings.routingStrategy')}</label>
                         <select onchange="settingsPage.updateString('routing_strategy', this.value)">
                             ${['smart','priority','round_robin','least_latency','cost_first'].map(s =>
                                 `<option value="${s}" ${routingStrategy && routingStrategy.value === s ? 'selected' : ''}>${this.ROUTING_STRATEGY_LABELS[s]}</option>`
                             ).join('')}
+                        </select>
                     </div>
                     <div class="form-group">
-                        <label>默认超时（秒）</label>
+                        <label>${I18n.t('settings.defaultTimeout')}</label>
                         <input type="number" value="${defaultTimeout ? defaultTimeout.value : 60}" min="1"
                                onchange="settingsPage.updateNumber('default_timeout', this.value, 'int')">
                     </div>
                     <div class="form-group">
-                        <label>最大降级次数</label>
+                        <label>${I18n.t('settings.maxFailover')}</label>
                         <input type="number" value="${maxFailover ? maxFailover.value : 3}" min="0" max="10"
                                onchange="settingsPage.updateNumber('max_failover', this.value, 'int')">
                     </div>
                     <div class="form-group">
-                        <label>最大重试次数</label>
+                        <label>${I18n.t('settings.maxRetryCount')}</label>
                         <input type="number" value="${maxRetryCount ? maxRetryCount.value : 2}" min="0" max="10"
                                onchange="settingsPage.updateNumber('max_retry_count', this.value, 'int')">
                     </div>
@@ -167,13 +171,13 @@ class SettingsPage {
         if (logSetting) {
             html += `
             <div class="card">
-                <div class="card-header"><span class="card-title">🗑️ 日志清理</span></div>
+                <div class="card-header"><span class="card-title">${I18n.t('settings.logCleanup')}</span></div>
                 <div style="padding:16px;display:flex;align-items:center;gap:12px;">
-                    <label style="font-size:14px;">日志保留天数：</label>
+                    <label style="font-size:14px;">${I18n.t('settings.logRetentionDays')}</label>
                     <input type="number" id="log-retention-input" value="${logSetting.value}" min="1" max="365"
                            style="width:80px;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:14px;">
-                    <span style="color:var(--text-muted);font-size:13px;">天（当前：${logSetting.value} 天，每 10 分钟检查一次）</span>
-                    <button class="btn-primary" onclick="settingsPage.saveLogRetention()" style="margin-left:auto;">保存</button>
+                    <span style="color:var(--text-muted);font-size:13px;">${I18n.t('settings.daysDetail', {value: logSetting.value})}</span>
+                    <button class="btn-primary" onclick="settingsPage.saveLogRetention()" style="margin-left:auto;">${I18n.t('common.save')}</button>
                 </div>
             </div>`;
         }
@@ -184,14 +188,14 @@ class SettingsPage {
             html += `
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">🔍 厂商健康测试配置</span>
-                    <button class="btn-primary btn-sm" onclick="settingsPage.addHealthConfig()">+ 添加厂商</button>
+                    <span class="card-title">${I18n.t('settings.healthTestConfig')}</span>
+                    <button class="btn-primary btn-sm" onclick="settingsPage.addHealthConfig()">${I18n.t('settings.addVendor')}</button>
                 </div>
                 <div style="padding:16px;">
-                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">直连 Provider 健康检测时使用，按 base_url 中的域名匹配测试端点和请求体。</p>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">${I18n.t('settings.healthTestHint')}</p>
                     <table>
                         <thead><tr>
-                            <th>厂商名称</th><th>域名匹配</th><th>测试端点</th><th>测试请求体</th><th>操作</th>
+                            <th>${I18n.t('settings.vendorName')}</th><th>${I18n.t('settings.domainMatch')}</th><th>${I18n.t('settings.testEndpoint')}</th><th>${I18n.t('settings.testBody')}</th><th>${I18n.t('common.actions')}</th>
                         </tr></thead>
                         <tbody>
                             ${configs.map((cfg, i) => `
@@ -208,12 +212,12 @@ class SettingsPage {
                                 <td><input type="text" value="${this.escHtml(cfg.body || '')}"
                                            onchange="settingsPage.updateHealthConfig(${i}, 'body', this.value)"
                                            style="width:300px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:11px;font-family:monospace;"></td>
-                                <td><button class="btn-icon" onclick="settingsPage.removeHealthConfig(${i})" title="删除">🗑️</button></td>
+                                <td><button class="btn-icon" onclick="settingsPage.removeHealthConfig(${i})" title="${I18n.t('common.delete')}">🗑️</button></td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
-                    <button class="btn-primary" onclick="settingsPage.saveHealthConfigs()" style="margin-top:12px;">💾 保存全部</button>
-                    <button class="btn-secondary" onclick="settingsPage.resetHealthConfigs()" style="margin-top:12px;margin-left:8px;">↩️ 恢复默认</button>
+                    <button class="btn-primary" onclick="settingsPage.saveHealthConfigs()" style="margin-top:12px;">${I18n.t('settings.saveAll')}</button>
+                    <button class="btn-secondary" onclick="settingsPage.resetHealthConfigs()" style="margin-top:12px;margin-left:8px;">${I18n.t('settings.restoreDefault')}</button>
                 </div>
             </div>`;
         }
@@ -230,41 +234,41 @@ class SettingsPage {
 
             html += `
             <div class="card">
-                <div class="card-header"><span class="card-title">🔔 告警通知配置</span></div>
+                <div class="card-header"><span class="card-title">${I18n.t('settings.alertNotifyConfig')}</span></div>
                 <div style="padding:16px;">
-                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">配置微信和邮件告警通道，在"告警规则"页面选择通道后自动使用。</p>
+                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">${I18n.t('settings.alertNotifyHint')}</p>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                         <div class="form-group" style="grid-column:span 2;">
-                            <label>Server酱 SendKey（微信推送）</label>
-                            <input type="text" id="alert-wechat-sendkey" value="${this.escHtml(wechatSendkey)}" placeholder="在 https://sct.ftqq.com/ 获取">
+                            <label>${I18n.t('settings.wechatSendkey')}</label>
+                            <input type="text" id="alert-wechat-sendkey" value="${this.escHtml(wechatSendkey)}" placeholder="${I18n.t('settings.wechatSendkeyHint')}">
                         </div>
                         <div class="form-group">
-                            <label>SMTP 服务器地址</label>
-                            <input type="text" id="alert-smtp-host" value="${this.escHtml(smtpHost)}" placeholder="如 smtp.gmail.com">
+                            <label>${I18n.t('settings.smtpHost')}</label>
+                            <input type="text" id="alert-smtp-host" value="${this.escHtml(smtpHost)}" placeholder="${I18n.t('settings.smtpHostPlaceholder')}">
                         </div>
                         <div class="form-group">
-                            <label>SMTP 端口</label>
+                            <label>${I18n.t('settings.smtpPort')}</label>
                             <input type="number" id="alert-smtp-port" value="${smtpPort}" min="1" max="65535">
                         </div>
                         <div class="form-group">
-                            <label>SMTP 用户名</label>
-                            <input type="text" id="alert-smtp-user" value="${this.escHtml(smtpUser)}" placeholder="登录邮箱">
+                            <label>${I18n.t('settings.smtpUser')}</label>
+                            <input type="text" id="alert-smtp-user" value="${this.escHtml(smtpUser)}" placeholder="${I18n.t('settings.smtpUserPlaceholder')}">
                         </div>
                         <div class="form-group">
-                            <label>SMTP 密码</label>
-                            <input type="password" id="alert-smtp-password" value="${this.escHtml(smtpPass)}" placeholder="邮箱密码或应用专用密码（QQ 邮箱请使用授权码）">
+                            <label>${I18n.t('settings.smtpPassword')}</label>
+                            <input type="password" id="alert-smtp-password" value="${this.escHtml(smtpPass)}" placeholder="${I18n.t('settings.smtpPasswordHint')}">
                         </div>
                         <div class="form-group">
-                            <label>发件人地址（留空则用用户名）</label>
-                            <input type="text" id="alert-smtp-from" value="${this.escHtml(smtpFrom)}" placeholder="发件人邮箱">
+                            <label>${I18n.t('settings.smtpFrom')}</label>
+                            <input type="text" id="alert-smtp-from" value="${this.escHtml(smtpFrom)}" placeholder="${I18n.t('settings.smtpFromPlaceholder')}">
                         </div>
                         <div class="form-group">
-                            <label>收件人地址（逗号分隔）</label>
+                            <label>${I18n.t('settings.smtpTo')}</label>
                             <input type="text" id="alert-email-to" value="${this.escHtml(emailTo)}" placeholder="admin@example.com">
                         </div>
                     </div>
-                    <button class="btn-primary" onclick="settingsPage.saveAlertNotify()" style="margin-top:12px;">💾 保存告警配置</button>
-                    <button class="btn-secondary" onclick="settingsPage.sendTestEmail()" style="margin-top:12px;margin-left:8px;">📧 发送测试邮件</button>
+                    <button class="btn-primary" onclick="settingsPage.saveAlertNotify()" style="margin-top:12px;">${I18n.t('settings.saveAlertConfig')}</button>
+                    <button class="btn-secondary" onclick="settingsPage.sendTestEmail()" style="margin-top:12px;margin-left:8px;">${I18n.t('settings.sendTestEmail')}</button>
                 </div>
             </div>`;
         }
@@ -277,23 +281,23 @@ class SettingsPage {
         const featDefs = [
             {
                 key: 'feature_dynamic_content_last',
-                title: '📌 动态内容后置',
-                shortDesc: '将 user 消息中的动态内容（URL、时间、随机数等）移到末尾，提升 prompt cache 命中率。',
-                detail: '开启后 wr-proxy 会对请求 body 中的 messages 数组重新排序：把包含 URL、日期、数字等动态内容的 message 移到同 role 组的最后，使 prompt 前缀尽可能保持静态，从而提升上游 prompt cache 命中率。适合固定 system prompt + 动态用户输入的场景。',
+                title: I18n.t("settings.dynamicContentLast"),
+                shortDesc: I18n.t("settings.dynamicContentLastDesc"),
+                detail: I18n.t("settings.dynamicContentLastDetail"),
                 icon: '🔀',
             },
             {
                 key: 'feature_token_compression',
-                title: '🗜️ Token 压缩（RTK）',
-                shortDesc: '对系统提示词和长上下文进行压缩预处理，减少输入 token 数量。',
-                detail: '在请求发送到上游之前，先通过一次轻量模型（如 qwen-turbo）对长文本做摘要，减少输入 token 数量。适用于 system prompt 很长的场景（>4000 tokens），可显著降低调用成本，但会损失少量上下文精度。开启后需要额外配置压缩模型（见下方设置）。',
+                title: I18n.t("settings.tokenCompression"),
+                shortDesc: I18n.t("settings.tokenCompressionDesc"),
+                detail: I18n.t("settings.tokenCompressionDetail"),
                 icon: '📦',
             },
             {
                 key: 'feature_session_compression',
-                title: '🔄 会话压缩',
-                shortDesc: '对多轮对话的历史消息进行压缩，将早期消息合并为摘要。',
-                detail: '当对话轮数超过阈值时，将早期消息合并为摘要，减少后续请求的上下文长度。适用于长对话场景（如客服、助教），可将数十轮对话压缩为几轮摘要。注意：压缩会丢失部分细节，适合对上下文精度要求不高的场景。开启后需要配置压缩阈值和模型（见下方设置）。',
+                title: I18n.t("settings.sessionCompression"),
+                shortDesc: I18n.t("settings.sessionCompressionDesc"),
+                detail: I18n.t("settings.sessionCompressionDetail"),
                 icon: '📉',
             },
         ];
@@ -304,11 +308,11 @@ class SettingsPage {
         return `
         <div class="card" style="border-left:3px solid var(--accent);">
             <div class="card-header">
-                <span class="card-title">⚡ wr-proxy 优化特性</span>
-                <button class="btn-primary btn-sm" onclick="settingsPage.reloadProxy()" id="btn-reload-proxy">🔄 Reload wr-proxy</button>
+                <span class="card-title">${I18n.t('settings.featureToggles')}</span>
+                <button class="btn-primary btn-sm" onclick="settingsPage.reloadProxy()" id="btn-reload-proxy">${I18n.t('settings.reloadProxy')}</button>
             </div>
             <div style="padding:16px;">
-                <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">以下特性为 wr-proxy 高级优化功能，开启后会在请求转发到上游之前自动处理请求体，以优化 token 使用和 cache 命中率。修改开关后需要点击 Reload 按钮生效。</p>
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">${I18n.t('settings.featureHint')}</p>
                 ${featDefs.map(feat => {
                     const s = dbSettings[feat.key];
                     const enabled = s ? s.value : false;
@@ -322,13 +326,13 @@ class SettingsPage {
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="font-weight:600;font-size:14px;${enabled ? 'color:var(--success)' : ''}">${feat.title}</span>
-                        <span class="state-label" style="margin-left:auto;font-size:12px;color:${enabled ? 'var(--success)' : 'var(--text-muted)'};">${enabled ? '已开启' : '已关闭'}</span>
+                        <span class="state-label" style="margin-left:auto;font-size:12px;color:${enabled ? 'var(--success)' : 'var(--text-muted)'};">${enabled ? I18n.t("settings.enabled") : I18n.t("settings.disabled")}</span>
                     </div>
                     <p style="color:var(--text-muted);font-size:13px;margin:0 0 6px 0;">${this.escHtml(feat.shortDesc)}</p>
                     <details style="color:var(--text-secondary);font-size:12px;margin:0;">
-                        <summary style="cursor:pointer;color:var(--accent);">详细说明 ▾</summary>
+                        <summary style="cursor:pointer;color:var(--accent);">${I18n.t('settings.detailToggle')}</summary>
                         <p style="margin:6px 0 0 0;line-height:1.6;">${this.escHtml(feat.detail)}</p>
-                        ${desc !== feat.shortDesc ? `<p style="margin:6px 0 0 0;color:var(--text-muted);font-size:11px;">💡 数据库中保存的说明：${this.escHtml(desc)}</p>` : ''}
+                        ${desc !== feat.shortDesc ? `<p style="margin:6px 0 0 0;color:var(--text-muted);font-size:11px;">${I18n.t('settings.dbDescription')}${this.escHtml(desc)}</p>` : ''}
                     </details>
                 </div>`;
                 }).join('')}
@@ -342,7 +346,7 @@ class SettingsPage {
             showToast(result.message);
             this.loadSettings();
         } catch (e) {
-            showToast('初始化失败: ' + (e.message || ''), 'error');
+            showToast(I18n.t("settings.initFailed") + (e.message || ''), 'error');
         }
     }
 
@@ -357,17 +361,17 @@ class SettingsPage {
         // 分级阈值栏
         const tierHtml = `
         <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
-            <span style="font-weight:600;color:var(--accent);">🎯 分级阈值</span>
+            <span style="font-weight:600;color:var(--accent);">${I18n.t('settings.tierThresholds')}</span>
             <span style="color:var(--text-muted);font-size:13px;">
                 <input type="number" step="0.01" min="0" max="1" value="${tier.simple_max}"
                     onchange="settingsPage.updateComplexityTier('simple_max', this.value)"
                     style="width:64px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
-                <span style="margin:0 4px;">简单→经济</span>
+                <span style="margin:0 4px;">${I18n.t('settings.simpleToEconomy')}</span>
                 &nbsp;│&nbsp;
                 <input type="number" step="0.01" min="0" max="1" value="${tier.moderate_max}"
                     onchange="settingsPage.updateComplexityTier('moderate_max', this.value)"
                     style="width:64px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
-                <span style="margin:0 4px;">中等→标准</span>
+                <span style="margin:0 4px;">${I18n.t('settings.moderateToStandard')}</span>
                 &nbsp;≥&nbsp;<span style="font-weight:500;">${tier.moderate_max}</span>&nbsp;→ premium
             </span>
         </div>`;
@@ -375,33 +379,33 @@ class SettingsPage {
         // 六维度定义
         const dims = [
             {
-                key: 'input_length', icon: '📏', title: '输入长度',
-                desc: '按请求消息的总字符数评分，输入越长意味着处理难度越大、需要更强模型的可能性越高。',
-                type: 'levels', unit: '字符', field: 'max_chars',
+                key: 'input_length', icon: '📏', title: I18n.t('settings.inputLength').replace('📏 ', ''),
+                desc: I18n.t("settings.inputLengthDesc"),
+                type: 'levels', unit: I18n.t("settings.chars"), field: 'max_chars',
             },
             {
-                key: 'multi_turn', icon: '💬', title: '多轮对话',
-                desc: '按对话轮数评分，轮数越多意味着需要更多上下文理解能力，更适合强模型。',
-                type: 'levels', unit: '轮', field: 'max_msgs',
+                key: 'multi_turn', icon: '💬', title: I18n.t('settings.multiTurn').replace('💬 ', ''),
+                desc: I18n.t("settings.multiTurnDesc"),
+                type: 'levels', unit: I18n.t("settings.turns"), field: 'max_msgs',
             },
             {
-                key: 'code_detection', icon: '💻', title: '代码检测',
-                desc: '检测消息中是否包含代码特征（代码块、函数定义、类等），编程任务通常需要更强的推理能力。',
+                key: 'code_detection', icon: '💻', title: I18n.t('settings.codeDetection').replace('💻 ', ''),
+                desc: I18n.t("settings.codeDetectionDesc"),
                 type: 'keywords', keywordsField: 'keywords', scoreField: 'score',
             },
             {
-                key: 'tools_detection', icon: '🔧', title: '工具调用',
-                desc: '检测请求中是否包含 tools 或 functions 字段，使用工具调用通常意味着更复杂的任务规划，需要更强模型。',
+                key: 'tools_detection', icon: '🔧', title: I18n.t('settings.toolsDetection').replace('🔧 ', ''),
+                desc: I18n.t("settings.toolsDetectionDesc"),
                 type: 'scores', toolsScoreField: 'tools_score', functionsScoreField: 'functions_score',
             },
             {
-                key: 'reasoning_keywords', icon: '🧠', title: '推理关键词',
-                desc: '检测最后一条用户消息是否包含推理/分析类关键词（如"分析""原理""推理"等），命中即意味着任务需要更强推理能力。',
+                key: 'reasoning_keywords', icon: '🧠', title: I18n.t('settings.reasoningKeywords').replace('🧠 ', ''),
+                desc: I18n.t("settings.reasoningKeywordsDesc"),
                 type: 'keywords', keywordsField: 'keywords', scoreField: 'score',
             },
             {
-                key: 'system_prompt', icon: '📋', title: '系统提示词',
-                desc: '检测 system prompt 的长度，过长的系统提示词通常包含复杂的指令或角色设定，需要更强模型来遵循。',
+                key: 'system_prompt', icon: '📋', title: I18n.t('settings.systemPrompt').replace('📋 ', ''),
+                desc: I18n.t("settings.systemPromptDesc"),
                 type: 'threshold', thresholdField: 'threshold_chars', scoreField: 'score',
             },
         ];
@@ -416,7 +420,7 @@ class SettingsPage {
         ]};
         const codeDet = cfg.code_detection || { enabled: true, score: 0.15, keywords: ['```', 'def ', 'function ', 'class ', 'import ', 'return '] };
         const toolsDet = cfg.tools_detection || { enabled: true, tools_score: 0.20, functions_score: 0.15 };
-        const reasonDet = cfg.reasoning_keywords || { enabled: true, score: 0.12, keywords: ['分析', '推理', '证明', '计算', '推导', 'explain', 'analyze', 'reason', 'prove', 'calculate', 'derive', 'compare', 'evaluate', 'critique', '为什么', '原因', '原理', '逻辑', '步骤', '方案', '策略', '设计'] };
+        const reasonDet = cfg.reasoning_keywords || { enabled: true, score: 0.12, keywords: ['explain', 'analyze', 'reason', 'prove', 'calculate', 'derive', 'compare', 'evaluate', 'critique', 'why', 'cause', 'principle', 'logic', 'steps', 'plan', 'strategy', 'design'] };
         const sysPrompt = cfg.system_prompt || { enabled: true, threshold_chars: 500, score: 0.08 };
         const dimConfigs = {
             input_length: inputLen, multi_turn: multiTurn,
@@ -435,8 +439,8 @@ class SettingsPage {
                 const levels = dc.levels || [];
                 contentHtml = `<table style="width:100%;font-size:13px;">
                     <thead><tr style="color:var(--text-muted);border-bottom:1px solid var(--border);">
-                        <th style="padding:4px 8px;text-align:left;font-weight:500;">条件</th>
-                        <th style="padding:4px 8px;text-align:center;font-weight:500;">得分</th>
+                        <th style="padding:4px 8px;text-align:left;font-weight:500;">${I18n.t('settings.condition')}</th>
+                        <th style="padding:4px 8px;text-align:center;font-weight:500;">${I18n.t('settings.score')}</th>
                     </tr></thead>
                     <tbody>${levels.map((lv, i) => {
                         const prev = i > 0 ? levels[i-1][dim.field] : 0;
@@ -463,13 +467,13 @@ class SettingsPage {
                 const kw = (dc.keywords || []).join(', ');
                 contentHtml = `<div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
                     <div style="flex:1;min-width:200px;">
-                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">关键词（逗号分隔）</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${I18n.t('settings.keywordsCommaSeparated')}</div>
                         <input type="text" value="${this.escHtml(kw)}"
                             onchange="settingsPage.updateComplexityKeywords('${dim.key}', this.value)"
                             style="width:100%;padding:5px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;font-family:monospace;">
                     </div>
                     <div style="min-width:80px;">
-                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">命中得分</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${I18n.t('settings.hitScore')}</div>
                         <input type="number" step="0.01" min="0" max="1" value="${dc[dim.scoreField]}"
                             onchange="settingsPage.updateComplexityField('${dim.key}', '${dim.scoreField}', this.value)"
                             style="width:64px;padding:5px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
@@ -478,13 +482,13 @@ class SettingsPage {
             } else if (dim.type === 'scores') {
                 contentHtml = `<div style="display:flex;gap:20px;">
                     <div>
-                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">tools 得分</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${I18n.t('settings.toolsScore')}</div>
                         <input type="number" step="0.01" min="0" max="1" value="${dc.tools_score}"
                             onchange="settingsPage.updateComplexityField('tools_detection', 'tools_score', this.value)"
                             style="width:64px;padding:5px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
                     </div>
                     <div>
-                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">functions 得分</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${I18n.t('settings.functionsScore')}</div>
                         <input type="number" step="0.01" min="0" max="1" value="${dc.functions_score}"
                             onchange="settingsPage.updateComplexityField('tools_detection', 'functions_score', this.value)"
                             style="width:64px;padding:5px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
@@ -493,13 +497,13 @@ class SettingsPage {
             } else if (dim.type === 'threshold') {
                 contentHtml = `<div style="display:flex;gap:20px;">
                     <div>
-                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">字符阈值</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${I18n.t('settings.charThreshold')}</div>
                         <input type="number" min="0" value="${dc.threshold_chars}"
                             onchange="settingsPage.updateComplexityField('system_prompt', 'threshold_chars', this.value)"
                             style="width:80px;padding:5px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
                     </div>
                     <div>
-                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">命中得分</div>
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">${I18n.t('settings.hitScore')}</div>
                         <input type="number" step="0.01" min="0" max="1" value="${dc.score}"
                             onchange="settingsPage.updateComplexityField('system_prompt', 'score', this.value)"
                             style="width:64px;padding:5px 6px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
@@ -516,11 +520,11 @@ class SettingsPage {
                             <span class="toggle-slider"></span>
                         </label>
                         <span style="font-weight:600;font-size:14px;">${dim.icon} ${dim.title}</span>
-                        <span class="state-label" style="font-size:12px;color:${accentColor};margin-left:auto;">${on ? '已启用' : '已禁用'}</span>
+                        <span class="state-label" style="font-size:12px;color:${accentColor};margin-left:auto;">${on ? I18n.t("settings.enabledState") : I18n.t("settings.disabledState")}</span>
                     </div>
                     ${on ? contentHtml : ''}
                     <details style="margin-top:6px;color:var(--text-muted);font-size:12px;">
-                        <summary style="cursor:pointer;color:var(--accent);">说明 ▾</summary>
+                        <summary style="cursor:pointer;color:var(--accent);">${I18n.t('settings.descToggle')}</summary>
                         <p style="margin:4px 0 0 0;line-height:1.6;">${dim.desc}</p>
                     </details>
                 </div>`;
@@ -536,16 +540,16 @@ class SettingsPage {
         return `
         <div class="card" style="border-left:3px solid #8b5cf6;">
             <div class="card-header">
-                <span class="card-title">🎯 智能模型选择 — 复杂度评估配置</span>
+                <span class="card-title">${I18n.t('settings.complexityConfig')}</span>
                 <div>
-                    <button class="btn-secondary btn-sm" onclick="settingsPage.resetComplexityConfig()" style="margin-right:8px;">↩️ 恢复默认</button>
-                    <button class="btn-primary btn-sm" onclick="settingsPage.saveComplexityConfig()" style="margin-right:8px;">💾 保存配置</button>
-                    <button class="btn-secondary btn-sm" onclick="settingsPage.reloadProxy()">🔄 Reload</button>
+                    <button class="btn-secondary btn-sm" onclick="settingsPage.resetComplexityConfig()" style="margin-right:8px;">${I18n.t('settings.restoreDefault')}</button>
+                    <button class="btn-primary btn-sm" onclick="settingsPage.saveComplexityConfig()" style="margin-right:8px;">${I18n.t('settings.saveConfig')}</button>
+                    <button class="btn-secondary btn-sm" onclick="settingsPage.reloadProxy()">${I18n.t('settings.reload')}</button>
                 </div>
             </div>
             <div style="padding:16px;">
                 <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">
-                    六维度独立评分，总分决定模型分级。修改配置后需点击 <code>Reload wr-proxy</code> 生效。
+                    ${I18n.t('settings.complexityHint')}
                 </p>
                 ${tierHtml}
                 ${dimsHtml}
@@ -558,11 +562,11 @@ class SettingsPage {
         if (!s) return;
         await this.saveSetting('smart_complexity_config', s.value);
         await this.loadSettings();
-        showToast('复杂度配置已保存，请点击 Reload wr-proxy 生效');
+        showToast(I18n.t('settings.complexitySaved'));
     }
 
     async resetComplexityConfig() {
-        if (!confirm('确定恢复默认复杂度配置？当前自定义设置将被覆盖。')) return;
+        if (!confirm(I18n.t('settings.confirmResetComplexity'))) return;
         const defaults = {
             "tier_thresholds": { "simple_max": 0.20, "moderate_max": 0.45 },
             "input_length": { "enabled": true, "levels": [
@@ -575,12 +579,12 @@ class SettingsPage {
             ]},
             "code_detection": { "enabled": true, "score": 0.15, "keywords": ["```", "def ", "function ", "class ", "import ", "return "] },
             "tools_detection": { "enabled": true, "tools_score": 0.20, "functions_score": 0.15 },
-            "reasoning_keywords": { "enabled": true, "score": 0.12, "keywords": ["分析", "推理", "证明", "计算", "推导", "explain", "analyze", "reason", "prove", "calculate", "derive", "compare", "evaluate", "critique", "为什么", "原因", "原理", "逻辑", "步骤", "方案", "策略", "设计"] },
+            "reasoning_keywords": { "enabled": true, "score": 0.12, "keywords": ["explain", "analyze", "reason", "prove", "calculate", "derive", "compare", "evaluate", "critique", "why", "cause", "principle", "logic", "steps", "plan", "strategy", "design"] },
             "system_prompt": { "enabled": true, "threshold_chars": 500, "score": 0.08 },
         };
         await this.saveSetting('smart_complexity_config', defaults);
         await this.loadSettings();
-        showToast('已恢复默认复杂度配置');
+        showToast(I18n.t("settings.complexityReset"));
     }
 
     updateComplexityTier(field, value) {
@@ -637,7 +641,7 @@ class SettingsPage {
     async toggleFeatureState(key, value, el) {
         const label = el.closest('label').parentElement.querySelector('.state-label');
         if (label) {
-            label.textContent = value ? '已开启' : '已关闭';
+            label.textContent = value ? I18n.t("settings.enabled") : I18n.t("settings.disabled");
             label.style.color = value ? 'var(--success)' : 'var(--text-muted)';
         }
         await this.toggleFeature(key, value);
@@ -645,18 +649,18 @@ class SettingsPage {
 
     async reloadProxy() {
         const btn = document.getElementById('btn-reload-proxy');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ 重载中...'; }
+        if (btn) { btn.disabled = true; btn.textContent = I18n.t("settings.reloading"); }
         try {
             const result = await API.post('/settings/reload-proxy', {});
             if (result.success) {
                 showToast('🔄 ' + result.message + (result.detail ? ' — ' + result.detail : ''));
             } else {
-                showToast('重载失败: ' + result.message, 'error');
+                showToast(I18n.t('settings.reloadFailed') + result.message, 'error');
             }
         } catch (e) {
-            showToast('重载失败: ' + (e.message || '网络错误'), 'error');
+            showToast(I18n.t("settings.reloadFailed") + (e.message || I18n.t("common.networkError")), 'error');
         } finally {
-            if (btn) { btn.disabled = false; btn.textContent = '🔄 Reload wr-proxy'; }
+            if (btn) { btn.disabled = false; btn.textContent = I18n.t('settings.reloadProxy'); }
         }
     }
 
@@ -664,7 +668,7 @@ class SettingsPage {
         const input = document.getElementById('log-retention-input');
         const value = parseInt(input.value);
         if (isNaN(value) || value < 1) {
-            showToast('保留天数必须是正整数', 'error');
+            showToast(I18n.t("settings.retentionDaysError"), 'error');
             return;
         }
         await this.saveSetting('log_retention_days', value);
@@ -702,13 +706,13 @@ class SettingsPage {
     }
 
     async resetHealthConfigs() {
-        if (!confirm('确定恢复默认厂商测试配置？')) return;
+        if (!confirm(I18n.t("settings.confirmResetHealthConfig"))) return;
         const defaults = [
             { domain: 'api.openai.com', name: 'OpenAI', endpoint: '/v1/chat/completions', body: '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
             { domain: 'api.anthropic.com', name: 'Anthropic', endpoint: '/v1/messages', body: '{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
             { domain: 'api.deepseek.com', name: 'DeepSeek', endpoint: '/v1/chat/completions', body: '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
-            { domain: 'dashscope.aliyuncs.com', name: '通义千问', endpoint: '/compatible-mode/v1/chat/completions', body: '{"model":"qwen-turbo","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
-            { domain: 'open.bigmodel.cn', name: '智谱', endpoint: '/v4/chat/completions', body: '{"model":"glm-4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
+            { domain: 'dashscope.aliyuncs.com', name: I18n.t("vendor.qwen"), endpoint: '/compatible-mode/v1/chat/completions', body: '{"model":"qwen-turbo","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
+            { domain: 'open.bigmodel.cn', name: I18n.t("vendor.zhipu"), endpoint: '/v4/chat/completions', body: '{"model":"glm-4-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' },
         ];
         await this.saveSetting('health_test_configs', defaults);
     }
@@ -723,11 +727,11 @@ class SettingsPage {
         const emailTo = document.getElementById('alert-email-to').value.trim();
 
         if (!wechatSendkey && !smtpHost) {
-            showToast('至少配置微信 SendKey 或 SMTP 地址之一', 'error');
+            showToast(I18n.t("settings.alertConfigRequired"), 'error');
             return;
         }
         if (smtpHost && !emailTo) {
-            showToast('配置了 SMTP 地址时必须填写 收件人', 'error');
+            showToast(I18n.t("settings.smtpToRequired"), 'error');
             return;
         }
 
@@ -744,7 +748,7 @@ class SettingsPage {
         for (const [key, value] of updates) {
             await this.saveSetting(key, value);
         }
-        showToast('告警通知配置已保存');
+        showToast(I18n.t("settings.alertConfigSaved"));
     }
 
     async sendTestEmail() {
@@ -755,7 +759,7 @@ class SettingsPage {
         const smtpPass = document.getElementById('alert-smtp-password').value;
 
         if (!smtpHost || !emailTo || !smtpUser || !smtpPass) {
-            showToast('请先填写 SMTP 配置（服务器地址、用户名、密码、收件人）', 'error');
+            showToast(I18n.t("settings.smtpConfigRequired"), 'error');
             return;
         }
 
@@ -763,15 +767,15 @@ class SettingsPage {
         await this.saveAlertNotify();
 
         try {
-            showToast('正在发送测试邮件...');
+            showToast(I18n.t("settings.sendingTestEmail"));
             const result = await API.post('/settings/test-email', {});
             if (result.success) {
                 showToast('📧 ' + result.message);
             } else {
-                showToast('发送失败: ' + result.message, 'error');
+                showToast(I18n.t("settings.sendFailed") + result.message, 'error');
             }
         } catch (e) {
-            showToast('发送失败: ' + (e.message || '网络错误'), 'error');
+            showToast(I18n.t("settings.sendFailed") + (e.message || I18n.t("common.networkError")), 'error');
         }
     }
 
@@ -805,19 +809,19 @@ class SettingsPage {
         );
 
         if (filtered.length === 0) {
-            return '<div class="empty-state"><p>暂无设置项</p></div>';
+            return `<div class="empty-state"><p>${I18n.t('settings.noSettings')}</p></div>`;
         }
 
         const categoryLabels = {
-            'general': '📋 通用',
-            'proxy': '🔌 代理',
-            'monitor': '📊 监控',
-            'alert': '🔔 告警',
-            'advanced': '⚙️ 高级',
+            'general': I18n.t("settings.generalCat"),
+            'proxy': I18n.t("settings.proxyCat"),
+            'monitor': I18n.t("settings.monitorCat"),
+            'alert': I18n.t("settings.alertCat"),
+            'advanced': I18n.t("settings.advancedCat"),
         };
 
         let html = '<div class="table-wrap"><table><thead><tr>'
-            + '<th>键名</th><th>值</th><th>类型</th><th>分类</th><th>说明</th><th>操作</th>'
+            + `<th>${I18n.t('settings.keyName')}</th><th>${I18n.t('settings.value')}</th><th>${I18n.t('settings.typeCol')}</th><th>${I18n.t('settings.categoryCol')}</th><th>${I18n.t('settings.descCol')}</th><th>${I18n.t('common.actions')}</th>`
             + '</tr></thead><tbody>';
 
         for (const s of filtered) {
@@ -831,7 +835,7 @@ class SettingsPage {
                     <td class="setting-notes">${this.escHtml(s.description || '-')}</td>
                     <td>
                         ${s.editable
-                            ? `<button class="btn-sm" onclick="settingsPage.editSetting('${this.escHtml(s.key)}')">✏️ 编辑</button>`
+                            ? `<button class="btn-sm" onclick="settingsPage.editSetting('${this.escHtml(s.key)}')">${I18n.t('common.edit')}</button>`
                             : '<span style="color:var(--text-muted)">-</span>'}
                     </td>
                 </tr>`;
@@ -850,10 +854,10 @@ class SettingsPage {
                 return `
                     <label class="toggle-switch ${compact ? 'compact' : ''}">
                         <input type="checkbox" ${val ? 'checked' : ''}
-                               onchange="this.closest('label').querySelector('.toggle-label').textContent=this.checked?'开启':'关闭';settingsPage.toggleBool('${key}',this.checked)"
+                               onchange="this.closest('label').querySelector('.toggle-label').textContent=this.checked?I18n.t('settings.toggleEnabled'):I18n.t('settings.toggleDisabled');settingsPage.toggleBool('${key}',this.checked)"
                                ${setting.editable ? '' : 'disabled'}>
                         <span class="toggle-slider"></span>
-                        <span class="toggle-label">${val ? '开启' : '关闭'}</span>
+                        <span class="toggle-label">${val ? I18n.t("common.on") : I18n.t("common.off")}</span>
                     </label>`;
             case 'int':
             case 'float':
@@ -906,9 +910,9 @@ class SettingsPage {
 
     async toggleProxySwitch(value) {
         const label = document.querySelector('#page-settings .card-header .toggle-label');
-        if (label) label.textContent = value ? '已开启' : '已关闭';
+        if (label) label.textContent = value ? I18n.t("settings.enabled") : I18n.t("settings.disabled");
         await this.saveSetting('proxy_enabled', value);
-        showToast(`代理网关已${value ? '开启' : '关闭'}，正在重载 wr-proxy...`);
+        showToast(I18n.t('settings.proxyToggleReload', {status: value ? I18n.t('common.on') : I18n.t('common.off')}));
         await this.reloadProxy();
     }
 
@@ -927,19 +931,19 @@ class SettingsPage {
             const value = JSON.parse(rawValue);
             await this.saveSetting(key, value);
         } catch (e) {
-            showToast('JSON 格式错误: ' + e.message, 'error');
+            showToast(I18n.t("common.jsonError") + e.message, 'error');
         }
     }
 
     async saveSetting(key, value) {
         try {
             await API.put(`/settings/${encodeURIComponent(key)}`, { value });
-            showToast(`设置 ${key} 已更新`);
+            showToast(I18n.t('settings.settingUpdated', {key: key}));
             const s = this.settings.find(x => x.key === key);
             if (s) s.value = value;
         } catch (e) {
             console.error('Failed to save setting:', e);
-            showToast('保存失败，请重试', 'error');
+            showToast(I18n.t("settings.saveFailedRetry"), 'error');
             this.loadSettings();
         }
     }
@@ -956,20 +960,20 @@ class SettingsPage {
             <div id="edit-setting-modal" class="modal" style="display:flex">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>编辑设置: ${this.escHtml(s.key)}</h3>
+                        <h3>${I18n.t('settings.editSetting')}${this.escHtml(s.key)}</h3>
                         <button class="modal-close" onclick="settingsPage.closeEditModal()">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
-                            <label>键名</label>
+                            <label>${I18n.t('settings.keyName')}</label>
                             <input type="text" value="${this.escHtml(s.key)}" disabled class="form-input">
                         </div>
                         <div class="form-group">
-                            <label>说明</label>
+                            <label>${I18n.t('settings.descCol')}</label>
                             <input type="text" value="${this.escHtml(s.description || '')}" disabled class="form-input">
                         </div>
                         <div class="form-group">
-                            <label>值（${this.escHtml(this.VALUE_TYPE_LABELS[s.value_type] || s.value_type)}）</label>
+                            <label>${I18n.t('settings.valueOf')}${this.escHtml(this.VALUE_TYPE_LABELS[s.value_type] || s.value_type)}）</label>
                             ${s.value_type === 'bool'
                                 ? `<label class="toggle-switch">
                                        <input type="checkbox" id="edit-setting-value" ${s.value ? 'checked' : ''}>
@@ -985,8 +989,8 @@ class SettingsPage {
                             }
                         </div>
                         <div class="form-actions">
-                            <button class="btn-primary" onclick="settingsPage.submitEdit('${this.escHtml(s.key)}', '${s.value_type}')">保存</button>
-                            <button class="btn-secondary" onclick="settingsPage.closeEditModal()">取消</button>
+                            <button class="btn-primary" onclick="settingsPage.submitEdit('${this.escHtml(s.key)}', '${s.value_type}')">${I18n.t('common.save')}</button>
+                            <button class="btn-secondary" onclick="settingsPage.closeEditModal()">${I18n.t('common.cancel')}</button>
                         </div>
                     </div>
                 </div>
@@ -1012,7 +1016,7 @@ class SettingsPage {
             try {
                 value = JSON.parse(raw.value);
             } catch (e) {
-                showToast('JSON 格式错误', 'error');
+                showToast(I18n.t("settings.jsonError"), 'error');
                 return;
             }
         } else {
@@ -1031,9 +1035,9 @@ class SettingsPage {
     async backup() {
         try {
             const result = await API.post('/settings/backup', {});
-            showToast('备份成功: ' + (result.backup || ''));
+            showToast(I18n.t("settings.backupSuccess") + (result.backup || ''));
         } catch (e) {
-            showToast('备份失败', 'error');
+            showToast(I18n.t('settings.backupFailed'), 'error');
         }
     }
 
@@ -1042,17 +1046,17 @@ class SettingsPage {
             <div id="restore-modal" class="modal" style="display:flex">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>恢复备份</h3>
+                        <h3>${I18n.t('settings.restoreTitle')}</h3>
                         <button class="modal-close" onclick="settingsPage.closeRestoreModal()">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
-                            <label>备份文件路径</label>
-                            <input type="text" id="restore-path" class="form-input" placeholder="如: /path/to/webrouter.db.backup_20250515_120000">
+                            <label>${I18n.t('settings.backupPath')}</label>
+                            <input type="text" id="restore-path" class="form-input" placeholder="${I18n.t('settings.backupPathPlaceholder')}">
                         </div>
                         <div class="form-actions">
-                            <button class="btn-primary" onclick="settingsPage.restore()">恢复</button>
-                            <button class="btn-secondary" onclick="settingsPage.closeRestoreModal()">取消</button>
+                            <button class="btn-primary" onclick="settingsPage.restore()">${I18n.t('settings.restore')}</button>
+                            <button class="btn-secondary" onclick="settingsPage.closeRestoreModal()">${I18n.t('common.cancel')}</button>
                         </div>
                     </div>
                 </div>
@@ -1066,15 +1070,15 @@ class SettingsPage {
     async restore() {
         const path = document.getElementById('restore-path').value.trim();
         if (!path) {
-            showToast('请输入备份路径', 'error');
+            showToast(I18n.t("settings.enterBackupPath"), 'error');
             return;
         }
         try {
             await API.post('/settings/restore', { backup_path: path });
-            showToast('恢复成功，请刷新页面');
+            showToast(I18n.t("settings.restoreSuccess"));
             this.closeRestoreModal();
         } catch (e) {
-            showToast('恢复失败: ' + (e.message || ''), 'error');
+            showToast(I18n.t("settings.restoreFailed") + (e.message || ''), 'error');
         }
     }
 
@@ -1084,18 +1088,18 @@ class SettingsPage {
     }
 
     ROUTING_STRATEGY_LABELS = {
-        smart: '智能调度',
-        priority: '优先级',
-        round_robin: '轮询',
-        least_latency: '最低延迟',
-        cost_first: '成本优先',
+        smart: I18n.t("settings.smartRouting"),
+        priority: I18n.t("common.priority"),
+        round_robin: I18n.t("settings.roundRobin"),
+        least_latency: I18n.t("settings.leastLatency"),
+        cost_first: I18n.t("settings.costFirst"),
     };
 
     VALUE_TYPE_LABELS = {
-        string: '字符串',
-        int: '整数',
-        float: '浮点数',
-        bool: '布尔',
+        string: I18n.t("settings.typeString"),
+        int: I18n.t("settings.typeInt"),
+        float: I18n.t("settings.typeFloat"),
+        bool: I18n.t("settings.typeBool"),
         json: 'JSON',
     };
 

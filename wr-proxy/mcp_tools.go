@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -146,9 +149,66 @@ func registerKnowledgeMCPTools() {
 		},
 		Handler: mcpToolMemoryRecall,
 	})
-}
 
-// mcpToolKnowledgeSearch 知识搜索（支持部门权限过滤）
+	// ---- CE 新增工具 ----
+	registerMCPTool(MCPToolDef{
+		Name:        "provider_health",
+		Description: "列出所有活跃 Provider 的健康状态、类型、延迟。帮助了解当前各 API 源的工作状况。",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler: mcpToolProviderHealth,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "model_list",
+		Description: "列出所有最近使用过的模型。支持按 provider 过滤。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"provider": map[string]interface{}{
+					"type":        "string",
+					"description": "可选：按 Provider 名称过滤",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "返回条数上限，默认 20",
+				},
+			},
+		},
+		Handler: mcpToolModelList,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "request_stats",
+		Description: "查询请求统计聚合数据，支持按小时/天分组，按 model/provider/token 聚合。",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"hours": map[string]interface{}{
+					"type":        "integer",
+					"description": "统计时间范围（小时），默认 24",
+				},
+				"group_by": map[string]interface{}{
+					"type":        "string",
+					"description": "聚合维度: model/provider/token，默认 model",
+				},
+			},
+		},
+		Handler: mcpToolRequestStats,
+	})
+
+	registerMCPTool(MCPToolDef{
+		Name:        "routing_strategy",
+		Description: "查询当前路由策略配置。",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler: mcpToolRoutingStrategy,
+	})
+}
 func mcpToolKnowledgeSearch(args map[string]interface{}) (string, error) {
 	keyword, ok := args["keyword"].(string)
 	if !ok || keyword == "" {
@@ -507,5 +567,156 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+// ---- CE 新增工具实现 ----
+
+func mcpToolProviderHealth(args map[string]interface{}) (string, error) {
+	rows, err := db.Query(`
+		SELECT id, name, type, status, last_latency_ms
+		FROM wr_providers WHERE enabled=1
+		ORDER BY name`)
+	if err != nil {
+		return "", fmt.Errorf("query providers: %w", err)
+	}
+	defer rows.Close()
+
+	result := "## Provider Health Status\n\n"
+	result += "| ID | Name | Type | Status | Latency |\n|---|---|---|---|---|\n"
+	for rows.Next() {
+		var id int
+		var name, ptype, status string
+		var latency int
+		if err := rows.Scan(&id, &name, &ptype, &status, &latency); err != nil {
+			continue
+		}
+		latencyStr := "-"
+		if latency > 0 {
+			latencyStr = fmt.Sprintf("%dms", latency)
+		}
+		result += fmt.Sprintf("| %d | %s | %s | %s | %s |\n", id, name, ptype, status, latencyStr)
+	}
+	return result, nil
+}
+
+func mcpToolModelList(args map[string]interface{}) (string, error) {
+	provider, _ := args["provider"].(string)
+	limit := 20
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	var query string
+	var queryArgs []interface{}
+
+	if provider != "" {
+		query = `SELECT DISTINCT model_name, COUNT(*) as cnt
+			FROM wr_request_logs
+			WHERE provider_name = ?
+			GROUP BY model_name ORDER BY cnt DESC LIMIT ?`
+		queryArgs = append(queryArgs, provider, limit)
+	} else {
+		query = `SELECT DISTINCT model_name, COUNT(*) as cnt
+			FROM wr_request_logs
+			GROUP BY model_name ORDER BY cnt DESC LIMIT ?`
+		queryArgs = append(queryArgs, limit)
+	}
+
+	rows, err := db.Query(query, queryArgs...)
+	if err != nil {
+		return "", fmt.Errorf("query models: %w", err)
+	}
+	defer rows.Close()
+
+	result := "## Recent Models\n\n"
+	result += "| Model | Request Count |\n|---|---|\n"
+	for rows.Next() {
+		var model string
+		var cnt int
+		if err := rows.Scan(&model, &cnt); err != nil {
+			continue
+		}
+		result += fmt.Sprintf("| %s | %d |\n", model, cnt)
+	}
+	return result, nil
+}
+
+func mcpToolRequestStats(args map[string]interface{}) (string, error) {
+	hours := 24
+	if h, ok := args["hours"].(float64); ok && h > 0 {
+		hours = int(h)
+	}
+	groupBy, _ := args["group_by"].(string)
+	if groupBy == "" {
+		groupBy = "model"
+	}
+
+	var selectCol string
+	var label string
+	switch groupBy {
+	case "provider":
+		selectCol = "provider_name"
+		label = "Provider"
+	case "token":
+		selectCol = "token_name"
+		label = "Token"
+	default:
+		selectCol = "model_name"
+		label = "Model"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s,
+			COUNT(*) as requests,
+			SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+			AVG(latency_ms) as avg_latency,
+			SUM(cost_cents) as total_cost
+		FROM wr_request_logs
+		WHERE created_at >= datetime('now', '-%d hours')
+		GROUP BY %s
+		ORDER BY requests DESC
+		LIMIT 20`, selectCol, hours, selectCol)
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return "", fmt.Errorf("query stats: %w", err)
+	}
+	defer rows.Close()
+
+	result := fmt.Sprintf("## Request Stats (last %dh, by %s)\n\n", hours, label)
+	result += fmt.Sprintf("| %s | Requests | Errors | Avg Latency | Cost (cents) |\n|---|---|---|---|---|\n", label)
+	for rows.Next() {
+		var name string
+		var requests, errors int
+		var avgLatency float64
+		var totalCost int64
+		if err := rows.Scan(&name, &requests, &errors, &avgLatency, &totalCost); err != nil {
+			continue
+		}
+		latencyStr := "-"
+		if avgLatency > 0 {
+			latencyStr = fmt.Sprintf("%.1fms", avgLatency)
+		}
+		result += fmt.Sprintf("| %s | %d | %d | %s | %d |\n", name, requests, errors, latencyStr, totalCost)
+	}
+	return result, nil
+}
+
+func mcpToolRoutingStrategy(args map[string]interface{}) (string, error) {
+	var strategy string
+	err := db.QueryRow("SELECT value FROM wr_system_settings WHERE key='routing_strategy'").Scan(&strategy)
+	if err != nil {
+		// Default
+		strategy = "smart"
+	}
+
+	result := "## Current Routing Strategy\n\n"
+	result += fmt.Sprintf("**Strategy**: %s\n\n", strategy)
+	result += "Available strategies: smart, priority, round_robin, least_latency, cost_first\n\n"
+	result += "To change the strategy, go to System Settings → Routing Strategy."
+	return result, nil
 }

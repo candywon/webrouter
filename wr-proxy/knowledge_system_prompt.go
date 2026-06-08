@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -7,27 +10,23 @@ import (
 )
 
 // injectKnowledgeSystemPrompt 在请求体中注入知识增强 System Prompt
-// 当 Token 开启了 knowledge_capture_enabled 或 rag_enabled 时生效
-// 注入内容：部门标识 + RAG上下文（如果启用）+ 自定义知识提示词
+// 仅当 Token 开启了 rag_enabled 或配置了 system_prompt_knowledge 时生效
+// KnowledgeCaptureEnabled 只控制对话捕获，不触发 prompt 注入
+// 部门信息仅用于 RAG 搜索的 domain filter，不注入 prompt 文本
 func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 	if token == nil {
 		return body
 	}
 
-	// 检查是否需要注入
-	if !token.KnowledgeCaptureEnabled && !token.RAGEnabled {
+	// 检查是否需要注入（仅 RAG + 自定义知识）
+	if !token.RAGEnabled && token.SystemPromptKnowledge == "" {
 		return body
 	}
 
 	// 构造知识增强提示词
 	var parts []string
 
-	// 1. 部门标识
-	if token.KnowledgeDepartment != "" {
-		parts = append(parts, "【部门标识】你正在为 "+token.KnowledgeDepartment+" 提供服务。")
-	}
-
-	// 2. RAG 上下文
+	// 1. RAG 上下文
 	if token.RAGEnabled {
 		ragCtx, err := buildRAGContext(body, token)
 		if err != nil {
@@ -38,9 +37,9 @@ func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 		}
 	}
 
-	// 3. 自定义知识提示词
+	// 2. 自定义知识提示词（原文注入，不加前缀）
 	if token.SystemPromptKnowledge != "" {
-		parts = append(parts, "【知识提示】"+token.SystemPromptKnowledge)
+		parts = append(parts, token.SystemPromptKnowledge)
 	}
 
 	if len(parts) == 0 {
@@ -96,22 +95,21 @@ func joinStrings(parts []string, sep string) string {
 }
 
 // buildKnowledgeSystemPrompt 构建完整的知识增强 System Prompt
-// 结合公司信息 + 部门职能 + 自定义提示词
+// 用于后台预览，不含部门标签
 func buildKnowledgeSystemPrompt(token *Token) string {
 	var parts []string
 
-	// 基础标识
-	parts = append(parts, "你是一个专业的企业级AI助手。")
-
-	if token.KnowledgeDepartment != "" {
-		parts = append(parts, "当前服务对象来自部门："+token.KnowledgeDepartment+"。")
-		parts = append(parts, "请根据该部门的专业领域特点，提供针对性的回答。")
+	if token.RAGEnabled {
+		parts = append(parts, "以下回答可参考内部知识库中的相关信息。")
 	}
 
 	if token.SystemPromptKnowledge != "" {
 		parts = append(parts, token.SystemPromptKnowledge)
 	}
 
+	if len(parts) == 0 {
+		return ""
+	}
 	return "\n" + joinStrings(parts, "\n") + "\n"
 }
 
@@ -121,7 +119,7 @@ func GetKnowledgeSystemPrompt(token *Token) string {
 	if token == nil {
 		return ""
 	}
-	if !token.KnowledgeCaptureEnabled && !token.RAGEnabled && token.SystemPromptKnowledge == "" {
+	if !token.RAGEnabled && token.SystemPromptKnowledge == "" {
 		return ""
 	}
 	return buildKnowledgeSystemPrompt(token)

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 请求格式校验、补全与清洗
@@ -16,12 +19,12 @@ import (
 // --- 请求校验结果 ---
 
 type SanitizeResult struct {
-	Body       []byte // 清洗后的请求体（可能被修改）
-	Warnings   []string
-	Stripped   []string // 被剥离的字段列表
-	Modified   bool     // 请求体是否被修改
-	Valid      bool     // 请求是否合法
-	RejectReason string // 拒绝原因（空=不拒绝）
+	Body         []byte // 清洗后的请求体（可能被修改）
+	Warnings     []string
+	Stripped     []string // 被剥离的字段列表
+	Modified     bool     // 请求体是否被修改
+	Valid        bool     // 请求是否合法
+	RejectReason string   // 拒绝原因（空=不拒绝）
 }
 
 // SanitizeRequest 校验并清洗请求体
@@ -227,8 +230,8 @@ func sanitizeToolFields(provider *Provider, req map[string]interface{}, result *
 	toolFields := []string{
 		"tools",
 		"tool_choice",
-		"functions",       // 旧版 function calling（已废弃但某些客户端仍用）
-		"function_call",   // 旧版
+		"functions",     // 旧版 function calling（已废弃但某些客户端仍用）
+		"function_call", // 旧版
 		"parallel_tool_calls",
 	}
 

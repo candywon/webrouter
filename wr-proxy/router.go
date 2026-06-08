@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 智能调度引擎：选 Provider、分组、降级、热插拔
@@ -16,15 +19,22 @@ type Router struct {
 	strategy  string
 }
 
+// Strategy returns the current routing strategy name
+func (r *Router) Strategy() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.strategy
+}
+
 var router = &Router{
 	strategy: "smart",
 }
 
 // SessionSticky session → provider 粘性映射
 type SessionSticky struct {
-	ProviderID  int
+	ProviderID   int
 	ProviderName string
-	LastUsed    time.Time
+	LastUsed     time.Time
 }
 
 var (
@@ -151,6 +161,8 @@ func (r *Router) SelectProvider(model string, token *Token, excludeIDs []int, se
 		selected = selectFromGroups(selectLeastLatency, primary, hot, cold)
 	case "cost_first":
 		selected = selectFromGroups(selectCostFirst, primary, hot, cold)
+	case "cost_optimal":
+		selected = selectFromGroups(selectCostFirst, primary, hot, cold) // model selection handled in smart_model.go
 	case "round_robin":
 		selected = selectFromGroups(selectWeightedRandom, primary, hot, cold)
 	case "priority":

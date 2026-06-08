@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -14,18 +17,18 @@ import (
 
 // AgentMemory 持久化记忆条目
 type AgentMemory struct {
-	ID        int     `json:"id"`
-	TokenID   int     `json:"token_id"`
-	TokenName string  `json:"token_name"`
-	SessionID string  `json:"session_id"`
-	Category  string  `json:"category"` // preference/fact/context/goal/constraint
-	Title     string  `json:"title"`
-	Content   string  `json:"content"`
-	Tags      string  `json:"tags"` // JSON array
-	Priority  int     `json:"priority"` // 1-5, 5 = most important
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-	ExpiresAt string  `json:"expires_at"`
+	ID        int    `json:"id"`
+	TokenID   int    `json:"token_id"`
+	TokenName string `json:"token_name"`
+	SessionID string `json:"session_id"`
+	Category  string `json:"category"` // preference/fact/context/goal/constraint
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	Tags      string `json:"tags"`     // JSON array
+	Priority  int    `json:"priority"` // 1-5, 5 = most important
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // InitMemoryTables 创建记忆表
@@ -216,10 +219,10 @@ func BuildMemoryContext(token *Token, sessionID string) string {
 
 // MemoryExtractFromConversation 从对话中提取记忆（异步投递到 memory channel）
 type memoryExtractTask struct {
-	token      *Token
-	sessionID  string
-	prompt     string
-	response   string
+	token     *Token
+	sessionID string
+	prompt    string
+	response  string
 }
 
 var (
@@ -258,19 +261,16 @@ func extractMemoriesSimple(token *Token, sessionID, prompt, response string) {
 	// 规则 1：检测用户偏好表达（"我通常", "我喜欢", "我们一般"）
 	if containsAny(prompt, []string{"我通常", "我喜欢", "我们一般", "我总是", "我们习惯"}) {
 		SaveMemory(token, sessionID, "preference", "用户偏好", prompt, []string{"auto_extracted"}, 3, "")
-		LogInfo("[memory] extracted preference for token %d", token.ID)
 	}
 
 	// 规则 2：检测事实性信息（"请注意", "记住", "我们的规定是"）
 	if containsAny(prompt, []string{"请记住", "注意", "我们的规定", "我们的政策", "我们公司是"}) {
 		SaveMemory(token, sessionID, "fact", "事实信息", prompt, []string{"auto_extracted"}, 3, "")
-		LogInfo("[memory] extracted fact for token %d", token.ID)
 	}
 
 	// 规则 3：检测目标/任务（"我们的目标是", "需要完成", "计划")
 	if containsAny(prompt, []string{"我们的目标是", "需要完成", "计划在本", "计划在"}) {
 		SaveMemory(token, sessionID, "goal", "目标/任务", prompt, []string{"auto_extracted"}, 4, "")
-		LogInfo("[memory] extracted goal for token %d", token.ID)
 	}
 }
 

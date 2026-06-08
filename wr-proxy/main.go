@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 入口：加载配置、初始化、启动 HTTP 服务
@@ -84,30 +87,37 @@ func main() {
 		LogWarn("Failed to load desensitize rules: %v", err)
 	}
 
-	// 4.6 初始化知识捕获模块
-	knowledgeEnabled = cfg.KnowledgeCapture
+	// 4.6 初始化知识捕获模块（始终启动 infra，按 system_settings 动态开关）
+	knowledgeEnabled := cfg.KnowledgeCapture
 	if knowledgeEnabled {
-		InitKnowledge()
-		go startKnowledgeCleanup()
-		go startKnowledgeDailyReset()
-		// 启动知识提取定时任务（每5分钟检查一次）
-		go startKnowledgeExtractScheduler()
-		// 启动 embedding 异步 worker + 向量缓存
-		InitEmbedding()
-		InitVectorCache()
-		go startEmbeddingBackfillScheduler()
-		// 启动记忆层
-		InitMemoryWorker()
-		go startMemoryCleanup()
-		// RAG 反馈清理
-		go startRAGFeedbackCleanup()
-		LogInfo("Knowledge capture: ENABLED")
+		// 首次启动时如果 env 已开，确保 DB 设置同步
+		if !IsKnowledgeEnabled() {
+			// SetSetting("knowledge_capture_enabled", true)
+		}
 	}
+	InitKnowledge()
+	InitAuditLogger()
+	go startKnowledgeCleanup()
+	go startKnowledgeDailyReset()
+	go startKnowledgeExtractScheduler()
+	InitEmbedding()
+	InitVectorCache()
+	go startEmbeddingBackfillScheduler()
+	InitMemoryWorker()
+	go startMemoryCleanup()
+	go startRAGFeedbackCleanup()
+	go startRetentionCleanup()
+	LogInfo("Knowledge capture: %s (per-token + system setting)", map[bool]string{true: "ENABLED", false: "DISABLED"}[knowledgeEnabled])
 
 	// 4.7 初始化记忆表
 	if err := InitMemoryTables(); err != nil {
 		LogWarn("Memory tables init failed: %v", err)
 	}
+
+	// 4.8 启动会话记忆召回（独立于 knowledge_capture 全局开关，按 token 控制）
+	InitSessionMemoryWorker()
+	go startSessionMemoryCleanup()
+	LogInfo("Session Memory Recall: ENABLED (per-token)")
 
 	// 5. 启动健康检测
 	healthChecker := NewHealthChecker(cfg.HealthCheckInterval, cfg.HealthTimeout)
@@ -161,6 +171,7 @@ func main() {
 
 	fmt.Printf("\n  wr-proxy listening on %s\n", cfg.ListenAddr)
 	fmt.Printf("  DB: %s\n", cfg.DBPath)
+	fmt.Printf("  Timeout: %s (non-stream) / %s (stream)\n", cfg.DefaultTimeout, cfg.StreamTimeout)
 	fmt.Printf("  Strategy: %s\n", cfg.RoutingStrategy)
 	fmt.Printf("  Health check: %s\n", cfg.HealthCheckInterval)
 	fmt.Printf("\n  Endpoints:\n")

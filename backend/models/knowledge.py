@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """企业知识库 — Flask 数据模型"""
 from extensions import db
 from datetime import datetime
@@ -233,4 +236,30 @@ class KnowledgeAnalysis(db.Model):
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+class AuditLog(db.Model):
+    """审计日志表 — 数据安全法第27条要求"""
+    __tablename__ = 'wr_audit_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    action = db.Column(db.String(50), nullable=False, index=True)
+    resource_type = db.Column(db.String(50), default='')
+    resource_id = db.Column(db.String(100), default='')
+    token_id = db.Column(db.Integer, default=0, index=True)
+    detail = db.Column(db.Text, default='')
+    client_ip = db.Column(db.String(50), default='')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'action': self.action,
+            'resource_type': self.resource_type,
+            'resource_id': self.resource_id,
+            'token_id': self.token_id,
+            'detail': self.detail,
+            'client_ip': self.client_ip,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """仪表盘 API — 数据源改为 wr_request_logs + wr_providers"""
 from flask import Blueprint, jsonify, request as req
 from models.provider import Provider
@@ -49,6 +52,27 @@ def overview():
         RequestLog.created_at >= func.date('now'),
     ).first()
 
+    # 今日延迟百分位
+    today_latencies = [
+        r[0] for r in db.session.query(RequestLog.latency_ms).filter(
+            RequestLog.created_at >= func.date('now'),
+            RequestLog.latency_ms > 0,
+        ).order_by(RequestLog.latency_ms).all()
+    ]
+
+    def percentile(values, p):
+        if not values:
+            return 0
+        k = (len(values) - 1) * p / 100
+        f, c = int(k), int(k) + 1
+        if c >= len(values):
+            return values[-1]
+        return values[f] + (k - f) * (values[c] - values[f])
+
+    latency_p50 = round(percentile(today_latencies, 50), 2)
+    latency_p90 = round(percentile(today_latencies, 90), 2)
+    latency_p99 = round(percentile(today_latencies, 99), 2)
+
     return jsonify({
         'providers': {
             'total': total_providers,
@@ -67,6 +91,12 @@ def overview():
         'cost': {
             'month_cents': month_cost,
             'month_yuan': round(month_cost / 100, 2),
+        },
+        'latency': {
+            'p50_ms': latency_p50,
+            'p90_ms': latency_p90,
+            'p99_ms': latency_p99,
+            'sample_count': len(today_latencies),
         },
     })
 

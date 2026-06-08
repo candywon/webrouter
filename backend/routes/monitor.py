@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """监控API — 基于 WebRouter 自有的 Provider 健康状态"""
 from flask import Blueprint, jsonify, request
 from models.wr_models import ChannelHealth
 from models.provider import Provider
 from extensions import db
+from i18n.messages import get_message
 
 monitor_bp = Blueprint('monitor', __name__)
 
@@ -32,7 +36,7 @@ def check_channel(provider_id):
     """手动触发单个 Provider 检测"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     from services.health_checker import HealthChecker
     checker = HealthChecker()

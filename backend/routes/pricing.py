@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """模型定价管理 API — 支持 CRUD + 批量导入 + 通知 wr-proxy 刷新"""
 import json
 from flask import Blueprint, jsonify, request
 from models.wr_models import ModelPricing
 from extensions import db
+from i18n.messages import get_message
 
 pricing_bp = Blueprint('pricing', __name__)
 
@@ -35,11 +39,11 @@ def create_pricing():
     """新增模型定价"""
     data = request.get_json()
     if not data or not data.get('model'):
-        return jsonify({'error': 'model 字段必填'}), 400
+        return jsonify({'error': get_message('field_required_model', request)}), 400
 
     existing = ModelPricing.query.filter_by(model=data['model']).first()
     if existing:
-        return jsonify({'error': f'Model {data["model"]} 已存在，请用 PUT 更新'}), 409
+        return jsonify({'error': get_message('pricing_already_exists', request).format(model=data["model"])}), 409
 
     p = ModelPricing(
         model=data['model'],
@@ -53,7 +57,7 @@ def create_pricing():
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': '定价创建成功', 'pricing': p.to_dict()}), 201
+    return jsonify({'message': get_message('pricing_created', request), 'pricing': p.to_dict()}), 201
 
 
 @pricing_bp.route('/<string:model_name>', methods=['PUT'])
@@ -65,7 +69,7 @@ def update_pricing(model_name):
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'input_price' in data:
         p.input_price = float(data['input_price'])
@@ -84,7 +88,7 @@ def update_pricing(model_name):
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': '定价更新成功', 'pricing': p.to_dict()})
+    return jsonify({'message': get_message('pricing_updated', request), 'pricing': p.to_dict()})
 
 
 @pricing_bp.route('/<string:model_name>', methods=['DELETE'])
@@ -95,7 +99,7 @@ def delete_pricing(model_name):
         return jsonify({'error': f'Model {model_name} not found'}), 404
 
     if p.is_default:
-        return jsonify({'error': '不能删除默认定价'}), 400
+        return jsonify({'error': get_message('cannot_delete_default_pricing', request)}), 400
 
     db.session.delete(p)
     db.session.commit()
@@ -109,7 +113,7 @@ def batch_update():
     """批量更新定价（用于价格调整、定时同步）"""
     data = request.get_json()
     if not data or 'items' not in data:
-        return jsonify({'error': '需要 items 数组'}), 400
+        return jsonify({'error': get_message('field_required_items_array', request)}), 400
 
     items = data['items']
     created = 0
@@ -148,7 +152,7 @@ def batch_update():
     _notify_proxy_reload()
 
     return jsonify({
-        'message': f'批量更新完成: {created} 新增, {updated} 更新',
+        'message': get_message('pricing_batch_update_done', request).format(created=created, updated=updated),
         'created': created,
         'updated': updated,
     })
@@ -173,7 +177,7 @@ def reload_pricing():
     """手动触发 wr-proxy 刷新定价缓存"""
     result = _notify_proxy_reload()
     return jsonify({
-        'message': '刷新请求已发送',
+        'message': get_message('refresh_sent', request),
         'proxy_response': result,
     })
 

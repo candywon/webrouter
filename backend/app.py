@@ -1,8 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """WebRouter Flask 应用工厂"""
-from flask import Flask
+from flask import Flask, jsonify, request
+from flask_login import LoginManager, current_user, login_user
 from extensions import db, cors
 from config import get_config
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
 
@@ -72,10 +77,48 @@ def create_app(config_class=None):
         config_class = get_config()
 
     app.config.from_object(config_class)
+    app.config.setdefault('SECRET_KEY', os.environ.get('WEBROUTER_SECRET_KEY', 'webrouter-change-me'))
 
     # 初始化扩展
     db.init_app(app)
-    cors.init_app(app, resources={r"/api/*": {r"origins": "*"}})
+    cors.init_app(app, resources={r"/api/*": {r"origins": "*"}}, supports_credentials=True)
+
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        from models.wr_models import AdminUser
+        return AdminUser.query.get(int(user_id))
+
+    @login_manager.unauthorized_handler
+    def unauthorized():
+        return jsonify({'error': 'unauthorized'}), 401
+
+    @app.before_request
+    def require_admin_login():
+        # 认证路由始终放行（在 Demo 只读检查之前）
+        if request.path.startswith('/api/auth/'):
+            return None
+
+        # Demo 模式自动登录 + 核心数据只读保护
+        if app.config.get('DEMO_MODE'):
+            from models.wr_models import AdminUser
+            if not current_user.is_authenticated:
+                demo_admin = AdminUser.query.filter_by(username='demo').first()
+                if demo_admin:
+                    login_user(demo_admin)
+            # 核心数据只读保护：白名单之外的 POST/PUT/DELETE 返回 403
+            if request.method in ('POST', 'PUT', 'DELETE') and request.path.startswith('/api/'):
+                allowed_prefixes = ('/api/demo/', '/api/settings/', '/api/desensitize/',
+                                    '/api/pricing/', '/api/modelgrades/', '/api/modelaliases/')
+                if not request.path.startswith(allowed_prefixes):
+                    return jsonify({'error': 'demo_mode_readonly'}), 403
+        if request.path in ('/health',):
+            return None
+        if request.path.startswith('/api/') and not current_user.is_authenticated:
+            return jsonify({'error': 'unauthorized'}), 401
+        return None
 
     # 注册路由蓝图
     from routes.dashboard import dashboard_bp
@@ -93,7 +136,14 @@ def create_app(config_class=None):
     from routes.modelgrades import modelgrades_bp  # 模型分级管理
     from routes.modelaliases import modelaliases_bp  # 模型别名管理
     from routes.knowledge_routes import knowledge_bp  # 企业知识库
+    from routes.knowledge_quality import knowledge_quality_bp  # 知识搜索质量
+    from routes.session_routes import session_bp  # 会话记忆管理
+    from routes.auth import auth_bp  # 后台登录认证
+    from routes.demo import demo_bp  # Demo 模式
+    from routes.monitoring_ext import monitoring_ext_bp  # 扩展监控
+    from routes.export import export_bp  # 数据导出
 
+    app.register_blueprint(demo_bp, url_prefix='/api/demo')
     app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
     app.register_blueprint(providers_bp, url_prefix='/api/providers')
     app.register_blueprint(monitor_bp, url_prefix='/api/monitor')
@@ -109,6 +159,11 @@ def create_app(config_class=None):
     app.register_blueprint(modelgrades_bp, url_prefix='/api/modelgrades')
     app.register_blueprint(modelaliases_bp, url_prefix='/api/modelaliases')
     app.register_blueprint(knowledge_bp, url_prefix='/api/knowledge')
+    app.register_blueprint(knowledge_quality_bp, url_prefix="/api/knowledge")
+    app.register_blueprint(session_bp, url_prefix='/api/sessions')
+    app.register_blueprint(monitoring_ext_bp, url_prefix='/api/monitoring')
+    app.register_blueprint(export_bp, url_prefix='/api/export')
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
 
     # 根路径返回前端页面
     @app.route('/')
@@ -123,16 +178,22 @@ def create_app(config_class=None):
     # 初始化数据库
     with app.app_context():
         from models.wr_models import (  # noqa: F401
-            WRToken, ProviderExt, ProviderQuota, RequestLog,
+            AdminUser, WRToken, ProviderExt, ProviderQuota, RequestLog,
             AlertRule, AlertHistory, ChannelHealth, TeamQuota,
             SystemSetting, ModelGrade, ModelAlias,
         )
         from models.provider import Provider  # noqa: F401
         from models.knowledge import (  # noqa: F401
             KnowledgeRaw, KnowledgeItem, KnowledgeDomain,
-            KnowledgeDomainRisk, KnowledgeAnalysis,
+            KnowledgeDomainRisk, KnowledgeAnalysis, AuditLog,
         )
         db.create_all()
+
+        admin_user = os.environ.get('WEBROUTER_ADMIN_USER', 'admin')
+        admin_password = os.environ.get('WEBROUTER_ADMIN_PASSWORD', 'admin123456')
+        _, created_admin = AdminUser.ensure_default(admin_user, admin_password)
+        if created_admin:
+            app.logger.warning('默认管理员已创建：%s / %s，请尽快修改 WEBROUTER_ADMIN_PASSWORD', admin_user, admin_password)
 
         # 知识库字段迁移：为已存在的 wr_tokens 表添加新列
         from sqlalchemy import text
@@ -143,6 +204,7 @@ def create_app(config_class=None):
             ('rag_min_relevance', 'FLOAT DEFAULT 0.7'),
             ('rag_top_k', 'INTEGER DEFAULT 3'),
             ('system_prompt_knowledge', 'TEXT DEFAULT \'\''),
+            ('session_recall_enabled', 'BOOLEAN DEFAULT 0'),
         ]
         for col, ctype in knowledge_cols:
             try:
@@ -165,9 +227,21 @@ def create_app(config_class=None):
         count4 = ModelAlias.seed_defaults()
         if count4:
             app.logger.info(f'模型别名种子数据已初始化: {count4} 条')
+        count_provider = Provider.seed_defaults()
+        if count_provider:
+            app.logger.info(f'主流数据源模板已初始化: {count_provider} 条')
         count5 = seed_knowledge_domains()
         if count5:
             app.logger.info(f'知识库域种子数据已初始化: {count5} 条')
+
+        # Demo 模式：自动播种（幂等，仅首次有效）
+        if app.config.get('DEMO_MODE'):
+            from seed_demo import seed_demo_data
+            try:
+                seed_demo_data(app)
+                app.logger.info('[demo] 演示数据播种完成')
+            except Exception as e:
+                app.logger.error(f'[demo] 演示数据播种失败: {e}')
 
     # 启动定时任务
     _init_schedulers(app)

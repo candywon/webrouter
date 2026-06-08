@@ -1,45 +1,117 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Provider 上游 API 数据源
 type Provider struct {
-	ID             int       `json:"id"`
-	Name           string    `json:"name"`
-	Type           string    `json:"type"`            // direct/aggregate/litellm/custom
-	BaseURL        string    `json:"base_url"`
-	APIKey         string    `json:"api_key,omitempty"`
-	Models         string    `json:"models"`          // JSON array string: ["gpt-4o","claude-3"]
-	Tags           string    `json:"tags"`            // JSON array string
-	Priority       int       `json:"priority"`        // 0-100: 90+主力, 50-89热备, 1-49冷备, 0禁用
-	Weight         int       `json:"weight"`          // 调度权重 0-100
-	ProxyEnabled   bool      `json:"proxy_enabled"`   // 是否纳入代理池
-	RateLimitRPM   int       `json:"rate_limit_rpm"`  // 每分钟请求上限, 0=不限
-	TimeoutSeconds int       `json:"timeout_seconds"` // 请求超时
-	MaxRetries     int       `json:"max_retries"`     // 最大重试次数
-	CostMultiplier float64  `json:"cost_multiplier"` // 成本倍率
-	Enabled        bool      `json:"enabled"`
-	Status         string    `json:"status"`          // healthy/warning/dead/rate_limited/disabled
+	ID             int        `json:"id"`
+	Name           string     `json:"name"`
+	Type           string     `json:"type"` // direct/aggregate/litellm/custom
+	BaseURL        string     `json:"base_url"`
+	APIKey         string     `json:"api_key,omitempty"`
+	Models         string     `json:"models"`          // JSON array string: ["gpt-4o","claude-3"]
+	Tags           string     `json:"tags"`            // JSON array string
+	Priority       int        `json:"priority"`        // 0-100: 90+主力, 50-89热备, 1-49冷备, 0禁用
+	Weight         int        `json:"weight"`          // 调度权重 0-100
+	ProxyEnabled   bool       `json:"proxy_enabled"`   // 是否纳入代理池
+	RateLimitRPM   int        `json:"rate_limit_rpm"`  // 每分钟请求上限, 0=不限
+	TimeoutSeconds int        `json:"timeout_seconds"` // 请求超时
+	MaxRetries     int        `json:"max_retries"`     // 最大重试次数
+	CostMultiplier float64    `json:"cost_multiplier"` // 成本倍率
+	Enabled        bool       `json:"enabled"`
+	Status         string     `json:"status"` // healthy/warning/dead/rate_limited/disabled
 	LastCheckAt    *time.Time `json:"last_check_at"`
-	LastLatencyMs  int       `json:"last_latency_ms"`
-	LastError      string    `json:"last_error,omitempty"`
+	LastLatencyMs  int        `json:"last_latency_ms"`
+	LastError      string     `json:"last_error,omitempty"`
 
 	// 额度信息（从 Flask API 获取或手动配置）
-	QuotaTotal    int64   `json:"quota_total"`     // 总额度(分), 0=未知/不限
-	QuotaUsed     int64   `json:"quota_used"`      // 已用额度(分)
-	QuotaSource   string  `json:"quota_source"`    // manual/api/unknown
+	QuotaTotal  int64  `json:"quota_total"`  // 总额度(分), 0=未知/不限
+	QuotaUsed   int64  `json:"quota_used"`   // 已用额度(分)
+	QuotaSource string `json:"quota_source"` // manual/api/unknown
 
 	// 能力标记
 	SupportsTools bool `json:"supports_tools"` // 是否支持 function calling / tools
+
+	// 有 Channel 时是否将 Provider 主体也作为兜底渠道纳入调度
+	FallbackEnabled bool `json:"fallback_enabled"`
 
 	// 运行时状态（不持久化）
 	HealthStatus  string     `json:"-"` // 缓存的健康状态
 	ConsecFails   int        `json:"-"` // 连续失败次数
 	CooldownUntil *time.Time `json:"-"` // 冷却截止时间（长时限流/额度用完时设置）
+
+	// 按模型的冷却（单模型额度用完/限流时使用，不影响其他模型）
+	modelCooldown   map[string]time.Time `json:"-"`
+	modelCooldownMu sync.RWMutex         `json:"-"`
+}
+
+// SetModelCooldown 为指定模型设置冷却截止时间
+func (p *Provider) SetModelCooldown(model string, until time.Time) {
+	if model == "" {
+		return
+	}
+	p.modelCooldownMu.Lock()
+	defer p.modelCooldownMu.Unlock()
+	if p.modelCooldown == nil {
+		p.modelCooldown = make(map[string]time.Time)
+	}
+	p.modelCooldown[model] = until
+}
+
+// ClearModelCooldown 清除指定模型的冷却；model 为空则清空全部
+func (p *Provider) ClearModelCooldown(model string) {
+	p.modelCooldownMu.Lock()
+	defer p.modelCooldownMu.Unlock()
+	if p.modelCooldown == nil {
+		return
+	}
+	if model == "" {
+		p.modelCooldown = nil
+		return
+	}
+	delete(p.modelCooldown, model)
+}
+
+// IsModelCooling 判断指定模型是否处于冷却中
+func (p *Provider) IsModelCooling(model string) bool {
+	if model == "" {
+		return false
+	}
+	p.modelCooldownMu.RLock()
+	defer p.modelCooldownMu.RUnlock()
+	if p.modelCooldown == nil {
+		return false
+	}
+	until, ok := p.modelCooldown[model]
+	if !ok {
+		return false
+	}
+	return time.Now().Before(until)
+}
+
+// ModelCooldownSnapshot 返回当前模型冷却状态的快照（用于 admin 查询）
+func (p *Provider) ModelCooldownSnapshot() map[string]time.Time {
+	p.modelCooldownMu.RLock()
+	defer p.modelCooldownMu.RUnlock()
+	if len(p.modelCooldown) == 0 {
+		return nil
+	}
+	out := make(map[string]time.Time, len(p.modelCooldown))
+	now := time.Now()
+	for m, t := range p.modelCooldown {
+		if now.Before(t) {
+			out[m] = t
+		}
+	}
+	return out
 }
 
 // IsAvailable 判断 Provider 是否可参与调度
@@ -63,6 +135,10 @@ func (p *Provider) IsAvailable(model string) bool {
 			return false
 		}
 	}
+	// 指定模型处于冷却（其他模型仍可用）
+	if model != "" && p.IsModelCooling(model) {
+		return false
+	}
 	return true
 }
 
@@ -72,9 +148,9 @@ func (p *Provider) PriorityGroup() string {
 	case p.Priority >= 90:
 		return "primary" // 主力
 	case p.Priority >= 50:
-		return "hot"     // 热备
+		return "hot" // 热备
 	default:
-		return "cold"    // 冷备
+		return "cold" // 冷备
 	}
 }
 
@@ -104,31 +180,34 @@ func (p *Provider) QuotaRemaining() int64 {
 
 // Token 对外 API Key
 type Token struct {
-	ID              int        `json:"id"`
-	Name            string     `json:"name"`
-	Key             string     `json:"key"`               // sk-wr-...xxxx
-	UserID          int        `json:"user_id"`
-	Models          string     `json:"models"`            // JSON array: ["gpt-4o"], 空=全部
-	ProviderIDs     string     `json:"provider_ids"`      // JSON array: [1,3], 空=全部
-	QuotaTotal      int64      `json:"quota_total"`       // 总额度(分), 0=不限
-	QuotaUsed       int64      `json:"quota_used"`        // 已用额度(分)
-	RateLimitRPM    int        `json:"rate_limit_rpm"`    // 每分钟限速, 0=不限
-	SubnetWhitelist string     `json:"subnet_whitelist"`  // JSON array: ["10.0.0.0/8"]
-	SmartDowngrade      bool       `json:"smart_downgrade"`      // 允许自动降级（强模型→便宜模型）
-	DesensitizeEnabled bool       `json:"desensitize_enabled"` // 是否启用脱敏
-	DesensitizeLevel   string     `json:"desensitize_level"`   // 脱敏级别：off/standard/strict
+	ID                 int    `json:"id"`
+	Name               string `json:"name"`
+	Key                string `json:"key"` // sk-wr-...xxxx
+	UserID             int    `json:"user_id"`
+	Models             string `json:"models"`              // JSON array: ["gpt-4o"], 空=全部
+	ProviderIDs        string `json:"provider_ids"`        // JSON array: [1,3], 空=全部
+	QuotaTotal         int64  `json:"quota_total"`         // 总额度(分), 0=不限
+	QuotaUsed          int64  `json:"quota_used"`          // 已用额度(分)
+	RateLimitRPM       int    `json:"rate_limit_rpm"`      // 每分钟限速, 0=不限
+	SubnetWhitelist    string `json:"subnet_whitelist"`    // JSON array: ["10.0.0.0/8"]
+	SmartDowngrade     bool   `json:"smart_downgrade"`     // 允许自动降级（强模型→便宜模型）
+	DesensitizeEnabled bool   `json:"desensitize_enabled"` // 是否启用脱敏
+	DesensitizeLevel   string `json:"desensitize_level"`   // 脱敏级别：off/standard/strict
 
 	// 知识捕获扩展字段
-	KnowledgeCaptureEnabled bool   `json:"knowledge_capture_enabled"` // 是否开启知识捕获
-	KnowledgeDepartment     string `json:"knowledge_department"`      // 归属部门
-	RAGEnabled              bool   `json:"rag_enabled"`               // 是否开启RAG自动注入
-	RAGMinRelevance         float64 `json:"rag_min_relevance"`        // RAG最低相关度阈值
-	RAGTopK                 int    `json:"rag_top_k"`                 // RAG注入最多条数
-	SystemPromptKnowledge   string `json:"system_prompt_knowledge"`   // 自定义System Prompt知识片段
+	KnowledgeCaptureEnabled bool    `json:"knowledge_capture_enabled"` // 是否开启知识捕获
+	KnowledgeDepartment     string  `json:"knowledge_department"`      // 归属部门
+	RAGEnabled              bool    `json:"rag_enabled"`               // 是否开启RAG自动注入
+	RAGMinRelevance         float64 `json:"rag_min_relevance"`         // RAG最低相关度阈值
+	RAGTopK                 int     `json:"rag_top_k"`                 // RAG注入最多条数
+	SystemPromptKnowledge   string  `json:"system_prompt_knowledge"`   // 自定义System Prompt知识片段
+	RAGHybridAlpha          float64 `json:"rag_hybrid_alpha"`          // 混合检索 α 权重 (0=纯向量, 1=纯BM25), 默认0.3
+	RAGReranker             string  `json:"rag_reranker"`              // 重排序策略: none/overlap
+	SessionRecallEnabled    bool    `json:"session_recall_enabled"`    // 是否开启会话记忆召回（@recall / X-Recall-Session）
 
-	Enabled            bool       `json:"enabled"`
-	ExpiresAt          *time.Time `json:"expires_at"`
-	CreatedAt          time.Time  `json:"created_at"`
+	Enabled   bool       `json:"enabled"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // IsExpired 检查 Token 是否过期
@@ -181,38 +260,38 @@ func (t *Token) CanUseProvider(providerID int) bool {
 
 // RequestLog 请求日志
 type RequestLog struct {
-	ID            int64     `json:"id"`
-	RequestID     string    `json:"request_id"`
-	TokenID       int       `json:"token_id"`
-	TokenName     string    `json:"token_name"`
-	ProviderID    int       `json:"provider_id"`
-	ProviderName  string    `json:"provider_name"`
-	ModelName     string    `json:"model_name"`
-	Endpoint      string    `json:"endpoint"`
-	InputTokens   int64     `json:"input_tokens"`
-	OutputTokens  int64     `json:"output_tokens"`
-	CachedTokens  int64     `json:"cached_tokens"`
-	StatusCode    int       `json:"status_code"`
-	LatencyMs     int       `json:"latency_ms"`
-	CostCents     int64     `json:"cost_cents"`
-	IsStream      bool      `json:"is_stream"`
-	IsRetry       bool      `json:"is_retry"`
-	ErrorMessage  string    `json:"error_message,omitempty"`
-	ErrorType     string    `json:"error_type,omitempty"` // quota_exhausted/rate_limited/timeout/unknown
-	ClientIP      string    `json:"client_ip"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID           int64     `json:"id"`
+	RequestID    string    `json:"request_id"`
+	TokenID      int       `json:"token_id"`
+	TokenName    string    `json:"token_name"`
+	ProviderID   int       `json:"provider_id"`
+	ProviderName string    `json:"provider_name"`
+	ModelName    string    `json:"model_name"`
+	Endpoint     string    `json:"endpoint"`
+	InputTokens  int64     `json:"input_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+	CachedTokens int64     `json:"cached_tokens"`
+	StatusCode   int       `json:"status_code"`
+	LatencyMs    int       `json:"latency_ms"`
+	CostCents    int64     `json:"cost_cents"`
+	IsStream     bool      `json:"is_stream"`
+	IsRetry      bool      `json:"is_retry"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+	ErrorType    string    `json:"error_type,omitempty"` // quota_exhausted/rate_limited/timeout/unknown
+	ClientIP     string    `json:"client_ip"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // QuotaPrediction 额度预测结果
 type QuotaPrediction struct {
-	ProviderID            int       `json:"provider_id"`
-	QuotaRemaining        int64     `json:"quota_remaining"`
-	DailyBurnRate         float64   `json:"daily_burn_rate"`
-	DaysUntilExhaust      float64   `json:"days_until_exhaust"`
-	PredictedExhaustDate  string    `json:"predicted_exhaust_date"`
-	Trend                 string    `json:"trend"` // increasing/stable/decreasing
-	Confidence            float64   `json:"confidence"`
-	AlertLevel            string    `json:"alert_level"` // green/yellow/orange/red/black
+	ProviderID           int     `json:"provider_id"`
+	QuotaRemaining       int64   `json:"quota_remaining"`
+	DailyBurnRate        float64 `json:"daily_burn_rate"`
+	DaysUntilExhaust     float64 `json:"days_until_exhaust"`
+	PredictedExhaustDate string  `json:"predicted_exhaust_date"`
+	Trend                string  `json:"trend"` // increasing/stable/decreasing
+	Confidence           float64 `json:"confidence"`
+	AlertLevel           string  `json:"alert_level"` // green/yellow/orange/red/black
 }
 
 // --- 辅助函数 ---

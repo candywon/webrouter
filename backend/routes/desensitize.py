@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """脱敏规则管理 API — CRUD + 规则重载通知 wr-proxy"""
 import re
 from flask import Blueprint, jsonify, request
 from models.wr_models import DesensitizeRule
 from extensions import db
+from i18n.messages import get_message
 
 desensitize_bp = Blueprint('desensitize', __name__)
 
@@ -25,12 +29,12 @@ def list_rules():
 def list_builtin():
     """内置规则说明（不可编辑，仅展示）"""
     builtin = [
-        {'category': 'IDCARD', 'name': '身份证号', 'pattern': r'[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]', 'level': 'standard'},
-        {'category': 'BANKCARD', 'name': '银行卡号', 'pattern': r'\b[3-6]\d{12,18}\b', 'level': 'standard'},
-        {'category': 'APIKEY', 'name': 'API密钥', 'pattern': r'(?:sk|sk_live|sk_test|key|api_key|apikey|secret|token|Bearer)\s*[:=]\s*["\']?[\w\-]{16,}["\']?', 'level': 'standard'},
-        {'category': 'EMAIL', 'name': '邮箱', 'pattern': r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', 'level': 'standard'},
-        {'category': 'PHONE', 'name': '手机号', 'pattern': r'\b1[3-9]\d{9}\b', 'level': 'standard'},
-        {'category': 'IP', 'name': 'IP地址', 'pattern': r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b', 'level': 'standard'},
+        {'category': 'IDCARD', 'name': 'ID Number', 'pattern': r'[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]', 'level': 'standard'},
+        {'category': 'BANKCARD', 'name': 'Bank Card Number', 'pattern': r'\b[3-6]\d{12,18}\b', 'level': 'standard'},
+        {'category': 'APIKEY', 'name': 'API Key', 'pattern': r'(?:sk|sk_live|sk_test|key|api_key|apikey|secret|token|Bearer)\s*[:=]\s*["\']?[\w\-]{16,}["\']?', 'level': 'standard'},
+        {'category': 'EMAIL', 'name': 'Email', 'pattern': r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', 'level': 'standard'},
+        {'category': 'PHONE', 'name': 'Phone Number', 'pattern': r'\b1[3-9]\d{9}\b', 'level': 'standard'},
+        {'category': 'IP', 'name': 'IP Address', 'pattern': r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b', 'level': 'standard'},
     ]
     return jsonify({'builtin': builtin})
 
@@ -40,34 +44,34 @@ def create_rule():
     """创建脱敏规则"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     name = (data.get('name') or '').strip()
     if not name:
-        return jsonify({'error': '规则名称不能为空'}), 400
+        return jsonify({'error': get_message('rule_name_required', request)}), 400
 
     rule_type = data.get('type', 'regex')
     if rule_type not in VALID_TYPES:
-        return jsonify({'error': f'type 必须为 {VALID_TYPES}'}), 400
+        return jsonify({'error': get_message('invalid_type', request).format(VALID_TYPES=VALID_TYPES)}), 400
 
     pattern = (data.get('pattern') or '').strip()
     if not pattern:
-        return jsonify({'error': 'pattern 不能为空'}), 400
+        return jsonify({'error': get_message('pattern_required', request)}), 400
 
     # 验证正则语法
     if rule_type == 'regex':
         try:
             re.compile(pattern)
         except re.error as e:
-            return jsonify({'error': f'正则语法错误: {e}'}), 400
+            return jsonify({'error': get_message('invalid_regex', request).format(e=e)}), 400
 
     category = data.get('category', 'CUSTOM')
     if category not in VALID_CATEGORIES:
-        return jsonify({'error': f'category 必须为 {VALID_CATEGORIES}'}), 400
+        return jsonify({'error': get_message('invalid_category', request).format(VALID_CATEGORIES=VALID_CATEGORIES)}), 400
 
     level = data.get('level', 'standard')
     if level not in VALID_LEVELS:
-        return jsonify({'error': f'level 必须为 {VALID_LEVELS}'}), 400
+        return jsonify({'error': get_message('invalid_level', request).format(VALID_LEVELS=VALID_LEVELS)}), 400
 
     rule = DesensitizeRule(
         name=name,
@@ -86,7 +90,7 @@ def create_rule():
     _notify_reload()
 
     return jsonify({
-        'message': '脱敏规则创建成功',
+        'message': get_message('desensitize_rule_created', request),
         'rule': rule.to_dict(),
     }), 201
 
@@ -100,31 +104,31 @@ def update_rule(rule_id):
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'name' in data:
         rule.name = data['name'].strip()
     if 'type' in data:
         if data['type'] not in VALID_TYPES:
-            return jsonify({'error': f'type 必须为 {VALID_TYPES}'}), 400
+            return jsonify({'error': get_message('invalid_type', request).format(VALID_TYPES=VALID_TYPES)}), 400
         rule.type = data['type']
     if 'pattern' in data:
         pattern = data['pattern'].strip()
         if not pattern:
-            return jsonify({'error': 'pattern 不能为空'}), 400
+            return jsonify({'error': get_message('pattern_required', request)}), 400
         if rule.type == 'regex' or data.get('type') == 'regex':
             try:
                 re.compile(pattern)
             except re.error as e:
-                return jsonify({'error': f'正则语法错误: {e}'}), 400
+                return jsonify({'error': get_message('invalid_regex', request).format(e=e)}), 400
         rule.pattern = pattern
     if 'category' in data:
         if data['category'] not in VALID_CATEGORIES:
-            return jsonify({'error': f'category 必须为 {VALID_CATEGORIES}'}), 400
+            return jsonify({'error': get_message('invalid_category', request).format(VALID_CATEGORIES=VALID_CATEGORIES)}), 400
         rule.category = data['category']
     if 'level' in data:
         if data['level'] not in VALID_LEVELS:
-            return jsonify({'error': f'level 必须为 {VALID_LEVELS}'}), 400
+            return jsonify({'error': get_message('invalid_level', request).format(VALID_LEVELS=VALID_LEVELS)}), 400
         rule.level = data['level']
     if 'enabled' in data:
         rule.enabled = bool(data['enabled'])
@@ -136,7 +140,7 @@ def update_rule(rule_id):
     _notify_reload()
 
     return jsonify({
-        'message': '脱敏规则更新成功',
+        'message': get_message('desensitize_rule_updated', request),
         'rule': rule.to_dict(),
     })
 
@@ -153,7 +157,7 @@ def delete_rule(rule_id):
 
     _notify_reload()
 
-    return jsonify({'message': '脱敏规则已删除'})
+    return jsonify({'message': get_message('desensitize_rule_deleted', request)})
 
 
 @desensitize_bp.route('/test', methods=['POST'])
@@ -161,7 +165,7 @@ def test_rule():
     """测试脱敏规则（不持久化，按实际引擎顺序逐条执行）"""
     data = request.get_json()
     if not data or 'text' not in data:
-        return jsonify({'error': '需要 text 字段'}), 400
+        return jsonify({'error': get_message('field_required_text', request)}), 400
 
     text = data['text']
     custom_rules = data.get('rules', [])  # [{type, pattern, category, level}]
@@ -198,7 +202,7 @@ def test_rule():
                 else:
                     continue
             except re.error as e:
-                results.append({'category': category, 'error': f'正则语法错误: {e}', 'is_builtin': is_builtin})
+                results.append({'category': category, 'error': get_message('invalid_regex', request).format(e=e), 'is_builtin': is_builtin})
                 continue
 
             if not matches:

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* Hash路由 */
 const Router = {
   routes: {},
@@ -30,6 +33,8 @@ const Router = {
       return;
     }
 
+    document.body.classList.toggle('login-mode', path === '/login');
+
     // 隐藏所有页面，显示当前
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     // 映射路由到页面容器
@@ -55,25 +60,27 @@ const Router = {
 
     // 更新标题
     const titles = {
-      '/': '仪表盘',
-      '/providers': '数据源管理',
-      '/channels': '渠道管理',
-      '/provider-channels': '渠道管理',
-      '/tokens': '令牌管理',
-      '/pricing': '模型定价',
-      '/modelgrades': '模型分级',
-      '/desensitize': '脱敏规则',
-      '/monitor': '健康监控',
-      '/alerts': '告警规则',
-      '/billing': '计费统计',
-      '/team': '团队管理',
-      '/cli': 'CLI 对接',
-      '/reqcache': '请求缓存',
-      '/api-test': 'API 测试',
-      '/knowledge': '知识库',
-      '/settings': '系统设置',
+      '/login': I18n.t("router.login"),
+      '/': I18n.t("nav.dashboard"),
+      '/providers': I18n.t("nav.providers"),
+      '/channels': I18n.t("nav.channels"),
+      '/provider-channels': I18n.t("nav.channels"),
+      '/tokens': I18n.t("nav.tokens"),
+      '/pricing': I18n.t("nav.pricing"),
+      '/modelgrades': I18n.t("nav.modelgrades"),
+      '/desensitize': I18n.t("nav.desensitize"),
+      '/monitor': I18n.t("nav.monitor"),
+      '/alerts': I18n.t("nav.alerts"),
+      '/billing': I18n.t("nav.billing"),
+      '/team': I18n.t("nav.team"),
+      '/cli': I18n.t("nav.cli"),
+      '/reqcache': I18n.t("nav.reqcache"),
+      '/api-test': I18n.t("nav.apiTest"),
+      '/knowledge': I18n.t("nav.knowledge"),
+      '/settings': I18n.t("nav.settings"),
     };
-    document.getElementById('header-title').textContent = titles[path] || 'AI-API综合管理平台';
+    const titleEl = document.getElementById('header-title');
+    if (titleEl) titleEl.textContent = titles[path] || I18n.t("router.defaultTitle");
 
     this.current = path;
     if (handler.load) handler.load();

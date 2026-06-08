@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 智能重试引擎：上游错误语义识别 + 请求Hash缓存 + 降级策略决策
@@ -54,10 +57,13 @@ var quotaExhaustedPatterns = []string{
 	"usage limit reached",
 	"account_limit_exceeded",
 	"quota_exceeded",
-	"AccountQuotaExceeded",    // DashScope 5小时额度超额
-	"DataInsufficient",        // DashScope 额度不足
-	"InvalidApiKey",           // DashScope Key无效
-	"Forbidden",               // DashScope 禁止访问
+	"AccountQuotaExceeded", // DashScope 5小时额度超额
+	"DataInsufficient",     // DashScope 额度不足
+	"Arrearage",            // DashScope 账户欠费
+	"overdue",              // DashScope 欠费英文
+	"in good standing",     // DashScope 欠费完整消息
+	"InvalidApiKey",        // DashScope Key无效
+	"Forbidden",            // DashScope 禁止访问
 	"额度",
 	"余额不足",
 	"已用完",
@@ -77,10 +83,10 @@ var rateLimitPatterns = []string{
 	"daily limit",
 	"hour limit",
 	"minute limit",
-	"Throttling",             // DashScope 限流错误码
+	"Throttling", // DashScope 限流错误码
 	"throttling",
-	"Request was throttled",  // DashScope 限流消息
-	"rate_limit_exceeded",    // 通用限流码
+	"Request was throttled", // DashScope 限流消息
+	"rate_limit_exceeded",   // 通用限流码
 	"频率限制",
 	"请求过多",
 	"并发",
@@ -268,7 +274,7 @@ type requestCacheEntry struct {
 // 2. 防止同一请求无限重试（连续 N 次同一 hash 失败则放弃）
 // 3. 统计和日志用途
 type RequestCache struct {
-	mu     sync.RWMutex
+	mu      sync.RWMutex
 	entries map[string]*requestCacheEntry // key: "tokenID:model"
 }
 
@@ -445,15 +451,12 @@ func ShouldFailover(result *ProxyResult, tokenID int, model string, body []byte)
 		return true, "response_truncated"
 	}
 
-	// 4. 检查请求缓存：同一请求是否已失败过
-	if reqCache.IsSameRequestFailed(tokenID, model, body) {
-		// 同一请求体之前已失败，但这次 status 是正常的？
-		// 可能是上游返回了看似成功但实际不完整的响应
-		// 保守策略：允许 failover 但记录日志
-		LogWarn("RetryEngine: same request body previously failed for token=%d model=%s, allowing failover",
-			tokenID, model)
-		return true, "same_request_previously_failed"
-	}
+	// 4. 跨 Provider failover 已经换了上游，不再依赖 reqCache 的"同请求历史失败"
+	// 来否决一个 HTTP 200 + 无截断的正常响应。reqCache 仍由 handlers 在成功路径上更新，
+	// 用于其他用途（统计/限流/熔断）。
+	_ = body
+	_ = tokenID
+	_ = model
 
 	return false, ""
 }

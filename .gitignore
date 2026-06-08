@@ -17,3 +17,6 @@ wr-proxy/*.exe
 logs/*.pid
 logs/*.log
 *.pid
+
+# Fly.io
+.fly/

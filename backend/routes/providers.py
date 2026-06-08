@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """Provider 管理 API — 数据源的 CRUD、健康检测、代理配置"""
 import json
 import requests as http
@@ -5,6 +8,7 @@ from flask import Blueprint, jsonify, request
 from models.provider import Provider
 from models.wr_models import ChannelHealth, ProviderExt, ProviderQuota
 from extensions import db
+from i18n.messages import get_message
 
 providers_bp = Blueprint('providers', __name__)
 
@@ -145,7 +149,7 @@ def get_provider(provider_id):
     """获取单个 Provider 详情"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
     return jsonify(_provider_full_dict(provider, include_secrets=False))
 
 
@@ -154,18 +158,18 @@ def create_provider():
     """注册新 Provider"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     name = (data.get('name') or '').strip()
     provider_type = (data.get('type') or '').strip()
     base_url = (data.get('base_url') or '').strip()
 
     if not name:
-        return jsonify({'error': '名称不能为空'}), 400
+        return jsonify({'error': get_message('name_required', request)}), 400
     if provider_type not in Provider.VALID_TYPES:
-        return jsonify({'error': f'不支持的类型: {provider_type}'}), 400
+        return jsonify({'error': get_message('unsupported_type', request).format(provider_type=provider_type)}), 400
     if not base_url:
-        return jsonify({'error': 'Base URL 不能为空'}), 400
+        return jsonify({'error': get_message('base_url_required', request)}), 400
 
     provider = Provider(name=name, type=provider_type, base_url=base_url)
 
@@ -239,7 +243,7 @@ def create_provider():
     _notify_proxy_reload()
 
     return jsonify({
-        'message': 'Provider 创建成功',
+        'message': get_message('provider_created', request),
         'provider': _provider_full_dict(provider),
     }), 201
 
@@ -249,11 +253,11 @@ def update_provider(provider_id):
     """更新 Provider 配置"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     # 主表字段
     if 'name' in data:
@@ -321,7 +325,7 @@ def update_provider(provider_id):
     _notify_proxy_reload()
 
     return jsonify({
-        'message': 'Provider 更新成功',
+        'message': get_message('provider_updated', request),
         'provider': _provider_full_dict(provider),
     })
 
@@ -331,7 +335,7 @@ def delete_provider(provider_id):
     """删除 Provider"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     # 同时删除关联数据
     ChannelHealth.query.filter_by(provider_id=provider_id).delete()
@@ -342,7 +346,7 @@ def delete_provider(provider_id):
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': 'Provider 已删除'})
+    return jsonify({'message': get_message('provider_deleted', request)})
 
 
 @providers_bp.route('/<int:provider_id>/check', methods=['POST'])
@@ -350,7 +354,7 @@ def check_provider(provider_id):
     """手动触发单个 Provider 健康检测"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     from models.provider_factory import ProviderFactory
     from datetime import datetime
@@ -397,7 +401,7 @@ def update_quota(provider_id):
     """更新 Provider 额度"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     quota = _get_or_create_quota(provider_id)
     if 'quota_total' in data:
@@ -414,7 +418,7 @@ def update_quota(provider_id):
 
     _notify_proxy_reload()
     return jsonify({
-        'message': '额度更新成功',
+        'message': get_message('quota_updated', request),
         'quota': quota.to_dict(),
     })
 
@@ -425,7 +429,7 @@ def auto_detect():
     data = request.get_json()
     base_url = (data or {}).get('base_url', '').strip()
     if not base_url:
-        return jsonify({'error': 'Base URL 不能为空'}), 400
+        return jsonify({'error': get_message('base_url_required', request)}), 400
 
     from models.provider_factory import ProviderFactory
     detected_type = ProviderFactory.auto_detect_type(base_url)
@@ -488,7 +492,7 @@ def list_cooldowns():
 def clear_cooldown(provider_id):
     """手动清除指定 Provider 的冷却状态"""
     _notify_clear_cooldown(provider_id)
-    return jsonify({'message': '冷却清除请求已发送', 'provider_id': provider_id})
+    return jsonify({'message': get_message('cooldown_clear_sent', request), 'provider_id': provider_id})
 
 
 @providers_bp.route('/request_cache')

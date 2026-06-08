@@ -1,0 +1,98 @@
+WebRouter Community Edition
+Copyright (c) 2024-2026 Jianlin Huang. All rights reserved.
+
+This product includes software developed by third parties.
+The following copyright notices and license terms apply to
+those third-party components.
+
+---
+
+Python Dependencies (backend/)
+
+Flask
+  Copyright (c) 2010 Pallets
+  License: BSD-3-Clause
+  https://github.com/pallets/flask
+
+Flask-SQLAlchemy
+  Copyright (c) 2010 Pallets
+  License: BSD-3-Clause
+  https://github.com/pallets/flask-sqlalchemy
+
+Flask-CORS
+  Copyright (c) 2016 Cory Dolphin
+  License: MIT
+  https://github.com/corydolphin/flask-cors
+
+Gunicorn
+  Copyright (c) 2009-2020 Benoit Chesneau and contributors
+  License: MIT
+  https://github.com/benoitc/gunicorn
+
+Requests
+  Copyright (c) 2019 Kenneth Reitz
+  License: Apache-2.0
+  https://github.com/psf/requests
+
+aiohttp
+  Copyright (c) 2013-2020 aio-libs contributors
+  License: Apache-2.0
+  https://github.com/aio-libs/aiohttp
+
+APScheduler
+  Copyright (c) 2015-2020 Alex Grönholm
+  License: MIT
+  https://github.com/agronholm/apscheduler
+
+redis-py
+  Copyright (c) 2014 Redis Labs
+  License: MIT
+  https://github.com/redis/redis-py
+
+PyMySQL
+  Copyright (c) 2010-2015 PyMySQL contributors
+  License: MIT
+  https://github.com/PyMySQL/PyMySQL
+
+cryptography
+  Copyright (c) 2013-2024 The cryptography developers
+  License: Apache-2.0 or BSD-3-Clause
+  https://github.com/pyca/cryptography
+
+python-dateutil
+  Copyright (c) 2017 dateutil contributors
+  License: Apache-2.0 or BSD-3-Clause
+  https://github.com/dateutil/dateutil
+
+---
+
+Go Dependencies (wr-proxy/)
+
+modernc.org/sqlite
+  Copyright (c) 2017 The modernc.org/sqlite Authors
+  License: BSD-3-Clause
+  https://gitlab.com/cznic/sqlite
+
+github.com/google/uuid
+  Copyright (c) 2009 Google Inc.
+  License: BSD-3-Clause
+  https://github.com/google/uuid
+
+github.com/dustin/go-humanize
+  Copyright (c) 2005-2008 Dustin Sallings
+  License: MIT
+  https://github.com/dustin/go-humanize
+
+github.com/hashicorp/golang-lru/v2
+  Copyright (c) HashiCorp
+  License: MPL-2.0
+  https://github.com/hashicorp/golang-lru
+
+---
+
+Frontend
+
+Font Awesome (icons)
+  Copyright (c) Fonticons, Inc.
+  License: Font Awesome Free License (CC BY 4.0 + SIL OFL 1.1)
+  https://fontawesome.com/

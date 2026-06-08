@@ -1,12 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """模型分级管理 API — 智能选模型 (auto/smart) 的分级配置"""
 import json
 from flask import Blueprint, jsonify, request
 from models.wr_models import ModelGrade
 from extensions import db
+from i18n.messages import get_message
 
 modelgrades_bp = Blueprint('modelgrades', __name__)
 
-VALID_TIERS = ['economy', 'standard', 'premium']
+VALID_TIERS = ['economy', 'standard', 'enhanced', 'premium', 'flagship']
 
 
 @modelgrades_bp.route('/')
@@ -40,15 +44,15 @@ def create_grade():
     """新增模型分级"""
     data = request.get_json()
     if not data or not data.get('model'):
-        return jsonify({'error': 'model 字段必填'}), 400
+        return jsonify({'error': get_message('field_required_model', request)}), 400
 
     tier = data.get('tier', '').strip()
     if tier not in VALID_TIERS:
-        return jsonify({'error': f'tier 必须是 {VALID_TIERS} 之一'}), 400
+        return jsonify({'error': get_message('invalid_tier', request).format(VALID_TIERS=VALID_TIERS)}), 400
 
     existing = ModelGrade.query.filter_by(model=data['model']).first()
     if existing:
-        return jsonify({'error': f'Model {data["model"]} 已存在，请用 PUT 更新'}), 409
+        return jsonify({'error': get_message('pricing_already_exists', request).format(model=data["model"])}), 409
 
     g = ModelGrade(
         model=data['model'],
@@ -63,7 +67,7 @@ def create_grade():
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': '模型分级创建成功', 'grade': g.to_dict()}), 201
+    return jsonify({'message': get_message('model_grade_created', request), 'grade': g.to_dict()}), 201
 
 
 @modelgrades_bp.route('/<string:model_name>', methods=['PUT'])
@@ -75,11 +79,11 @@ def update_grade(model_name):
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'tier' in data:
         if data['tier'] not in VALID_TIERS:
-            return jsonify({'error': f'tier 必须是 {VALID_TIERS} 之一'}), 400
+            return jsonify({'error': get_message('invalid_tier', request).format(VALID_TIERS=VALID_TIERS)}), 400
         g.tier = data['tier']
     if 'cost_index' in data:
         g.cost_index = float(data['cost_index'])
@@ -95,7 +99,7 @@ def update_grade(model_name):
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': '模型分级更新成功', 'grade': g.to_dict()})
+    return jsonify({'message': get_message('model_grade_updated', request), 'grade': g.to_dict()})
 
 
 @modelgrades_bp.route('/<string:model_name>', methods=['DELETE'])
@@ -117,9 +121,11 @@ def list_tiers():
     """列出所有分级层级"""
     return jsonify({
         'tiers': [
-            {'value': 'economy', 'label': '经济型', 'description': '便宜快速，适合简单任务'},
-            {'value': 'standard', 'label': '标准型', 'description': '中等性价比，适合日常任务'},
-            {'value': 'premium', 'label': '旗舰型', 'description': '最强推理，适合复杂任务'},
+            {'value': 'economy', 'label': 'Economy', 'description': 'Cheap & fast, for simple tasks (chat, translation, short Q&A)'},
+            {'value': 'standard', 'label': 'Standard', 'description': 'Balanced, for daily tasks (writing, summarization, formatting)'},
+            {'value': 'enhanced', 'label': 'Enhanced', 'description': 'Capable, for code generation, multi-step reasoning, documents'},
+            {'value': 'premium', 'label': 'Premium', 'description': 'Powerful, for complex architecture, math proofs, long analysis'},
+            {'value': 'flagship', 'label': 'Flagship', 'description': 'Top-tier, for research, competition, deep multimodal reasoning'},
         ],
     })
 
@@ -129,7 +135,7 @@ def reload_grades():
     """手动触发 wr-proxy 刷新模型分级缓存"""
     result = _notify_proxy_reload()
     return jsonify({
-        'message': '刷新请求已发送',
+        'message': get_message('refresh_sent', request),
         'proxy_response': result,
     })
 

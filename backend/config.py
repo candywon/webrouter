@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 import os
 
 
@@ -26,13 +29,20 @@ class ProductionConfig(Config):
     DEBUG = False
 
 
+class DemoConfig(ProductionConfig):
+    DEMO_MODE = True
+
+
 config_map = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
+    'demo': DemoConfig,
     'default': DevelopmentConfig,
 }
 
 
 def get_config():
     env = os.environ.get('FLASK_ENV', 'default')
+    if os.environ.get('WEBROUTER_DEMO'):
+        return DemoConfig
     return config_map.get(env, DevelopmentConfig)

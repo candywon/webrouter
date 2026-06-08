@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -30,7 +33,7 @@ func TestShouldCapture_FewTurnsShortResponse(t *testing.T) {
 
 func TestShouldCapture_CodeHeavy(t *testing.T) {
 	entry := KnowledgeEntry{
-		Response: "```python\ndef hello():\n    print('world')\n    for i in range(100):\n        print(i)\n        if i % 2 == 0:\n            continue\n        x = i * 2\n        y = x + 1\n        print(x, y)\n\ndef goodbye():\n    pass\n```\n以上代码",
+		Response:  "```python\ndef hello():\n    print('world')\n    for i in range(100):\n        print(i)\n        if i % 2 == 0:\n            continue\n        x = i * 2\n        y = x + 1\n        print(x, y)\n\ndef goodbye():\n    pass\n```\n以上代码",
 		TurnCount: 5,
 	}
 	// code ratio > 60%, should be filtered
@@ -45,8 +48,8 @@ func TestShouldCapture_CodeHeavy(t *testing.T) {
 
 func TestShouldCapture_TranslationIntent(t *testing.T) {
 	entry := KnowledgeEntry{
-		Prompt:    "请翻译这段话：Hello World",
-		Response:  "你好，世界。这是一段测试文本。为了达到200字符的长度要求，我需要补充一些无关紧要的内容。" +
+		Prompt: "请翻译这段话：Hello World",
+		Response: "你好，世界。这是一段测试文本。为了达到200字符的长度要求，我需要补充一些无关紧要的内容。" +
 			"这是一段测试文本。为了达到200字符的长度要求，我需要补充一些无关紧要的内容。" +
 			"这是一段测试文本。为了达到200字符的长度要求，我需要补充一些无关紧要的内容。",
 		TurnCount: 3,
@@ -58,8 +61,8 @@ func TestShouldCapture_TranslationIntent(t *testing.T) {
 
 func TestShouldCapture_AnalysisWithTranslation(t *testing.T) {
 	entry := KnowledgeEntry{
-		Prompt:    "翻译并分析以下数据：Q3毛利率为18.7%",
-		Response:  "Q3毛利率同比收窄3.2个百分点至18.7%，主要原因是原材料成本上涨和市场竞争加剧。建议优化供应链。" +
+		Prompt: "翻译并分析以下数据：Q3毛利率为18.7%",
+		Response: "Q3毛利率同比收窄3.2个百分点至18.7%，主要原因是原材料成本上涨和市场竞争加剧。建议优化供应链。" +
 			"这是一段补充长度的文本，用于确保响应超过200字符。在实际业务场景中，这类分析通常会包含更多的数据支撑和推理过程。" +
 			"同时还会涉及行业对比和竞争对手分析，以及未来趋势预测。这些内容对于企业决策具有重要参考价值。",
 		TurnCount: 3,
@@ -71,8 +74,8 @@ func TestShouldCapture_AnalysisWithTranslation(t *testing.T) {
 
 func TestShouldCapture_KnowledgeRich(t *testing.T) {
 	entry := KnowledgeEntry{
-		Prompt:    "分析这份Q3财报的毛利率趋势",
-		Response:  "根据财务部Q3分析报告，Q3毛利率同比收窄3.2个百分点至18.7%，主要受原材料价格上涨影响。" +
+		Prompt: "分析这份Q3财报的毛利率趋势",
+		Response: "根据财务部Q3分析报告，Q3毛利率同比收窄3.2个百分点至18.7%，主要受原材料价格上涨影响。" +
 			"从趋势来看，毛利率已连续三个季度下滑，但降幅逐季收窄。预计Q4随着供应链优化，毛利率将回升至20%左右。" +
 			"建议关注原材料采购成本控制和产品结构优化两个方向，以维持长期盈利能力。同时需要警惕市场竞争加剧的风险。",
 		TurnCount: 5,
@@ -292,35 +295,23 @@ func TestInjectKnowledgeSystemPrompt_NoInjection(t *testing.T) {
 }
 
 func TestInjectKnowledgeSystemPrompt_DepartmentOnly(t *testing.T) {
+	// 合规改造后：部门信息仅用于 RAG domain filter，不注入 prompt 文本。
+	// 仅开启 Capture + Department 而未开启 RAG/SystemPromptKnowledge 时，应保持请求体不变。
 	token := &Token{
 		ID:                      1,
-		KnowledgeCaptureEnabled: true, // 需开启功能
+		KnowledgeCaptureEnabled: true,
 		KnowledgeDepartment:     "法务部",
 	}
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`)
 	result := injectKnowledgeSystemPrompt(body, token)
 
-	var req map[string]interface{}
-	if err := json.Unmarshal(result, &req); err != nil {
-		t.Fatalf("failed to parse result: %v", err)
-	}
-
-	msgs := req["messages"].([]interface{})
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
-	}
-
-	firstMsg := msgs[0].(map[string]interface{})
-	if firstMsg["role"] != "system" {
-		t.Error("first message should be system role")
-	}
-	content := firstMsg["content"].(string)
-	if !containsAll(content, "部门标识", "法务部") {
-		t.Errorf("system prompt should contain department info, got: %s", content)
+	if string(result) != string(body) {
+		t.Errorf("department alone should not trigger injection, body changed:\nbefore: %s\nafter:  %s", body, result)
 	}
 }
 
 func TestInjectKnowledgeSystemPrompt_AppendToExisting(t *testing.T) {
+	// 合规改造后：部门不再注入文本，仅自定义知识提示词被追加到已有 system 消息末尾。
 	token := &Token{
 		ID:                      1,
 		KnowledgeCaptureEnabled: true,
@@ -342,16 +333,19 @@ func TestInjectKnowledgeSystemPrompt_AppendToExisting(t *testing.T) {
 
 	firstMsg := msgs[0].(map[string]interface{})
 	content := firstMsg["content"].(string)
-	if !containsAll(content, "你是一个助手", "技术部", "Go语言示例") {
-		t.Errorf("system prompt should contain original content + knowledge, got: %s", content)
+	if !containsAll(content, "你是一个助手", "Go语言示例") {
+		t.Errorf("system prompt should contain original content + custom knowledge, got: %s", content)
+	}
+	if contains(content, "技术部") {
+		t.Errorf("department text must NOT be injected post-compliance, got: %s", content)
 	}
 }
 
 func TestInjectKnowledgeSystemPrompt_CustomPromptOnly(t *testing.T) {
 	token := &Token{
-		ID:                      1,
-		RAGEnabled:              true,
-		SystemPromptKnowledge:   "你是法务助手，请提供专业法律建议。",
+		ID:                    1,
+		RAGEnabled:            true,
+		SystemPromptKnowledge: "你是法务助手，请提供专业法律建议。",
 	}
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"合同纠纷怎么处理"}]}`)
 	result := injectKnowledgeSystemPrompt(body, token)
@@ -370,14 +364,23 @@ func TestInjectKnowledgeSystemPrompt_CustomPromptOnly(t *testing.T) {
 }
 
 func TestGetKnowledgeSystemPrompt(t *testing.T) {
+	// 合规改造后：预览由 RAGEnabled + SystemPromptKnowledge 驱动，不含部门/企业标识。
 	token := &Token{
-		ID:                      1,
-		KnowledgeDepartment:     "财务部",
-		SystemPromptKnowledge:   "请关注财务合规。",
+		ID:                    1,
+		RAGEnabled:            true,
+		KnowledgeDepartment:   "财务部",
+		SystemPromptKnowledge: "请关注财务合规。",
 	}
 	prompt := GetKnowledgeSystemPrompt(token)
-	if !containsAll(prompt, "企业级AI助手", "财务部", "财务合规") {
-		t.Errorf("prompt should contain all parts, got: %s", prompt)
+	if !containsAll(prompt, "内部知识库", "财务合规") {
+		t.Errorf("prompt should contain RAG hint + custom knowledge, got: %s", prompt)
+	}
+	// 部门标签不应出现在预览中
+	if contains(prompt, "财务部") {
+		t.Errorf("department text must NOT appear in preview post-compliance, got: %s", prompt)
+	}
+	if contains(prompt, "企业级AI助手") {
+		t.Errorf("legacy base identity must NOT appear post-compliance, got: %s", prompt)
 	}
 
 	// Empty token
@@ -692,4 +695,136 @@ func TestRoundTo(t *testing.T) {
 	if roundTo(0.9999, 2) != 1.0 {
 		t.Errorf("roundTo failed: %.2f", roundTo(0.9999, 2))
 	}
+}
+
+// ============================================================
+// v2.0 新增测试：raw表截断 + 审计日志
+// ============================================================
+
+// --- raw 表文本截断测试 ---
+
+func TestRawTextTruncate_Constant(t *testing.T) {
+	if rawTextMaxLen != 5000 {
+		t.Errorf("rawTextMaxLen should be 5000, got %d", rawTextMaxLen)
+	}
+}
+
+func TestTruncate_UnderLimit(t *testing.T) {
+	s := "short text"
+	result := truncate(s, 100)
+	if result != s {
+		t.Error("short text should not be truncated")
+	}
+}
+
+func TestTruncate_AtLimit(t *testing.T) {
+	s := strings.Repeat("a", rawTextMaxLen)
+	result := truncate(s, rawTextMaxLen)
+	if len(result) != rawTextMaxLen {
+		t.Errorf("should keep exactly maxLen chars, got %d", len(result))
+	}
+	if result != s {
+		t.Error("exact-length text should be unchanged")
+	}
+}
+
+func TestTruncate_OverLimit(t *testing.T) {
+	s := strings.Repeat("x", rawTextMaxLen+1000)
+	result := truncate(s, rawTextMaxLen)
+	if len(result) != rawTextMaxLen {
+		t.Errorf("should truncate to maxLen, got %d chars", len(result))
+	}
+	if !strings.HasSuffix(result, "...") {
+		t.Error("truncated text should end with '...'")
+	}
+}
+
+func TestTruncate_EmptyString(t *testing.T) {
+	result := truncate("", rawTextMaxLen)
+	if result != "" {
+		t.Error("empty string should remain empty")
+	}
+}
+
+// --- 审计日志模块测试 ---
+
+func TestAuditEntry_Serialization(t *testing.T) {
+	entry := AuditEntry{
+		Action:       AuditKnowledgeCapture,
+		ResourceType: AuditResourceRaw,
+		ResourceID:   "req-123",
+		TokenID:      42,
+		Detail:       `{"model":"gpt-4","turns":3}`,
+		ClientIP:     "10.0.0.1",
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("failed to marshal AuditEntry: %v", err)
+	}
+
+	var decoded AuditEntry
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("failed to unmarshal AuditEntry: %v", err)
+	}
+
+	if decoded.Action != entry.Action {
+		t.Errorf("action mismatch: expected %s, got %s", entry.Action, decoded.Action)
+	}
+	if decoded.ResourceID != entry.ResourceID {
+		t.Errorf("resource_id mismatch: expected %s, got %s", entry.ResourceID, decoded.ResourceID)
+	}
+	if decoded.TokenID != entry.TokenID {
+		t.Errorf("token_id mismatch: expected %d, got %d", entry.TokenID, decoded.TokenID)
+	}
+}
+
+func TestAuditConstants_NoConflict(t *testing.T) {
+	// Ensure action constants are unique
+	consts := []string{
+		AuditKnowledgeCapture,
+		AuditKnowledgeExtract,
+		AuditKnowledgeAccess,
+		AuditConfigChange,
+		AuditDataDelete,
+		AuditRawCleanup,
+		AuditRetentionCleanup,
+	}
+	seen := make(map[string]bool)
+	for _, c := range consts {
+		if seen[c] {
+			t.Errorf("duplicate audit constant: %s", c)
+		}
+		seen[c] = true
+	}
+}
+
+func TestAuditResourceConstants_NoConflict(t *testing.T) {
+	consts := []string{
+		AuditResourceRaw,
+		AuditResourceItem,
+		AuditResourceDomain,
+		AuditResourceToken,
+		AuditResourceConfig,
+	}
+	seen := make(map[string]bool)
+	for _, c := range consts {
+		if seen[c] {
+			t.Errorf("duplicate resource constant: %s", c)
+		}
+		seen[c] = true
+	}
+}
+
+// TestLogAudit_ChannelDelivery verifies that LogAudit doesn't block
+// and correctly feeds the channel
+func TestLogAudit_NonBlocking(t *testing.T) {
+	// Initialize audit logger if not already done
+	InitAuditLogger()
+
+	// Send entries and verify non-blocking behavior
+	for i := 0; i < 300; i++ { // more than channel buffer (256)
+		LogAudit("test_action", "test_resource", "test-id", i, nil, "")
+	}
+	// If we reach here without blocking, the non-blocking test passed
 }

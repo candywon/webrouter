@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """系统设置 API — 持久化到 wr_system_settings 表"""
 import json
 import os
@@ -9,6 +12,7 @@ from flask import Blueprint, jsonify, request
 from flask import current_app
 from models.wr_models import SystemSetting
 from extensions import db
+from i18n.messages import get_message
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,7 @@ def update_settings():
     """批量更新系统设置（写入数据库）"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     updated = []
     errors = []
@@ -89,7 +93,7 @@ def update_settings():
                 db.session.add(s)
             else:
                 if not s.editable:
-                    errors.append(f'{key}: 该设置不可编辑')
+                    errors.append(get_message('setting_not_editable', request).format(key=key))
                     continue
                 s.value = json.dumps(value, ensure_ascii=False)
                 if isinstance(value, bool) and s.value_type != 'bool':
@@ -108,9 +112,9 @@ def update_settings():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'数据库提交失败: {str(e)}'}), 500
+        return jsonify({'error': get_message('db_commit_failed', request).format(e=str(e))}), 500
 
-    result = {'message': f'已更新 {len(updated)} 项设置', 'updated': updated}
+    result = {'message': get_message('settings_updated_count', request).format(len=len(updated)), 'updated': updated}
     if errors:
         result['errors'] = errors
     return jsonify(result)
@@ -131,24 +135,24 @@ def update_single_setting(key):
     """更新单个设置项"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     value = data.get('value')
     if value is None:
-        return jsonify({'error': 'value field required'}), 400
+        return jsonify({'error': get_message('key_required', request)}), 400
 
     s = SystemSetting.query.filter_by(key=key).first()
     if not s:
-        return jsonify({'error': f'Setting {key} not found'}), 404
+        return jsonify({'error': get_message('setting_not_found', request).format(key=key)}), 404
 
     if not s.editable:
-        return jsonify({'error': f'Setting {key} is not editable'}), 403
+        return jsonify({'error': get_message('setting_not_editable', request).format(key=key)}), 403
 
     s.value = json.dumps(value, ensure_ascii=False)
     s.updated_at = db.func.now()
     db.session.commit()
 
-    return jsonify({'message': '设置已更新', 'setting': s.to_dict()})
+    return jsonify({'message': get_message('settings_updated', request), 'setting': s.to_dict()})
 
 
 @settings_bp.route('/<string:key>', methods=['DELETE'], strict_slashes=False)
@@ -166,7 +170,7 @@ def delete_setting(key):
 
     s = SystemSetting.query.filter_by(key=key).first()
     if not s:
-        return jsonify({'error': f'Setting {key} not found'}), 404
+        return jsonify({'error': get_message('setting_not_found', request).format(key=key)}), 404
 
     db.session.delete(s)
     db.session.commit()
@@ -188,7 +192,7 @@ def create_backup():
             shutil.copy2(db_path, backup_path)
             return jsonify({'backup': backup_path})
 
-    return jsonify({'message': '备份功能仅支持SQLite'})
+    return jsonify({'message': get_message('backup_sqlite_only', request)})
 
 
 FEATURE_TOGGLE_DEFS = [
@@ -196,10 +200,10 @@ FEATURE_TOGGLE_DEFS = [
         'key': 'feature_dynamic_content_last',
         'value': False,
         'description': (
-            '动态内容后置：将 user 消息中的动态部分（URL、时间、随机数等）移到末尾，'
-            '使 prompt 前缀尽可能静态，提升上游 prompt cache 命中率。'
-            '开启后 wr-proxy 会对请求 body 中的 messages 数组重新排序，'
-            '把包含 URL、日期、数字等动态内容的 message 移到同 role 组的最后。'
+            'Dynamic content tailing: move dynamic user message content such as URLs, timestamps, '
+            'and random values to the end so the prompt prefix stays as static as possible and improves upstream prompt cache hits. '
+            'When enabled, wr-proxy reorders the messages array in the request body and moves messages containing URLs, dates, or numbers '
+            'to the end of the same-role group.'
         ),
         'category': 'advanced',
     },
@@ -207,10 +211,10 @@ FEATURE_TOGGLE_DEFS = [
         'key': 'feature_token_compression',
         'value': False,
         'description': (
-            'Token 压缩（RTK - Return Token Key）：对系统提示词和长上下文进行压缩预处理。'
-            '在请求发送到上游之前，先通过一次轻量模型（如 qwen-turbo）对长文本做摘要，'
-            '减少输入 token 数量。适用于 system prompt 很长的场景（>4000 tokens），'
-            '可显著降低调用成本，但会损失少量上下文精度。'
+            'Token compression (RTK - Return Token Key): compresses system prompts and long context before sending requests upstream. '
+            'A lightweight model such as qwen-turbo summarizes long text first to reduce input tokens. '
+            'This is useful for very long system prompts (>4000 tokens) and can significantly reduce cost, '
+            'with a small loss of context precision.'
         ),
         'category': 'advanced',
     },
@@ -218,10 +222,10 @@ FEATURE_TOGGLE_DEFS = [
         'key': 'feature_session_compression',
         'value': False,
         'description': (
-            '会话压缩：对多轮对话的历史消息进行压缩。'
-            '当对话轮数超过阈值时，将早期消息合并为摘要，减少后续请求的上下文长度。'
-            '适用于长对话场景（如客服、助教），可将数十轮对话压缩为几轮摘要。'
-            '注意：压缩会丢失部分细节，适合对上下文精度要求不高的场景。'
+            'Session compression: compresses historical messages in multi-turn conversations. '
+            'When the conversation exceeds the configured threshold, earlier messages are merged into a summary to reduce context length. '
+            'This is useful for long conversations such as support or tutoring sessions. '
+            'Compression may lose some details, so it is best for scenarios with moderate context precision requirements.'
         ),
         'category': 'advanced',
     },
@@ -241,7 +245,7 @@ DEFAULT_COMPLEXITY_CONFIG = {
             {"max_chars": 2000, "score": 0.20},
             {"max_chars": 0, "score": 0.30},
         ],
-        "description": "按消息总字符数评分，输入越长越复杂",
+        "description": "Scores by total message length; longer input is treated as more complex",
     },
     "multi_turn": {
         "enabled": True,
@@ -251,37 +255,36 @@ DEFAULT_COMPLEXITY_CONFIG = {
             {"max_msgs": 10, "score": 0.15},
             {"max_msgs": 0, "score": 0.20},
         ],
-        "description": "按对话轮数评分，轮数越多越复杂",
+        "description": "Scores by conversation turns; more turns are treated as more complex",
     },
     "code_detection": {
         "enabled": True,
         "score": 0.15,
         "keywords": ["```", "def ", "function ", "class ", "import ", "return "],
-        "description": "检测代码特征（代码块、函数定义等），命中即加分",
+        "description": "Detects code features such as code blocks and function definitions; matches add complexity score",
     },
     "tools_detection": {
         "enabled": True,
         "tools_score": 0.20,
         "functions_score": 0.15,
-        "description": "检测 tools/functions 字段，使用工具调用意味着复杂任务",
+        "description": "Detects tools/functions fields; tool usage indicates a more complex task",
     },
     "reasoning_keywords": {
         "enabled": True,
         "score": 0.12,
         "keywords": [
-            "分析", "推理", "证明", "计算", "推导",
             "explain", "analyze", "reason", "prove", "calculate",
             "derive", "compare", "evaluate", "critique",
-            "为什么", "原因", "原理", "逻辑",
-            "步骤", "方案", "策略", "设计",
+            "why", "cause", "principle", "logic",
+            "steps", "plan", "strategy", "design",
         ],
-        "description": "最后一条用户消息包含推理/分析关键词即加分",
+        "description": "Adds complexity score when the last user message contains reasoning or analysis keywords",
     },
     "system_prompt": {
         "enabled": True,
         "threshold_chars": 500,
         "score": 0.08,
-        "description": "system 消息超过指定字符数即加分",
+        "description": "Adds complexity score when the system message exceeds the configured character threshold",
     },
 }
 
@@ -311,7 +314,7 @@ def seed_features():
             key='smart_complexity_config',
             value=json.dumps(DEFAULT_COMPLEXITY_CONFIG, ensure_ascii=False),
             value_type='json',
-            description='智能模型选择六维度复杂度配置：输入长度、多轮对话、代码检测、工具调用、推理关键词、系统提示词',
+            description='Smart model selection complexity configuration: input length, multi-turn conversation, code detection, tool usage, reasoning keywords, and system prompt length.',
             category='advanced',
             editable=True,
         )
@@ -322,8 +325,8 @@ def seed_features():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'数据库提交失败: {str(e)}'}), 500
-    return jsonify({'message': f'已初始化 {len(created)} 项', 'created': created})
+        return jsonify({'error': get_message('db_commit_failed', request).format(e=str(e))}), 500
+    return jsonify({'message': get_message('settings_initialized', request).format(len=len(created)), 'created': created})
 
 
 @settings_bp.route('/restore', methods=['POST'])
@@ -332,16 +335,16 @@ def restore_backup():
     data = request.get_json()
     backup_path = data.get('backup_path', '')
     if not backup_path or not os.path.exists(backup_path):
-        return jsonify({'error': '备份文件不存在'}), 404
+        return jsonify({'error': get_message('backup_file_not_found', request)}), 404
 
     db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
     if db_uri.startswith('sqlite:///'):
         db_path = db_uri.replace('sqlite:///', '')
         import shutil
         shutil.copy2(backup_path, db_path)
-        return jsonify({'message': '已恢复'})
+        return jsonify({'message': get_message('restored', request)})
 
-    return jsonify({'error': '仅支持SQLite恢复'}), 400
+    return jsonify({'error': get_message('restore_sqlite_only', request)}), 400
 
 
 @settings_bp.route('/test-email', methods=['POST'])
@@ -355,21 +358,21 @@ def test_email():
     email_to = SystemSetting.get('alert_email_to', '')
 
     if not smtp_host:
-        return jsonify({'success': False, 'message': '未配置 SMTP 服务器地址'}), 400
+        return jsonify({'success': False, 'message': get_message('smtp_no_server', request)}), 400
     if not email_to:
-        return jsonify({'success': False, 'message': '未配置收件人地址'}), 400
+        return jsonify({'success': False, 'message': get_message('smtp_no_recipient', request)}), 400
     if not smtp_user or not smtp_password:
-        return jsonify({'success': False, 'message': '未配置 SMTP 用户名或密码'}), 400
+        return jsonify({'success': False, 'message': get_message('smtp_no_credentials', request)}), 400
 
     from_addr = smtp_from or smtp_user
     recipients = [addr.strip() for addr in email_to.split(',') if addr.strip()]
 
     msg = MIMEText(
-        '这是一封来自 WebRouter 的测试邮件，说明您的 SMTP 配置正确。',
+        'This is a test email from WebRouter confirming that your SMTP configuration is correct.',
         'plain',
         'utf-8',
     )
-    msg['Subject'] = '[WebRouter] SMTP 配置测试成功'
+    msg['Subject'] = '[WebRouter] SMTP configuration test'
     msg['From'] = from_addr
     msg['To'] = ', '.join(recipients)
 
@@ -385,25 +388,25 @@ def test_email():
         server.sendmail(from_addr, recipients, msg.as_string())
         server.quit()
         logger.info(f'测试邮件已发送: to={email_to}')
-        return jsonify({'success': True, 'message': f'测试邮件已发送至 {email_to}'})
+        return jsonify({'success': True, 'message': get_message('smtp_test_sent', request).format(email_to=email_to)})
     except smtplib.SMTPAuthenticationError as e:
-        return jsonify({'success': False, 'message': f'SMTP 认证失败: {str(e)}\n提示：QQ 邮箱请使用授权码，而非登录密码。'}), 401
+        return jsonify({'success': False, 'message': get_message('smtp_auth_failed', request).format(e=str(e))}), 401
     except smtplib.SMTPConnectError as e:
-        return jsonify({'success': False, 'message': f'SMTP 连接失败: {str(e)}'}), 502
+        return jsonify({'success': False, 'message': get_message('smtp_connection_failed', request).format(e=str(e))}), 502
     except smtplib.SMTPSenderRefused as e:
-        return jsonify({'success': False, 'message': f'发件人地址被拒绝: {str(e)}'}), 403
+        return jsonify({'success': False, 'message': get_message('smtp_sender_rejected', request).format(e=str(e))}), 403
     except smtplib.SMTPRecipientsRefused as e:
-        return jsonify({'success': False, 'message': f'收件人地址被拒绝: {str(e)}'}), 400
+        return jsonify({'success': False, 'message': get_message('smtp_recipient_rejected', request).format(e=str(e))}), 400
     except OSError as e:
         # 连接意外关闭等网络错误
         err_msg = str(e)
         if 'closed' in err_msg.lower() or 'reset' in err_msg.lower():
-            return jsonify({'success': False, 'message': f'SMTP 连接异常关闭，可能是认证失败或被服务器拒绝。\n提示：QQ 邮箱请使用授权码（在 设置 → 账户 → POP3/IMAP/SMTP 中获取），而非登录密码。'}), 500
-        return jsonify({'success': False, 'message': f'网络连接失败: {err_msg}'}), 500
+            return jsonify({'success': False, 'message': get_message('smtp_connection_closed', request)}), 500
+        return jsonify({'success': False, 'message': get_message('network_error', request).format(err_msg=err_msg)}), 500
     except smtplib.SMTPException as e:
-        return jsonify({'success': False, 'message': f'邮件发送失败: {str(e)}'}), 500
+        return jsonify({'success': False, 'message': get_message('smtp_send_failed', request).format(e=str(e))}), 500
     except Exception as e:
-        return jsonify({'success': False, 'message': f'未知错误: {str(e)}'}), 500
+        return jsonify({'success': False, 'message': get_message('unknown_error', request).format(e=str(e))}), 500
 
 
 @settings_bp.route('/reload-proxy', methods=['POST'])
@@ -417,13 +420,13 @@ def reload_proxy():
         resp = _requests.post(f"{proxy_url}/admin/reload", timeout=10)
         data = resp.json() if resp.ok else {}
         if resp.ok:
-            return jsonify({'success': True, 'message': 'wr-proxy 已重新加载', 'detail': data.get('message', '')})
+            return jsonify({'success': True, 'message': get_message('proxy_reloaded', request), 'detail': data.get('message', '')})
         else:
-            return jsonify({'success': False, 'message': f'wr-proxy 返回 {resp.status_code}: {data.get("error", "")}'})
+            return jsonify({'success': False, 'message': get_message('proxy_reload_error', request).format(status=resp.status_code, error=data.get("error", ""))})
     except _requests.ConnectionError:
-        return jsonify({'success': False, 'message': f'无法连接 wr-proxy（{proxy_url}），请确认 wr-proxy 正在运行'}), 502
+        return jsonify({'success': False, 'message': get_message('proxy_unreachable', request).format(proxy_url=proxy_url)}), 502
     except Exception as e:
-        return jsonify({'success': False, 'message': f'重载失败: {str(e)}'}), 500
+        return jsonify({'success': False, 'message': get_message('proxy_reload_failed', request).format(e=str(e))}), 500
 
 
 @settings_bp.route('/test-proxy', methods=['POST'])
@@ -431,11 +434,11 @@ def test_proxy():
     """通过 Flask 转发请求到 wr-proxy，测试 API 调用（避免浏览器直连 wr-proxy）"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data provided'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     api_key = data.get('api_key', '')
     if not api_key:
-        return jsonify({'error': 'api_key required'}), 400
+        return jsonify({'error': get_message('api_key_required', request)}), 400
 
     import os
     proxy_url = SystemSetting.get('proxy_url')
@@ -470,9 +473,9 @@ def test_proxy():
                 return jsonify({'error': err.get('message', resp.text)}), resp.status_code
             elif isinstance(err, str):
                 return jsonify({'error': err}), resp.status_code
-            return jsonify({'error': result.get('message', '请求失败')}), resp.status_code
+            return jsonify({'error': result.get('message', get_message('request_failed', request))}), resp.status_code
         return jsonify(result), resp.status_code
     except _requests.ConnectionError:
-        return jsonify({'error': f'无法连接 wr-proxy（{proxy_url}），请确认正在运行'}), 502
+        return jsonify({'error': get_message('proxy_unreachable', request).format(proxy_url=proxy_url)}), 502
     except Exception as e:
-        return jsonify({'error': f'请求失败: {str(e)}'}), 500
+        return jsonify({'error': get_message('request_failed_detail', request).format(e=str(e))}), 500

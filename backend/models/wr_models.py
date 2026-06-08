@@ -1,8 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """WebRouter 自有数据模型 — 独立 SQLite 数据库"""
 import json
 import secrets
 from extensions import db
 from datetime import datetime
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
 
 
 # ============================================================
@@ -44,6 +49,39 @@ class Org(db.Model):
 
 
 # ============================================================
+#  Admin User — 后台管理员账号
+# ============================================================
+
+class AdminUser(UserMixin, db.Model):
+    """后台管理员 — 单管理员账号"""
+    __tablename__ = 'wr_admin_users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_login_at = db.Column(db.DateTime, nullable=True)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    @classmethod
+    def ensure_default(cls, username, password):
+        user = cls.query.filter_by(username=username).first()
+        if user:
+            return user, False
+        user = cls(username=username, enabled=True)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        return user, True
+
+
+# ============================================================
 #  WR Token — 对外 API Key（核心管控单元）
 # ============================================================
 
@@ -72,6 +110,7 @@ class WRToken(db.Model):
     rag_min_relevance = db.Column(db.Float, default=0.7)              # RAG 最低相关度
     rag_top_k = db.Column(db.Integer, default=3)                      # RAG 召回条数
     system_prompt_knowledge = db.Column(db.Text, default='')           # 知识增强 System Prompt
+    session_recall_enabled = db.Column(db.Boolean, default=False)      # 是否开启会话记忆召回（@recall / X-Recall-Session）
     enabled = db.Column(db.Boolean, default=True)
     expires_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -143,6 +182,7 @@ class WRToken(db.Model):
             'rag_min_relevance': self.rag_min_relevance,
             'rag_top_k': self.rag_top_k,
             'system_prompt_knowledge': self.system_prompt_knowledge,
+            'session_recall_enabled': self.session_recall_enabled,
             'enabled': self.enabled,
             'is_expired': self.is_expired,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
@@ -171,6 +211,7 @@ class ProviderExt(db.Model):
     priority = db.Column(db.Integer, default=50)              # 0-100: 90+主力, 50-89热备, 1-49冷备
     weight = db.Column(db.Integer, default=100)               # 调度权重
     supports_tools = db.Column(db.Boolean, default=True)      # 是否支持 function calling / tools
+    fallback_enabled = db.Column(db.Boolean, default=True)    # 有 Channel 时，Provider 主体是否作为兜底渠道参与调度
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
@@ -184,6 +225,7 @@ class ProviderExt(db.Model):
             'priority': self.priority,
             'weight': self.weight,
             'supports_tools': self.supports_tools,
+            'fallback_enabled': self.fallback_enabled,
         }
 
 
@@ -504,7 +546,7 @@ class ModelGrade(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     model = db.Column(db.String(100), nullable=False, unique=True, index=True)
-    tier = db.Column(db.String(20), nullable=False, index=True)       # economy/standard/premium
+    tier = db.Column(db.String(20), nullable=False, index=True)       # economy/standard/enhanced/premium/flagship
     cost_index = db.Column(db.Float, nullable=False, default=1.0)     # 相对成本指数
     vendor = db.Column(db.String(50), default='')                     # 厂商标识
     description = db.Column(db.Text, default='')                      # 描述说明
@@ -534,21 +576,28 @@ class ModelGrade(db.Model):
             return 0
 
         seeds = [
-            # economy — 便宜快速
-            cls(model='qwen3-coder-flash', tier='economy', cost_index=1.0, vendor='qwen', description='通义千问编程轻量版', sort_order=1),
-            cls(model='qwen-turbo', tier='economy', cost_index=1.0, vendor='qwen', description='通义千问Turbo', sort_order=2),
-            cls(model='gpt-4o-mini', tier='economy', cost_index=1.5, vendor='openai', description='OpenAI轻量版', sort_order=3),
-            # standard — 中等性价比
-            cls(model='qwen-plus-2025-07-28', tier='standard', cost_index=3.0, vendor='qwen', description='通义千问Plus', sort_order=10),
-            cls(model='qwen-plus', tier='standard', cost_index=3.0, vendor='qwen', description='通义千问Plus', sort_order=11),
-            cls(model='gpt-4o', tier='standard', cost_index=5.0, vendor='openai', description='OpenAI标准版', sort_order=12),
-            cls(model='deepseek-chat', tier='standard', cost_index=2.0, vendor='deepseek', description='DeepSeek对话', sort_order=13),
-            # premium — 最强推理
-            cls(model='qwen3.6-plus', tier='premium', cost_index=8.0, vendor='qwen', description='通义千问旗舰', sort_order=20),
-            cls(model='qwen-max', tier='premium', cost_index=10.0, vendor='qwen', description='通义千问Max', sort_order=21),
-            cls(model='o1', tier='premium', cost_index=15.0, vendor='openai', description='OpenAI推理', sort_order=22),
-            cls(model='o1-mini', tier='premium', cost_index=8.0, vendor='openai', description='OpenAI推理轻量', sort_order=23),
-            cls(model='claude-sonnet-4', tier='premium', cost_index=12.0, vendor='anthropic', description='Claude Sonnet', sort_order=24),
+            # economy — cheap & fast (chat, translation, short Q&A)
+            cls(model='qwen3-coder-flash', tier='economy', cost_index=1.0, vendor='qwen', description='Qwen Coder Flash', sort_order=1),
+            cls(model='qwen-turbo', tier='economy', cost_index=1.0, vendor='qwen', description='Qwen Turbo', sort_order=2),
+            cls(model='gpt-4o-mini', tier='economy', cost_index=1.5, vendor='openai', description='GPT-4o Mini', sort_order=3),
+            # standard — balanced (writing, summarization, formatting)
+            cls(model='qwen-plus-2025-07-28', tier='standard', cost_index=3.0, vendor='qwen', description='Qwen Plus', sort_order=10),
+            cls(model='qwen-plus', tier='standard', cost_index=3.0, vendor='qwen', description='Qwen Plus', sort_order=11),
+            cls(model='gpt-4o', tier='standard', cost_index=5.0, vendor='openai', description='GPT-4o', sort_order=12),
+            cls(model='deepseek-chat', tier='standard', cost_index=2.0, vendor='deepseek', description='DeepSeek Chat', sort_order=13),
+            # enhanced — capable (code generation, multi-step reasoning, docs)
+            cls(model='deepseek-reasoner', tier='enhanced', cost_index=4.0, vendor='deepseek', description='DeepSeek Reasoner', sort_order=30),
+            cls(model='claude-sonnet-4', tier='enhanced', cost_index=8.0, vendor='anthropic', description='Claude Sonnet 4', sort_order=31),
+            cls(model='gemini-2.5-flash', tier='enhanced', cost_index=5.0, vendor='google', description='Gemini 2.5 Flash', sort_order=32),
+            # premium — powerful (complex architecture, math proofs, long analysis)
+            cls(model='qwen3.6-plus', tier='premium', cost_index=10.0, vendor='qwen', description='Qwen 3.6 Plus', sort_order=40),
+            cls(model='qwen-max', tier='premium', cost_index=12.0, vendor='qwen', description='Qwen Max', sort_order=41),
+            cls(model='o1', tier='premium', cost_index=15.0, vendor='openai', description='OpenAI o1', sort_order=42),
+            cls(model='o1-mini', tier='premium', cost_index=8.0, vendor='openai', description='OpenAI o1 Mini', sort_order=43),
+            cls(model='claude-opus-4', tier='premium', cost_index=18.0, vendor='anthropic', description='Claude Opus 4', sort_order=44),
+            # flagship — top-tier (research, competition, deep multimodal reasoning)
+            cls(model='o3', tier='flagship', cost_index=30.0, vendor='openai', description='OpenAI o3', sort_order=50),
+            cls(model='claude-opus-4-extended', tier='flagship', cost_index=25.0, vendor='anthropic', description='Claude Opus 4 Extended', sort_order=51),
         ]
 
         for s in seeds:

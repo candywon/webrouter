@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """Provider 数据源模型 — 统一管理不同类型的 API 源"""
 import json
 from extensions import db
@@ -126,6 +129,128 @@ class Provider(db.Model):
             d['health_endpoint'] = self.health_endpoint
 
         return d
+
+    @classmethod
+    def seed_defaults(cls):
+        """初始化主流直连厂商模板（仅补缺，不覆盖已有配置）"""
+        templates = [
+            {
+                'name': 'OpenAI',
+                'base_url': 'https://api.openai.com/v1',
+                'models': ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
+                'tags': ['direct', 'openai', 'global'],
+            },
+            {
+                'name': 'Anthropic',
+                'base_url': 'https://api.anthropic.com',
+                'models': ['claude-sonnet-4', 'claude-haiku-4-5', 'claude-opus-4-7'],
+                'tags': ['direct', 'anthropic', 'global'],
+            },
+            {
+                'name': 'Google Gemini',
+                'base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
+                'models': ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+                'tags': ['direct', 'google', 'global'],
+            },
+            {
+                'name': 'DeepSeek',
+                'base_url': 'https://api.deepseek.com/v1',
+                'models': ['deepseek-chat', 'deepseek-reasoner'],
+                'tags': ['direct', 'deepseek', 'china'],
+            },
+            {
+                'name': 'DashScope/Qwen',
+                'base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                'models': ['qwen-plus', 'qwen-turbo', 'qwen-max', 'qwen3-coder-flash'],
+                'tags': ['direct', 'qwen', 'china'],
+            },
+            {
+                'name': 'Zhipu GLM',
+                'base_url': 'https://open.bigmodel.cn/api/paas/v4',
+                'models': ['glm-4', 'glm-4-plus', 'glm-4-flash'],
+                'tags': ['direct', 'zhipu', 'china'],
+            },
+            {
+                'name': 'Moonshot/Kimi',
+                'base_url': 'https://api.moonshot.cn/v1',
+                'models': ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+                'tags': ['direct', 'moonshot', 'china'],
+            },
+            {
+                'name': 'Volcengine Ark/Doubao',
+                'base_url': 'https://ark.cn-beijing.volces.com/api/v3',
+                'models': ['doubao-pro-32k', 'doubao-lite-32k', 'doubao-seed-1-6'],
+                'tags': ['direct', 'doubao', 'china'],
+            },
+            {
+                'name': 'MiniMax',
+                'base_url': 'https://api.minimax.chat/v1',
+                'models': ['abab6.5s-chat', 'abab6.5g-chat', 'minimax-text-01'],
+                'tags': ['direct', 'minimax', 'china'],
+            },
+            {
+                'name': 'StepFun',
+                'base_url': 'https://api.stepfun.com/v1',
+                'models': ['step-1-8k', 'step-1-32k', 'step-2-16k'],
+                'tags': ['direct', 'stepfun', 'china'],
+            },
+            {
+                'name': 'xAI Grok',
+                'base_url': 'https://api.x.ai/v1',
+                'models': ['grok-4', 'grok-3', 'grok-3-mini'],
+                'tags': ['direct', 'xai', 'global'],
+            },
+            {
+                'name': 'Mistral',
+                'base_url': 'https://api.mistral.ai/v1',
+                'models': ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest'],
+                'tags': ['direct', 'mistral', 'global'],
+            },
+            {
+                'name': 'OpenRouter',
+                'base_url': 'https://openrouter.ai/api/v1',
+                'models': ['openai/gpt-4o', 'anthropic/claude-sonnet-4', 'google/gemini-2.0-flash-001'],
+                'tags': ['aggregate', 'openrouter', 'global'],
+            },
+            {
+                'name': 'Groq',
+                'base_url': 'https://api.groq.com/openai/v1',
+                'models': ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+                'tags': ['direct', 'groq', 'global'],
+            },
+            {
+                'name': 'Together AI',
+                'base_url': 'https://api.together.xyz/v1',
+                'models': ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'Qwen/Qwen2.5-72B-Instruct-Turbo'],
+                'tags': ['direct', 'together', 'global'],
+            },
+        ]
+
+        created = 0
+        for t in templates:
+            exists = cls.query.filter((cls.name == t['name']) | (cls.base_url == t['base_url'])).first()
+            if exists:
+                continue
+            p = cls(
+                name=t['name'],
+                type=cls.TYPE_DIRECT,
+                base_url=t['base_url'],
+                models=json.dumps(t['models'], ensure_ascii=False),
+                tags=json.dumps(t['tags'], ensure_ascii=False),
+                priority=0,
+                weight=100,
+                enabled=False,
+                status=cls.STATUS_DISABLED,
+                notes='Built-in mainstream provider template: fill in API Key and enable to activate.',
+            )
+            db.session.add(p)
+            db.session.flush()
+            from models.wr_models import ProviderExt
+            db.session.add(ProviderExt(provider_id=p.id, proxy_enabled=False, priority=0, weight=100))
+            created += 1
+        if created:
+            db.session.commit()
+        return created
 
     @classmethod
     def get_type_config(cls, provider_type=None):

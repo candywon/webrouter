@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """
 脱敏标记格式实测脚本
 测试大模型对不同脱敏标记格式的识别和保留能力

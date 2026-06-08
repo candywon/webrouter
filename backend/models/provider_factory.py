@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """Provider 适配器工厂 — 根据类型创建对应的适配器实例"""
 import time
 import logging
@@ -41,7 +44,7 @@ class BaseProviderAdapter:
         }
 
         url = f"{self.base_url}{endpoint}"
-        logger.info(f"[{self.provider.get('name')}] Request URL: {url}")
+        logger.debug(f"[{self.provider.get('name')}] Request URL: {url}")
         default_headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',

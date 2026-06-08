@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """Token 管理 API — 对外 API Key 的 CRUD"""
 import json
 from flask import Blueprint, jsonify, request
 from models.wr_models import WRToken
 from extensions import db
+from i18n.messages import get_message
 
 tokens_bp = Blueprint('tokens', __name__)
 
@@ -22,11 +26,11 @@ def create_token():
     """创建 Token"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     name = (data.get('name') or '').strip()
     if not name:
-        return jsonify({'error': '名称不能为空'}), 400
+        return jsonify({'error': get_message('name_required', request)}), 400
 
     token = WRToken(
         name=name,
@@ -58,7 +62,7 @@ def create_token():
     if 'desensitize_level' in data:
         level = data['desensitize_level']
         if level not in ('off', 'standard', 'strict'):
-            return jsonify({'error': 'desensitize_level 必须为 off/standard/strict'}), 400
+            return jsonify({'error': get_message('invalid_desensitize_level', request)}), 400
         token.desensitize_level = level
     # 知识库相关字段
     if 'knowledge_capture_enabled' in data:
@@ -80,13 +84,13 @@ def create_token():
         try:
             token.expires_at = parse_dt(data['expires_at'])
         except (ValueError, TypeError):
-            return jsonify({'error': 'expires_at 格式无效'}), 400
+            return jsonify({'error': get_message('invalid_expires_at', request)}), 400
 
     db.session.add(token)
     db.session.commit()
 
     return jsonify({
-        'message': 'Token 创建成功',
+        'message': get_message('token_created', request),
         'token': token.to_dict(include_key=True),  # 创建时返回完整 Key
     }), 201
 
@@ -142,7 +146,7 @@ def update_token(token_id):
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'org_id' in data:
         token.org_id = int(data['org_id']) if data['org_id'] else None
@@ -170,7 +174,7 @@ def update_token(token_id):
     if 'desensitize_level' in data:
         level = data['desensitize_level']
         if level not in ('off', 'standard', 'strict'):
-            return jsonify({'error': 'desensitize_level 必须为 off/standard/strict'}), 400
+            return jsonify({'error': get_message('invalid_desensitize_level', request)}), 400
         token.desensitize_level = level
     # 知识库相关字段
     if 'knowledge_capture_enabled' in data:
@@ -193,14 +197,14 @@ def update_token(token_id):
             try:
                 token.expires_at = parse_dt(data['expires_at'])
             except (ValueError, TypeError):
-                return jsonify({'error': 'expires_at 格式无效'}), 400
+                return jsonify({'error': get_message('invalid_expires_at', request)}), 400
         else:
             token.expires_at = None
 
     db.session.commit()
 
     return jsonify({
-        'message': 'Token 更新成功',
+        'message': get_message('token_updated', request),
         'token': token.to_dict(),
     })
 
@@ -214,7 +218,7 @@ def delete_token(token_id):
 
     db.session.delete(token)
     db.session.commit()
-    return jsonify({'message': 'Token 已删除'})
+    return jsonify({'message': get_message('token_deleted', request)})
 
 
 @tokens_bp.route('/<int:token_id>/reset-quota', methods=['POST'])
@@ -233,7 +237,7 @@ def reset_quota(token_id):
     db.session.commit()
 
     return jsonify({
-        'message': '配额已重置',
+        'message': get_message('quota_reset', request),
         'token': token.to_dict(),
     })
 

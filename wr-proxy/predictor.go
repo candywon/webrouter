@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 额度预测引擎：推算 Provider 额度耗尽时间
@@ -20,11 +23,11 @@ func (pr *Predictor) PredictExhaustion(provider *Provider) *QuotaPrediction {
 	if provider.QuotaTotal <= 0 {
 		// 无额度信息，无法预测
 		return &QuotaPrediction{
-			ProviderID:       provider.ID,
-			QuotaRemaining:   -1,
-			AlertLevel:       "green",
-			Trend:            "unknown",
-			Confidence:       0,
+			ProviderID:     provider.ID,
+			QuotaRemaining: -1,
+			AlertLevel:     "green",
+			Trend:          "unknown",
+			Confidence:     0,
 		}
 	}
 
@@ -63,14 +66,14 @@ func (pr *Predictor) PredictExhaustion(provider *Provider) *QuotaPrediction {
 	confidence := pr.calculateConfidence(dailyCosts)
 
 	prediction := &QuotaPrediction{
-		ProviderID:       provider.ID,
-		QuotaRemaining:   remaining,
-		DailyBurnRate:    burnRate,
-		DaysUntilExhaust: daysUntil,
+		ProviderID:           provider.ID,
+		QuotaRemaining:       remaining,
+		DailyBurnRate:        burnRate,
+		DaysUntilExhaust:     daysUntil,
 		PredictedExhaustDate: pr.exhaustDate(daysUntil),
-		Trend:            trend,
-		Confidence:       confidence,
-		AlertLevel:       pr.alertLevel(ratio, daysUntil),
+		Trend:                trend,
+		Confidence:           confidence,
+		AlertLevel:           pr.alertLevel(ratio, daysUntil),
 	}
 
 	return prediction

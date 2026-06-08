@@ -1,0 +1,18 @@
+# 排除本地数据库文件 — Demo 部署必须从零初始化
+data/
+*.db
+*.db-shm
+*.db-wal
+*.db.bak
+*.db.backup_*
+
+# 排除 Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# 排除环境配置
+.env
+.env.*
+*.local

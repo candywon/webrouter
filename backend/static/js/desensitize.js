@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * 脱敏规则管理页面 JS
  */
@@ -41,20 +44,20 @@ class DesensitizePage {
             'IP': '🌐', 'APIKEY': '🔑', 'NAME': '👤', 'COMPANY': '🏢', 'CUSTOM': '⚙️',
         };
         const categoryLabel = {
-            'PHONE': '手机号', 'IDCARD': '身份证', 'EMAIL': '邮箱', 'BANKCARD': '银行卡',
-            'IP': 'IP地址', 'APIKEY': 'API密钥', 'NAME': '姓名', 'COMPANY': '公司', 'CUSTOM': '自定义',
+            'PHONE': I18n.t("common.catPhone"), 'IDCARD': I18n.t("common.catIdCard"), 'EMAIL': I18n.t("team.email"), 'BANKCARD': I18n.t("common.catBankCard"),
+            'IP': I18n.t("common.catIp"), 'APIKEY': I18n.t("common.catApiKey"), 'NAME': I18n.t("common.catName"), 'COMPANY': I18n.t("common.catCompany"), 'CUSTOM': I18n.t("common.custom"),
         };
 
         let html = '';
         if (this.rules.length === 0) {
-            html = `<div class="empty-state"><p>暂无自定义规则</p><p class="hint">点击"添加规则"创建脱敏规则</p></div>`;
+            html = `<div class="empty-state"><p>${I18n.t('desensitize.noRules')}</p><p class="hint">${I18n.t('desensitize.addRuleHint')}</p></div>`;
         } else {
             for (const r of this.rules) {
                 const icon = categoryIcon[r.category] || '⚙️';
                 const catLabel = categoryLabel[r.category] || r.category;
                 const typeBadge = r.type === 'exact'
-                    ? '<span class="badge badge-info">精确匹配</span>'
-                    : '<span class="badge badge-unknown">正则匹配</span>';
+                    ? `<span class="badge badge-info">${I18n.t('desensitize.exactMatch')}</span>`
+                    : `<span class="badge badge-unknown">${I18n.t('desensitize.regexMatch')}</span>`;
                 const levelBadge = r.level === 'strict'
                     ? '<span class="badge badge-warning">strict</span>'
                     : '<span class="badge badge-healthy">standard</span>';
@@ -68,15 +71,15 @@ class DesensitizePage {
                         ${typeBadge}
                         ${levelBadge}
                         <span class="rule-category">${this.escHtml(catLabel)}</span>
-                        <label class="toggle-switch" title="${r.enabled ? '点击禁用' : '点击启用'}">
+                        <label class="toggle-switch" title="${r.enabled ? I18n.t("desensitize.clickDisable") : I18n.t("desensitize.clickEnable")}">
                             <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="desensitizePage.toggleEnabled(${r.id}, this.checked)">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
                     <div class="rule-pattern"><code>${this.escHtml(r.pattern)}</code></div>
                     <div class="rule-actions">
-                        <button class="btn-sm" onclick="desensitizePage.editRule(${r.id})">✏️ 编辑</button>
-                        <button class="btn-sm btn-danger" onclick="desensitizePage.deleteRule(${r.id})">🗑️ 删除</button>
+                        <button class="btn-sm" onclick="desensitizePage.editRule(${r.id})">✏️ ${I18n.t('common.edit')}</button>
+                        <button class="btn-sm btn-danger" onclick="desensitizePage.deleteRule(${r.id})">🗑️ ${I18n.t('common.delete')}</button>
                     </div>
                 </div>`;
             }
@@ -110,7 +113,7 @@ class DesensitizePage {
 
     showAddForm() {
         this.editingId = null;
-        document.getElementById('rule-form-title').textContent = '添加脱敏规则';
+        document.getElementById('rule-form-title').textContent = I18n.t("desensitize.addFormTitle");
         document.getElementById('rule-form').reset();
         document.getElementById('rule-type').value = 'regex';
         document.getElementById('rule-category').value = 'CUSTOM';
@@ -128,7 +131,7 @@ class DesensitizePage {
         if (!r) return;
 
         this.editingId = id;
-        document.getElementById('rule-form-title').textContent = '编辑脱敏规则';
+        document.getElementById('rule-form-title').textContent = I18n.t("desensitize.editFormTitle");
         document.getElementById('rule-type').value = r.type;
         document.getElementById('rule-name').value = r.name;
         document.getElementById('rule-pattern').value = r.pattern;
@@ -158,8 +161,8 @@ class DesensitizePage {
             sort_order: parseInt(document.getElementById('rule-sort-order').value) || 0,
         };
 
-        if (!data.name) { showToast('规则名称不能为空'); return; }
-        if (!data.pattern) { showToast('pattern 不能为空'); return; }
+        if (!data.name) { showToast(I18n.t("alert.ruleNameRequiredError")); return; }
+        if (!data.pattern) { showToast(I18n.t("desensitize.patternRequired")); return; }
 
         try {
             if (this.editingId) {
@@ -169,9 +172,9 @@ class DesensitizePage {
             }
             this.hideForm();
             await this.loadRules();
-            showToast(this.editingId ? '规则更新成功' : '规则创建成功');
+            showToast(this.editingId ? I18n.t("desensitize.updateSuccess") : I18n.t("desensitize.createSuccess"));
         } catch (e) {
-            showToast('保存失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -179,21 +182,21 @@ class DesensitizePage {
         try {
             await API.put(`/desensitize/${id}`, { enabled });
             await this.loadRules();
-            showToast(enabled ? '规则已启用' : '规则已禁用');
+            showToast(enabled ? I18n.t("desensitize.ruleEnabled") : I18n.t("desensitize.ruleDisabled"));
         } catch (e) {
-            showToast('更新失败');
+            showToast(I18n.t("desensitize.updateFailed"));
             await this.loadRules();
         }
     }
 
     async deleteRule(id) {
-        if (!confirm('确定删除此脱敏规则吗？')) return;
+        if (!confirm(I18n.t("desensitize.confirmDelete"))) return;
         try {
             await API.del(`/desensitize/${id}`);
             await this.loadRules();
-            showToast('规则已删除');
+            showToast(I18n.t("desensitize.ruleDeleted"));
         } catch (e) {
-            showToast('删除失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("common.deleteFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -208,7 +211,7 @@ class DesensitizePage {
 
     async runTest() {
         const text = document.getElementById('test-text').value;
-        if (!text) { showToast('请输入测试文本'); return; }
+        if (!text) { showToast(I18n.t("desensitize.enterTestText")); return; }
 
         // 收集当前自定义规则作为测试参数
         const rules = this.rules.filter(r => r.enabled).map(r => ({
@@ -222,7 +225,7 @@ class DesensitizePage {
             const result = await API.post('/desensitize/test', { text, rules });
             this.renderTestResult(result);
         } catch (e) {
-            showToast('测试失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("desensitize.testFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -231,15 +234,15 @@ class DesensitizePage {
         if (!container) return;
 
         if (result.total_matches === 0) {
-            container.innerHTML = '<div class="empty-state"><p>未匹配到任何敏感信息</p></div>';
+            container.innerHTML = `<div class="empty-state"><p>${I18n.t('desensitize.noMatch')}</p></div>`;
             return;
         }
 
-        let html = `<div class="test-summary">共匹配 <strong>${result.total_matches}</strong> 处</div>`;
+        let html = `<div class="test-summary">${I18n.t('desensitize.matchCount')} <strong>${result.total_matches}</strong> ${I18n.t('desensitize.matchUnit')}</div>`;
 
         // 脱敏后结果预览
         if (result.sanitized_text) {
-            html += `<div class="sanitized-preview"><strong>脱敏结果：</strong><code>${this.escHtml(result.sanitized_text)}</code></div>`;
+            html += `<div class="sanitized-preview"><strong>${I18n.t('desensitize.sanitizedResult')}</strong><code>${this.escHtml(result.sanitized_text)}</code></div>`;
         }
 
         for (const r of result.results) {
@@ -248,9 +251,9 @@ class DesensitizePage {
             <div class="test-match-card ${hasError ? 'test-error' : ''}">
                 <div class="test-match-header">
                     <span class="badge badge-info">${this.escHtml(r.category)}</span>
-                    ${r.is_builtin ? '<span class="badge badge-healthy">内置</span>' : ''}
+                    ${r.is_builtin ? `<span class="badge badge-healthy">${I18n.t('desensitize.builtin')}</span>` : ''}
                     <code>${this.escHtml(r.pattern)}</code>
-                    <span class="test-match-count">${r.count || 0} 处</span>
+                    <span class="test-match-count">${r.count || 0} ${I18n.t('desensitize.matchUnit')}</span>
                 </div>
                 ${hasError ? `<div class="test-error-msg">${this.escHtml(r.error)}</div>` : ''}
                 ${r.matches ? `<div class="test-matches">${r.matches.map(m => `<span class="match-tag">${this.escHtml(String(m))}</span>`).join('')}</div>` : ''}

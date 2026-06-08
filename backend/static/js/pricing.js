@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * 模型定价管理页面 JS
  */
@@ -60,11 +63,11 @@ class PricingPage {
 
         let html = '';
         if (this.pricing.length === 0) {
-            html = `<div class="empty-state"><p>暂无定价数据</p><p class="hint">点击"添加定价"配置模型价格</p></div>`;
+            html = `<div class="empty-state"><p>${I18n.t('pricing.noPricing')}</p><p class="hint">${I18n.t('pricing.addPricingHint')}</p></div>`;
         } else {
             html += `<div class="table-wrap"><table>
                 <thead><tr>
-                    <th>模型</th><th>厂商</th><th>输入价格</th><th>输出价格</th><th>默认</th><th>备注</th><th>操作</th>
+                    <th>${I18n.t('common.model')}</th><th>${I18n.t('pricing.vendor')}</th><th>${I18n.t('pricing.inputPrice')}</th><th>${I18n.t('pricing.outputPrice')}</th><th>${I18n.t('common.default')}</th><th>${I18n.t('common.notes')}</th><th>${I18n.t('common.actions')}</th>
                 </tr></thead><tbody>`;
 
             for (const p of this.pricing) {
@@ -75,7 +78,7 @@ class PricingPage {
                     <td><span class="badge ${vendorCls}">${this.escHtml(p.vendor || 'other')}</span></td>
                     <td>${this.priceToYuan(p.input_price)}/M</td>
                     <td>${this.priceToYuan(p.output_price)}/M</td>
-                    <td>${p.is_default ? '<span class="badge badge-healthy">默认</span>' : ''}</td>
+                    <td>${p.is_default ? '<span class="badge badge-healthy">' + I18n.t('common.default') + '</span>' : ''}</td>
                     <td class="pricing-notes">${this.escHtml(p.notes || '-')}</td>
                     <td>
                         <button class="btn-sm" onclick="pricingPage.editPricing('${this.escHtml(p.model)}')">✏️</button>
@@ -92,7 +95,7 @@ class PricingPage {
         const select = document.getElementById('vendor-filter');
         if (!select) return;
 
-        let opts = '<option value="">全部厂商</option>';
+        let opts = `<option value="">${I18n.t('pricing.allVendors')}</option>`;
         for (const v of this.vendors) {
             const selected = this.filterVendor === v.name ? 'selected' : '';
             opts += `<option value="${this.escHtml(v.name)}" ${selected}>${this.escHtml(v.name)} (${v.model_count})</option>`;
@@ -107,7 +110,7 @@ class PricingPage {
 
     showAddForm() {
         this.editingModel = null;
-        document.getElementById('pricing-form-title').textContent = '添加模型定价';
+        document.getElementById('pricing-form-title').textContent = I18n.t("pricing.addFormTitle");
         document.getElementById('pricing-form').reset();
         document.getElementById('pf-model').value = '';
         document.getElementById('pf-model').disabled = false;
@@ -127,7 +130,7 @@ class PricingPage {
         if (!p) return;
 
         this.editingModel = modelName;
-        document.getElementById('pricing-form-title').textContent = '编辑定价';
+        document.getElementById('pricing-form-title').textContent = I18n.t("pricing.editFormTitle");
         document.getElementById('pf-model').value = p.model;
         document.getElementById('pf-model').disabled = true;
         // 分/千token → 元/百万token 显示
@@ -159,7 +162,7 @@ class PricingPage {
             notes: document.getElementById('pf-notes').value.trim(),
         };
 
-        if (!data.model) { showToast('模型名称不能为空'); return; }
+        if (!data.model) { showToast(I18n.t("pricing.modelNameRequired")); return; }
 
         try {
             if (this.editingModel) {
@@ -169,20 +172,20 @@ class PricingPage {
             }
             this.hideForm();
             await this.load();
-            showToast('定价保存成功');
+            showToast(I18n.t("pricing.saveSuccess"));
         } catch (e) {
-            showToast('保存失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     async deletePricing(modelName) {
-        if (!confirm(`确定删除模型 "${modelName}" 的定价吗？`)) return;
+        if (!confirm(I18n.t('pricing.confirmDelete', {modelName}))) return;
         try {
             await API.del(`/pricing/${encodeURIComponent(modelName)}`);
             await this.load();
-            showToast('定价已删除');
+            showToast(I18n.t("pricing.deleted"));
         } catch (e) {
-            showToast('删除失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("common.deleteFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -202,9 +205,9 @@ class PricingPage {
         let items;
         try {
             items = JSON.parse(jsonStr);
-            if (!Array.isArray(items)) throw new Error('需要数组格式');
+            if (!Array.isArray(items)) throw new Error(I18n.t("common.arrayRequired"));
         } catch (e) {
-            showToast('JSON 格式错误: ' + e.message);
+            showToast(I18n.t("common.jsonError") + e.message);
             return;
         }
 
@@ -212,18 +215,18 @@ class PricingPage {
             const result = await API.post('/pricing/batch', { items });
             this.hideBatchForm();
             await this.load();
-            showToast(result.message || '批量更新完成');
+            showToast(result.message || I18n.t("pricing.batchDone"));
         } catch (e) {
-            showToast('批量更新失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("pricing.batchFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     async reloadCache() {
         try {
             const result = await API.post('/pricing/reload');
-            showToast(result.message || '刷新请求已发送');
+            showToast(result.message || I18n.t("pricing.reloadSent"));
         } catch (e) {
-            showToast('刷新失败: ' + (e.message || '未知错误'));
+            showToast(I18n.t("pricing.reloadFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 

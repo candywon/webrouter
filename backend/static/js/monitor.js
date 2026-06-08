@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* 健康监控页面逻辑 */
 const MonitorPage = {
   cooldownTimer: null,
@@ -18,6 +21,69 @@ const MonitorPage = {
 
     // 加载冷却状态
     this.loadCooldowns();
+
+    // 加载 Provider 延迟对比
+    this.loadProviderComparison();
+  },
+
+  async loadProviderComparison() {
+    try {
+      const data = await API.get('/monitoring/provider-comparison?hours=24');
+      this.renderProviderComparison(data);
+    } catch (e) {
+      console.error('Failed to load provider comparison:', e);
+    }
+  },
+
+  renderProviderComparison(data) {
+    const canvas = document.getElementById('provider-comparison-chart');
+    if (!canvas || !data.data || data.data.length === 0) return;
+
+    if (this._providerChart) this._providerChart.destroy();
+
+    const sorted = [...data.data].sort((a, b) => b.avg_latency_ms - a.avg_latency_ms);
+    const labels = sorted.map(d => d.name);
+
+    this._providerChart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: I18n.t('common.avgLatency') + ' (ms)',
+            data: sorted.map(d => d.avg_latency_ms),
+            backgroundColor: 'rgba(99,102,241,0.7)',
+            borderRadius: 3,
+          },
+          {
+            label: I18n.t('billing.errorCount'),
+            data: sorted.map(d => d.error_count),
+            backgroundColor: 'rgba(239,68,68,0.6)',
+            borderRadius: 3,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { color: '#8b8fa3' },
+          },
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#8b8fa3' },
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#8b8fa3' },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
   },
 
   async loadCooldowns() {
@@ -44,16 +110,16 @@ const MonitorPage = {
     card.className = 'card';
     card.style.marginBottom = '16px';
 
-    let html = '<div class="card-header"><span class="card-title">⏳ 冷却中的 Provider</span><button class="btn-icon" onclick="MonitorPage.loadCooldowns()" title="刷新">🔄</button></div>';
-    html += '<table><thead><tr><th>Provider</th><th>状态</th><th>剩余时间</th><th>操作</th></tr></thead><tbody>';
+    let html = `<div class="card-header"><span class="card-title">⏳ ${I18n.t('monitor.coolingProviders')}</span><button class="btn-icon" onclick="MonitorPage.loadCooldowns()" title="Refresh">🔄</button></div>`;
+    html += `<table><thead><tr><th>Provider</th><th>${I18n.t('common.status')}</th><th>${I18n.t('monitor.remainingTime')}</th><th>${I18n.t('common.actions')}</th></tr></thead><tbody>`;
     cooldowns.forEach(cd => {
       const secs = cd.cooldown_remaining_sec;
       const timeStr = formatCooldown(secs);
       html += `<tr>
         <td><strong>${esc(cd.name)}</strong></td>
-        <td><span class="badge badge-warning">冷却中</span></td>
+        <td><span class="badge badge-warning">${I18n.t('monitor.cooling')}</span></td>
         <td id="cooldown-${cd.provider_id}">${timeStr}</td>
-        <td><button class="btn btn-sm" onclick="MonitorPage.clearCooldown(${cd.provider_id})">清除冷却</button></td>
+        <td><button class="btn btn-sm" onclick="MonitorPage.clearCooldown(${cd.provider_id})">${I18n.t('monitor.clearCooldown')}</button></td>
       </tr>`;
     });
     html += '</tbody></table>';
@@ -88,11 +154,11 @@ const MonitorPage = {
   async clearCooldown(providerId) {
     try {
       await API.post(`/providers/${providerId}/clear_cooldown`);
-      showToast('冷却已清除');
+      showToast(I18n.t("monitor.cooldownCleared"));
       this.loadCooldowns();
       this.load();
     } catch (e) {
-      showToast('清除失败: ' + e.message);
+      showToast(I18n.t("monitor.clearFailed") + e.message);
     }
   },
 
@@ -100,11 +166,11 @@ const MonitorPage = {
     const el = document.getElementById('monitor-content');
     if (!el) return;
     if (channels.length === 0) {
-      el.innerHTML = '<div class="empty-state"><div class="icon">💓</div><p>暂无渠道数据<br>请先在"渠道管理"中添加渠道</p></div>';
+      el.innerHTML = `<div class="empty-state"><div class="icon">💓</div><p>${I18n.t('dashboard.noChannelData')}<br>${I18n.t('common.goToChannel')}</p></div>`;
       return;
     }
     el.innerHTML = `<table>
-      <thead><tr><th>渠道名</th><th>类型</th><th>健康状态</th><th>延迟</th><th>最近检测</th><th>操作</th></tr></thead>
+      <thead><tr><th>${I18n.t('dashboard.channelTableHeader')}</th><th>${I18n.t('dashboard.channelTypeHeader')}</th><th>${I18n.t('dashboard.channelHealthHeader')}</th><th>${I18n.t('dashboard.channelLatencyHeader')}</th><th>${I18n.t('monitor.lastCheck')}</th><th>${I18n.t('common.actions')}</th></tr></thead>
       <tbody>${channels.map(ch => `
         <tr>
           <td>${ch.name || '-'}</td>
@@ -113,8 +179,8 @@ const MonitorPage = {
           <td>${ch.health?.latency_ms != null ? ch.health.latency_ms + 'ms' : '-'}</td>
           <td>${formatDate(ch.health?.checked_at)}</td>
           <td>
-            <button class="btn" onclick="MonitorPage.checkChannel(${ch.provider_id})">检测</button>
-            <button class="btn" onclick="MonitorPage.showHistory(${ch.provider_id})">历史</button>
+            <button class="btn" onclick="MonitorPage.checkChannel(${ch.provider_id})">${I18n.t('common.check')}</button>
+            <button class="btn" onclick="MonitorPage.showHistory(${ch.provider_id})">${I18n.t('monitor.history')}</button>
           </td>
         </tr>
       `).join('')}</tbody>
@@ -124,10 +190,10 @@ const MonitorPage = {
   async checkChannel(id) {
     try {
       const result = await API.post(`/monitor/check/${id}`);
-      showToast(`渠道检测完成: ${result.status}, 延迟 ${result.latency_ms ?? '-'}ms`);
+      showToast(I18n.t('monitor.checkDone', {status: result.status, latency: result.latency_ms ?? '-'}));
       this.load();
     } catch (e) {
-      showToast('检测失败: ' + e.message);
+      showToast(I18n.t('common.checkFailed') + e.message);
     }
   },
 
@@ -139,21 +205,21 @@ const MonitorPage = {
     btn.disabled = true;
     btn.style.opacity = '0.7';
     btn.style.cursor = 'not-allowed';
-    btn.textContent = '检测中...';
+    btn.textContent = I18n.t('common.processing');
 
     try {
       const result = await API.post('/monitor/check_all');
       const count = result.results?.length || 0;
-      showToast(`全部检测完成，共 ${count} 个渠道`);
+      showToast(I18n.t('monitor.checkAllDone', {count: count}));
       this.load();
     } catch (e) {
-      showToast('全部检测失败: ' + e.message);
+      showToast(I18n.t("monitor.checkAllFailed") + e.message);
     } finally {
       // 恢复按钮状态
       btn.disabled = false;
       btn.style.opacity = '';
       btn.style.cursor = '';
-      btn.textContent = '全部检测';
+      btn.textContent = I18n.t('monitor.checkAll');
     }
   },
 
@@ -174,12 +240,12 @@ const MonitorPage = {
       histDiv.style.marginTop = '16px';
       histDiv.innerHTML = `
         <div class="card-header">
-          <span class="card-title">检测历史</span>
-          <button class="btn" onclick="document.getElementById('monitor-history').remove()">关闭</button>
+          <span class="card-title">${I18n.t('monitor.checkHistory')}</span>
+          <button class="btn" onclick="document.getElementById('monitor-history').remove()">${I18n.t('common.close')}</button>
         </div>
-        ${history.length === 0 ? '<div class="empty-state"><p>暂无历史记录</p></div>' : `
+        ${history.length === 0 ? `<div class="empty-state"><p>${I18n.t('monitor.noHistory')}</p></div>` : `
         <table>
-          <thead><tr><th>时间</th><th>状态</th><th>延迟</th><th>错误信息</th></tr></thead>
+          <thead><tr><th>${I18n.t('common.time')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('common.latency')}</th><th>${I18n.t('monitor.errorMessage')}</th></tr></thead>
           <tbody>${history.map(h => `
             <tr>
               <td>${formatDate(h.checked_at)}</td>
@@ -191,7 +257,7 @@ const MonitorPage = {
         </table>`}`;
       el.parentNode.insertBefore(histDiv, el.nextSibling);
     } catch (e) {
-      showToast('加载历史失败: ' + e.message);
+      showToast(I18n.t('monitor.loadHistoryFailed') + e.message);
     }
   },
 };

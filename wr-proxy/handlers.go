@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // HTTP 处理函数：/v1/* 代理入口
@@ -30,6 +33,11 @@ func RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/images/edits", handleImageEdits)
 	mux.HandleFunc("/v1/images/variations", handleImageVariations)
 	mux.HandleFunc("/v1/models", handleModels)
+	// Anthropic 兼容 API
+	mux.HandleFunc("/v1/messages", handleAnthropicMessages)
+
+	// Cohere 兼容 API
+	mux.HandleFunc("/v1/chat", handleCohereChat)
 
 	// 健康检查
 	mux.HandleFunc("/health", handleHealth)
@@ -138,7 +146,13 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 	// 3.5 智能模型选择（auto别名 / 自动降级）
 	originalModel := model
-	smartResult := SmartModelSelect(model, body, token)
+	// 3.4 提前获取 sessionID（智能路由需要）
+	sessionID := r.Header.Get("X-Session-Id")
+	if sessionID == "" {
+		sessionID = r.Header.Get("X-Session-ID")
+	}
+
+	smartResult := SmartModelSelect(model, body, token, sessionID)
 	model = smartResult.ResolvedModel
 
 	// Token 模型白名单（用解析后的模型检查）
@@ -163,7 +177,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.Path
 	clientIP := extractClientIP(r)
 	reqID := uuid.New().String()
-	sessionID := r.Header.Get("X-Session-Id")
+	sessionID = r.Header.Get("X-Session-Id")
 	if sessionID == "" {
 		sessionID = r.Header.Get("X-Session-ID")
 	}
@@ -178,8 +192,16 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		body = replaceModelInBody(body, originalModel, model)
 	}
 
-	// 3.9 知识增强 System Prompt 注入
-	if token.KnowledgeCaptureEnabled || token.RAGEnabled || token.SystemPromptKnowledge != "" {
+	// 3.85 会话记忆召回（在知识注入之前，使召回历史也受 RAG/knowledge 同等处理）
+	if token.SessionRecallEnabled {
+		if triggered, recallSessID, cleanedBody := detectRecallTrigger(r, body); triggered && recallSessID != "" {
+			body = cleanedBody
+			body = injectSessionMemory(body, token, recallSessID, clientIP)
+		}
+	}
+
+	// 3.9 知识增强 System Prompt 注入（仅 RAG + 自定义知识触发，捕获不注入）
+	if token.RAGEnabled || token.SystemPromptKnowledge != "" {
 		body = injectKnowledgeSystemPrompt(body, token)
 	}
 
@@ -187,9 +209,20 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	var lastResult *ProxyResult
 	var selectedProvider *Provider
 
+	// cost_optimal 策略可能已预选 Provider
+	var costOptimalProvider *Provider
+	if smartResult.PreferredProvider != nil {
+		costOptimalProvider = smartResult.PreferredProvider
+	}
+
 	for attempt := 0; attempt <= cfg.MaxFailover; attempt++ {
 		// 选 Provider
-		provider := router.SelectProvider(model, token, excludeIDs, sessionID)
+		var provider *Provider
+		if attempt == 0 && costOptimalProvider != nil && !intInSlice(costOptimalProvider.ID, excludeIDs) {
+			provider = costOptimalProvider
+		} else {
+			provider = router.SelectProvider(model, token, excludeIDs, sessionID)
+		}
 		if provider == nil {
 			// 所有 Provider 已排除，记录最终失败日志
 			if lastResult != nil {
@@ -279,8 +312,8 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 			if result.UpstreamError.Type == UpstreamErrQuotaExhausted {
 				// 额度用完 → 冷却30分钟（等用户充值或换Key）
 				cooldown := time.Now().Add(30 * time.Minute)
-				provider.CooldownUntil = &cooldown
-				LogInfo("Proxy: %s set cooldown 30min (quota exhausted)", provider.Name)
+				provider.SetModelCooldown(model, cooldown)
+				LogInfo("Proxy: %s/%s set model cooldown 30min (quota exhausted)", provider.Name, model)
 				continue
 			}
 			if result.UpstreamError.Type == UpstreamErrRateLimited {
@@ -289,9 +322,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 					// 长时限流 → 冷却到预计恢复时间（上限2小时）
 					cooldownDuration := time.Duration(min(waitSec, 7200)) * time.Second
 					cooldown := time.Now().Add(cooldownDuration)
-					provider.CooldownUntil = &cooldown
-					LogInfo("Proxy: %s set cooldown %dmin (long rate limit: %ds)",
-						provider.Name, int(cooldownDuration.Minutes()), waitSec)
+					provider.SetModelCooldown(model, cooldown)
+					LogInfo("Proxy: %s/%s set model cooldown %dmin (long rate limit: %ds)",
+						provider.Name, model, int(cooldownDuration.Minutes()), waitSec)
 					continue
 				}
 			}
@@ -357,6 +390,15 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 					rlog.LatencyMs = streamResult.LatencyMs
 					meter.RecordRequest(rlog)
 				}
+				// 流式知识捕获
+				if token.KnowledgeCaptureEnabled && IsKnowledgeEnabled() && streamResult.StreamContent != "" {
+					DeliverKnowledge(token, reqID, model, endpoint, clientIP,
+						extractPrompt(body), streamResult.StreamContent, body)
+				}
+				// 流式会话记忆落盘
+				if token.SessionRecallEnabled && sessionID != "" && streamResult.StreamContent != "" {
+					DeliverSessionMessages(token, sessionID, model, body, streamResult.StreamContent)
+				}
 			}
 		} else {
 			// 非流式响应：捕获响应体用于知识投递
@@ -364,9 +406,13 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 			resp.Body.Close()
 
 			// 投递知识（使用脱敏后的数据）
-			if readErr == nil && token.KnowledgeCaptureEnabled && knowledgeEnabled {
+			if readErr == nil && token.KnowledgeCaptureEnabled && IsKnowledgeEnabled() {
 				DeliverKnowledge(token, reqID, model, endpoint, clientIP,
 					extractPrompt(body), extractResponse(respBody), body)
+			}
+			// 会话记忆落盘
+			if readErr == nil && token.SessionRecallEnabled && sessionID != "" {
+				DeliverSessionMessages(token, sessionID, model, body, extractResponse(respBody))
 			}
 
 			// 重建响应体供 NonStreamResponse 写入
@@ -424,8 +470,8 @@ func handleModels(w http.ResponseWriter, r *http.Request) {
 	models := make([]map[string]string, 0, len(modelSet))
 	for m := range modelSet {
 		models = append(models, map[string]string{
-			"id":      m,
-			"object":  "model",
+			"id":       m,
+			"object":   "model",
 			"owned_by": "webrouter",
 		})
 	}
@@ -484,6 +530,12 @@ func handleReload(w http.ResponseWriter, r *http.Request) {
 	ReloadVendorTestConfigs()
 	// 同时刷新优化特性开关
 	ReloadFeatures()
+	// 审计：配置全量重载（合规要求）
+	LogConfigChange("reload_all", 0, map[string]interface{}{
+		"provider_count": len(router.GetProviders()),
+		"proxy_enabled":  ProxyEnabled,
+		"client_ip":      r.RemoteAddr,
+	})
 	writeJSON(w, 200, map[string]interface{}{
 		"message":       "Providers, desensitize rules, model grades, aliases, vendor configs, feature toggles and complexity config reloaded",
 		"proxy_enabled": ProxyEnabled,
@@ -628,6 +680,13 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 			remaining := time.Until(*p.CooldownUntil)
 			stat["cooldown_remaining_sec"] = int(remaining.Seconds())
 		}
+		if mc := p.ModelCooldownSnapshot(); len(mc) > 0 {
+			cooling := make(map[string]int, len(mc))
+			for m, t := range mc {
+				cooling[m] = int(time.Until(t).Seconds())
+			}
+			stat["model_cooldown"] = cooling
+		}
 		stats = append(stats, stat)
 	}
 	writeJSON(w, 200, map[string]interface{}{
@@ -643,12 +702,26 @@ func handleCooldowns(w http.ResponseWriter, r *http.Request) {
 		if p.CooldownUntil != nil && time.Now().Before(*p.CooldownUntil) {
 			remaining := time.Until(*p.CooldownUntil)
 			cooldowns = append(cooldowns, map[string]interface{}{
-				"provider_id":        p.ID,
-				"name":               p.Name,
-				"status":             p.Status,
-				"cooldown_until":     p.CooldownUntil.UTC().Format(time.RFC3339),
+				"provider_id":            p.ID,
+				"name":                   p.Name,
+				"status":                 p.Status,
+				"scope":                  "provider",
+				"cooldown_until":         p.CooldownUntil.UTC().Format(time.RFC3339),
 				"cooldown_remaining_sec": int(remaining.Seconds()),
 			})
+		}
+		if mc := p.ModelCooldownSnapshot(); len(mc) > 0 {
+			for model, until := range mc {
+				cooldowns = append(cooldowns, map[string]interface{}{
+					"provider_id":            p.ID,
+					"name":                   p.Name,
+					"status":                 p.Status,
+					"scope":                  "model",
+					"model":                  model,
+					"cooldown_until":         until.UTC().Format(time.RFC3339),
+					"cooldown_remaining_sec": int(time.Until(until).Seconds()),
+				})
+			}
 		}
 	}
 	writeJSON(w, 200, map[string]interface{}{
@@ -675,8 +748,15 @@ func handleClearCooldown(w http.ResponseWriter, r *http.Request) {
 	providers := router.GetProviders()
 	for _, p := range providers {
 		if p.ID == id {
-			if p.CooldownUntil != nil {
+			hadProvider := p.CooldownUntil != nil
+			hadModel := len(p.ModelCooldownSnapshot()) > 0
+			if hadProvider {
 				p.CooldownUntil = nil
+			}
+			if hadModel {
+				p.ClearModelCooldown("")
+			}
+			if hadProvider || hadModel {
 				LogInfo("Cooldown cleared for provider %d: %s", id, p.Name)
 				writeJSON(w, 200, map[string]interface{}{
 					"message":     "Cooldown cleared",
@@ -766,7 +846,8 @@ func isBinaryContentType(ct string) bool {
 	}
 	return strings.HasPrefix(mediaType, "multipart/") ||
 		strings.HasPrefix(mediaType, "audio/") ||
-		strings.HasPrefix(mediaType, "image/")
+		strings.HasPrefix(mediaType, "image/") ||
+		strings.HasPrefix(mediaType, "video/")
 }
 
 // modelFromForm 从 multipart 表单提取 model 字段
@@ -894,10 +975,10 @@ func handleBinaryProxy(w http.ResponseWriter, r *http.Request, endpoint string) 
 					fw.Write([]byte(v))
 				}
 			}
-			// 再写入文件
-			for _, fileHeaders := range r.MultipartForm.File {
+			// 再写入文件（保留原始 field name）
+			for fieldName, fileHeaders := range r.MultipartForm.File {
 				for _, fh := range fileHeaders {
-					fw, _ := writer.CreateFormFile(fh.Filename, fh.Filename)
+					fw, _ := writer.CreateFormFile(fieldName, fh.Filename)
 					f, _ := fh.Open()
 					io.Copy(fw, f)
 					f.Close()
@@ -939,8 +1020,8 @@ func handleBinaryProxy(w http.ResponseWriter, r *http.Request, endpoint string) 
 			// 冷却机制
 			if result.UpstreamError.Type == UpstreamErrQuotaExhausted {
 				cooldown := time.Now().Add(30 * time.Minute)
-				provider.CooldownUntil = &cooldown
-				LogInfo("BinaryProxy: %s set cooldown 30min (quota exhausted)", provider.Name)
+				provider.SetModelCooldown(model, cooldown)
+				LogInfo("BinaryProxy: %s/%s set model cooldown 30min (quota exhausted)", provider.Name, model)
 				continue
 			}
 			if result.UpstreamError.Type == UpstreamErrRateLimited {
@@ -948,9 +1029,9 @@ func handleBinaryProxy(w http.ResponseWriter, r *http.Request, endpoint string) 
 				if waitSec > 60 {
 					cooldownDuration := time.Duration(min(waitSec, 7200)) * time.Second
 					cooldown := time.Now().Add(cooldownDuration)
-					provider.CooldownUntil = &cooldown
-					LogInfo("BinaryProxy: %s set cooldown %dmin (long rate limit: %ds)",
-						provider.Name, int(cooldownDuration.Minutes()), waitSec)
+					provider.SetModelCooldown(model, cooldown)
+					LogInfo("BinaryProxy: %s/%s set model cooldown %dmin (long rate limit: %ds)",
+						provider.Name, model, int(cooldownDuration.Minutes()), waitSec)
 					continue
 				}
 			}
@@ -1045,66 +1126,213 @@ func handleImageVariations(w http.ResponseWriter, r *http.Request) {
 	handleBinaryProxy(w, r, "/v1/images/variations")
 }
 
-// --- 辅助 ---
-
-func authenticateRequest(r *http.Request) (*Token, *AuthResult) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		return nil, &AuthResult{Error: "Missing Authorization header", StatusCode: 401}
+// handleAnthropicMessages Anthropic /v1/messages → 转换为 OpenAI 格式后转发
+func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
 	}
 
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return nil, &AuthResult{Error: "Invalid Authorization format", StatusCode: 401}
-	}
-
-	tokenKey := strings.TrimSpace(parts[1])
-	if tokenKey == "" {
-		return nil, &AuthResult{Error: "Empty token", StatusCode: 401}
-	}
-
-	token, err := LoadTokenByKey(tokenKey)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		LogError("LoadTokenByKey failed: key=%s err=%v", tokenKey[:min(10, len(tokenKey))]+"...", err)
-		return nil, &AuthResult{Error: "Database error", StatusCode: 500}
-	}
-	if token == nil {
-		return nil, &AuthResult{Error: "Invalid API key", StatusCode: 401}
+		http.Error(w, `{"error":"cannot read body"}`, http.StatusBadRequest)
+		return
 	}
 
-	result := Authenticate(r, token)
-	if result.Error != "" {
-		return nil, result
+	// 提取模型和流式标记
+	var anthReq struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
+	json.Unmarshal(body, &anthReq)
+	isStream := anthReq.Stream
+
+	// 转换为 OpenAI 格式
+	openAIBody, err := TranslateAnthropicToOpenAI(body)
+	if err != nil {
+		LogWarn("[anthropic] translate failed: %v", err)
+		http.Error(w, fmt.Sprintf(`{"error":"translate failed: %s"}`, err.Error()), http.StatusBadRequest)
+		return
 	}
 
-	return token, nil
+	// 构建内部请求以复用认证和路由
+	internalReq, _ := http.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(openAIBody))
+	internalReq.Header = r.Header.Clone()
+	internalReq.Header.Set("Content-Type", "application/json")
+
+	// 认证
+	token, authResult := authenticateRequest(internalReq)
+	if authResult != nil && authResult.Error != "" {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, authResult.Error), authResult.StatusCode)
+		return
+	}
+
+	// 解析 model 别名
+	model := anthReq.Model
+	if resolved, ok := ResolveModelAlias(model); ok {
+		model = resolved
+	}
+
+	// 选择 Provider
+	provider := router.SelectProvider(model, token, nil, "")
+	if provider == nil {
+		http.Error(w, `{"error":"no available provider"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// 构建上游请求
+	upstreamURL := provider.BaseURL + "/v1/chat/completions"
+	upstreamReq, _ := http.NewRequest("POST", upstreamURL, bytes.NewReader(openAIBody))
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
+
+	client := &http.Client{
+		Timeout: 180 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:    100,
+			IdleConnTimeout: 90 * time.Second,
+		},
+	}
+
+	upstreamResp, err := client.Do(upstreamReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"upstream request failed: %s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+	defer upstreamResp.Body.Close()
+
+	if isStream {
+		// 流式响应 → Anthropic SSE 格式
+		StreamAnthropicResponse(w, upstreamResp, model)
+		return
+	}
+
+	// 非流式：读取全部响应并转换
+	respBody, _ := io.ReadAll(upstreamResp.Body)
+	converted, err := TranslateOpenAIToAnthropic(respBody)
+	if err != nil {
+		LogWarn("[anthropic] response translate failed: %v", err)
+		converted = respBody
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(upstreamResp.StatusCode)
+	w.Write(converted)
 }
 
+// handleCohereChat Cohere /v1/chat → 转换为 OpenAI 格式后转发
+func handleCohereChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, `{"error":"cannot read body"}`, http.StatusBadRequest)
+		return
+	}
+
+	var coReq struct {
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
+	}
+	json.Unmarshal(body, &coReq)
+	isStream := coReq.Stream
+
+	// 转换为 OpenAI 格式
+	openAIBody, err := TranslateCohereToOpenAI(body)
+	if err != nil {
+		LogWarn("[cohere] translate failed: %v", err)
+		http.Error(w, fmt.Sprintf(`{"error":"translate failed: %s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	internalReq, _ := http.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(openAIBody))
+	internalReq.Header = r.Header.Clone()
+	internalReq.Header.Set("Content-Type", "application/json")
+
+	token, authResult := authenticateRequest(internalReq)
+	if authResult != nil && authResult.Error != "" {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, authResult.Error), authResult.StatusCode)
+		return
+	}
+
+	model := coReq.Model
+	if resolved, ok := ResolveModelAlias(model); ok {
+		model = resolved
+	}
+
+	provider := router.SelectProvider(model, token, nil, "")
+	if provider == nil {
+		http.Error(w, `{"error":"no available provider"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	upstreamURL := provider.BaseURL + "/v1/chat/completions"
+	upstreamReq, _ := http.NewRequest("POST", upstreamURL, bytes.NewReader(openAIBody))
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
+
+	client := &http.Client{
+		Timeout: 180 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:    100,
+			IdleConnTimeout: 90 * time.Second,
+		},
+	}
+
+	upstreamResp, err := client.Do(upstreamReq)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"upstream request failed: %s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+	defer upstreamResp.Body.Close()
+
+	if isStream {
+		// Cohere 流式：目前退化为非流式
+		respBody, _ := io.ReadAll(upstreamResp.Body)
+		converted, err := TranslateOpenAIToCohere(respBody)
+		if err != nil {
+			LogWarn("[cohere] response translate failed: %v", err)
+			converted = respBody
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(upstreamResp.StatusCode)
+		w.Write(converted)
+		return
+	}
+
+	respBody, _ := io.ReadAll(upstreamResp.Body)
+	converted, err := TranslateOpenAIToCohere(respBody)
+	if err != nil {
+		LogWarn("[cohere] response translate failed: %v", err)
+		converted = respBody
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(upstreamResp.StatusCode)
+	w.Write(converted)
+}
+
+// extractModel 从请求体中提取 model 字段
 func extractModel(body []byte) string {
-	var req map[string]interface{}
+	var req struct {
+		Model string `json:"model"`
+	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return ""
 	}
-	model, ok := req["model"].(string)
-	if !ok {
-		return ""
-	}
-	return model
+	return req.Model
 }
 
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
-}
-
+// reloadProviders 重新加载 Provider 列表并刷新路由
 func reloadProviders() error {
 	providers, err := LoadProviders()
 	if err != nil {
-		return err
+		return fmt.Errorf("load providers: %w", err)
 	}
-	// 展开 Channel 为独立调度项
-	providers = LoadChannels(providers)
 	router.RefreshProviders(providers)
+	LogInfo("Reload: loaded %d providers", len(providers))
 	return nil
 }

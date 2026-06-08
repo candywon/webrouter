@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // wr-proxy 优化特性开关
@@ -96,11 +99,11 @@ func ApplyFeatureTransforms(body []byte, model string, token *Token) ([]byte, st
 
 // 动态内容正则模式
 var dynamicPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`https?://[^\s\)]+`),        // URL
+	regexp.MustCompile(`https?://[^\s\)]+`),           // URL
 	regexp.MustCompile(`\d{4}[-/]\d{1,2}[-/]\d{1,2}`), // 日期
-	regexp.MustCompile(`\d{1,2}:\d{2}(:\d{2})?`),  // 时间
-	regexp.MustCompile(`\b[a-f0-9]{32,}\b`),        // 哈希/UUID
-	regexp.MustCompile(`\d{11,}`),                  // 长数字
+	regexp.MustCompile(`\d{1,2}:\d{2}(:\d{2})?`),      // 时间
+	regexp.MustCompile(`\b[a-f0-9]{32,}\b`),           // 哈希/UUID
+	regexp.MustCompile(`\d{11,}`),                     // 长数字
 }
 
 // hasDynamicContent 判断消息是否包含动态内容
@@ -238,9 +241,9 @@ func compressSessionHistory(messages []interface{}) []interface{} {
 	// 生成摘要
 	summary := generateSessionSummary(toCompress)
 	summaryMsg := map[string]interface{}{
-		"role":    "system",
-		"content": fmt.Sprintf("[会话摘要 - 压缩了 %d 条历史消息]\n%s", len(toCompress), summary),
-		"__session_summary": true,
+		"role":               "system",
+		"content":            fmt.Sprintf("[会话摘要 - 压缩了 %d 条历史消息]\n%s", len(toCompress), summary),
+		"__session_summary":  true,
 		"__compressed_count": len(toCompress),
 	}
 

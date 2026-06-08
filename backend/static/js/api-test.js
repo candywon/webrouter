@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * API 测试页 — 通过 Flask 后端转发请求到 wr-proxy
  * 支持指定模型和 auto/smart 智能模式
@@ -23,7 +26,7 @@ const ApiTestPage = {
         const sel = document.getElementById('at-api-key');
         if (!sel) return;
         const enabled = this.members.filter(m => m.enabled && m.key);
-        sel.innerHTML = '<option value="">— 选择成员 —</option>'
+        sel.innerHTML = '<option value="">— ' + I18n.t('apitest.selectMember') + ' —</option>'
             + enabled.map(m => `<option value="${m.key}">${this.escHtml(m.name)} (${m.key.slice(0, 16)}…)</option>`).join('');
     },
 
@@ -35,7 +38,7 @@ const ApiTestPage = {
 
     async sendRequest() {
         const apiKey = document.getElementById('at-api-key').value;
-        if (!apiKey) return this.showAlert('请选择 API Key');
+        if (!apiKey) return this.showAlert(I18n.t("apitest.selectApiKey"));
 
         const mode = document.querySelector('input[name="at-model-mode"]:checked').value;
         let model;
@@ -44,7 +47,7 @@ const ApiTestPage = {
         } else {
             model = document.getElementById('at-model-name').value;
         }
-        if (!model) return this.showAlert('请填写模型名称或选择 auto/smart');
+        if (!model) return this.showAlert(I18n.t("apitest.enterModel"));
 
         const userMsg = document.getElementById('at-message').value;
 
@@ -61,11 +64,11 @@ const ApiTestPage = {
     async doSend(apiKey, model, userMsg) {
         const btn = document.getElementById('at-send-btn');
         btn.disabled = true;
-        btn.textContent = '⏳ 发送中...';
+        btn.textContent = I18n.t("apitest.sending");
 
         const card = document.getElementById('at-response-card');
         card.style.display = '';
-        document.getElementById('at-response-content').textContent = '等待响应...';
+        document.getElementById('at-response-content').textContent = I18n.t("apitest.waitingResponse");
         document.getElementById('at-response-content').style.color = '';
         document.getElementById('at-response-time').textContent = '';
         document.getElementById('at-response-model').textContent = '';
@@ -85,14 +88,14 @@ const ApiTestPage = {
             const elapsed = Date.now() - startTime;
 
             if (result.error) {
-                document.getElementById('at-response-content').textContent = `请求失败:\n${result.error}`;
+                document.getElementById('at-response-content').textContent = `${I18n.t('apitest.requestFailed')}\n${result.error}`;
                 document.getElementById('at-response-content').style.color = 'var(--danger)';
                 document.getElementById('at-response-time').textContent = `${elapsed}ms`;
                 return;
             }
 
             // 解析响应
-            const content = result.choices?.[0]?.message?.content || '(空响应)';
+            const content = result.choices?.[0]?.message?.content || I18n.t("apitest.emptyResponse");
             document.getElementById('at-response-content').textContent = content;
             document.getElementById('at-response-time').textContent = `${elapsed}ms`;
             document.getElementById('at-response-model').textContent = result.model || model;
@@ -104,21 +107,21 @@ const ApiTestPage = {
             document.getElementById('at-raw-response').textContent = JSON.stringify(result, null, 2);
         } catch (e) {
             const elapsed = Date.now() - startTime;
-            document.getElementById('at-response-content').textContent = `请求失败: ${e.message}`;
+            document.getElementById('at-response-content').textContent = `${I18n.t('apitest.requestFailed')} ${e.message}`;
             document.getElementById('at-response-content').style.color = 'var(--danger)';
             document.getElementById('at-response-time').textContent = `${elapsed}ms`;
         } finally {
             btn.disabled = false;
-            btn.textContent = '🚀 发送请求';
+            btn.textContent = I18n.t("apitest.sendRequest");
         }
     },
 
     showUsage(usage) {
         const parts = [];
-        if (usage.prompt_tokens) parts.push(`输入: ${usage.prompt_tokens} tokens`);
-        if (usage.completion_tokens) parts.push(`输出: ${usage.completion_tokens} tokens`);
-        if (usage.total_tokens) parts.push(`总计: ${usage.total_tokens} tokens`);
-        if (usage.prompt_tokens_details?.cached_tokens) parts.push(`缓存命中: ${usage.prompt_tokens_details.cached_tokens} tokens`);
+        if (usage.prompt_tokens) parts.push(`${I18n.t('apitest.input')}${usage.prompt_tokens} tokens`);
+        if (usage.completion_tokens) parts.push(`${I18n.t('apitest.output')}${usage.completion_tokens} tokens`);
+        if (usage.total_tokens) parts.push(`${I18n.t('apitest.total')}${usage.total_tokens} tokens`);
+        if (usage.prompt_tokens_details?.cached_tokens) parts.push(`${I18n.t('apitest.cacheHit')}${usage.prompt_tokens_details.cached_tokens} tokens`);
         document.getElementById('at-usage-info').textContent = parts.join('  │  ');
     },
 

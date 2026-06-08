@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -15,9 +18,9 @@ import (
 
 // CompressConfig 对话压缩配置
 type CompressConfig struct {
-	MaxMessages    int    // 最大消息数，超过此数触发压缩
-	MaxTokens      int    // 最大 token 数
-	KeepLast       int    // 保留最近不压缩的消息数
+	MaxMessages      int    // 最大消息数，超过此数触发压缩
+	MaxTokens        int    // 最大 token 数
+	KeepLast         int    // 保留最近不压缩的消息数
 	CompressionModel string // 压缩使用的模型
 }
 
@@ -112,8 +115,8 @@ func callCompressLLM(prompt string) (string, error) {
 			{"role": "system", "content": "你是一个对话摘要专家。请严格按 JSON 格式输出。"},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":    2000,
-		"temperature":   0.1,
+		"max_tokens":      2000,
+		"temperature":     0.1,
 		"response_format": map[string]string{"type": "json_object"},
 	}
 
@@ -213,7 +216,7 @@ func handleConversationCompress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{
-		"compressed":    compressed,
+		"compressed":     compressed,
 		"original_count": len(req.Messages),
 		"new_count":      len(compressed),
 		"summary":        summary,

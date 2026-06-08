@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """
 WebRouter 进程管理器 — 启动/停止/重启/状态查询
 管理 WebRouter (Flask) + wr-proxy (Go sidecar) 双进程
@@ -9,6 +12,8 @@ WebRouter 进程管理器 — 启动/停止/重启/状态查询
   python3 start.py restart   重启所有服务
   python3 start.py status    查看运行状态
   python3 start.py logs      查看实时日志
+  python3 start.py logstats  查看日志文件大小
+  python3 start.py cleanlogs 轮转/清理日志文件
 """
 
 import os
@@ -16,6 +21,8 @@ import sys
 import signal
 import subprocess
 import time
+import gzip
+import shutil
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -33,6 +40,53 @@ PROXY_DIR = BASE_DIR / "wr-proxy"
 WEBROUTER_PORT = int(os.environ.get("WEBROUTER_PORT", "5050"))
 PROXY_PORT = int(os.environ.get("WR_PROXY_PORT", "5051"))
 FLASK_HOST = os.environ.get("FLASK_HOST", "0.0.0.0")
+
+# 日志轮转配置
+LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
+LOG_BACKUP_COUNT = 5  # 最多保留 5 份压缩备份
+
+
+def rotate_log(log_path):
+    """日志文件轮转：超过 MAX_BYTES 时压缩旧日志，保留最新 N 份"""
+    if not log_path.exists():
+        return
+
+    size = log_path.stat().st_size
+    if size < LOG_MAX_BYTES:
+        return
+
+    print(f"  日志 {log_path.name} 达到 {size // 1024}KB，执行轮转...")
+
+    # 删除最旧的备份
+    oldest = log_path.with_suffix(f".log.{LOG_BACKUP_COUNT}.gz")
+    if oldest.exists():
+        oldest.unlink()
+
+    # 依次重命名: .log.4.gz -> .log.5.gz, .log.3.gz -> .log.4.gz, ...
+    for i in range(LOG_BACKUP_COUNT - 1, 0, -1):
+        src = log_path.with_suffix(f".log.{i}.gz")
+        dst = log_path.with_suffix(f".log.{i + 1}.gz")
+        if src.exists():
+            src.rename(dst)
+
+    # 压缩当前日志为 .log.1.gz
+    backup = log_path.with_suffix(".log.1.gz")
+    with open(log_path, "rb") as f_in, gzip.open(backup, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+    # 清空原日志
+    log_path.write_text("")
+    print(f"  轮转完成: {backup} ({size // 1024}KB → {backup.stat().st_size // 1024}KB)")
+
+
+def cleanup_old_logs():
+    """清理超过保留份数的旧日志备份"""
+    for pattern in ["webrouter", "wr-proxy"]:
+        base = LOGS_DIR / f"{pattern}.log"
+        for i in range(LOG_BACKUP_COUNT + 1, 100):  # 清理超出限额的残余
+            old = base.with_suffix(f".log.{i}.gz")
+            if old.exists():
+                old.unlink()
 
 
 def ensure_dirs():
@@ -124,6 +178,7 @@ def start_proxy():
     env = os.environ.copy()
     env["WR_DB_PATH"] = str(BACKEND_DIR / "data" / "webrouter.db")
     env.setdefault("WR_PROXY_PORT", str(PROXY_PORT))
+    env.setdefault("WR_KNOWLEDGE_CAPTURE", "1")
 
     proc = subprocess.Popen(
         [binary],
@@ -301,6 +356,10 @@ def main():
 
     if cmd == "start":
         print("\n启动 WebRouter 服务...")
+        # 启动前检查日志轮转
+        cleanup_old_logs()
+        rotate_log(LOGS_DIR / "webrouter.log")
+        rotate_log(LOGS_DIR / "wr-proxy.log")
         ok1 = start_proxy()
         ok2 = start_webrouter()
         if ok1 and ok2:
@@ -322,6 +381,9 @@ def main():
         stop_webrouter()
         stop_proxy()
         time.sleep(1)
+        cleanup_old_logs()
+        rotate_log(LOGS_DIR / "webrouter.log")
+        rotate_log(LOGS_DIR / "wr-proxy.log")
         ok1 = start_proxy()
         ok2 = start_webrouter()
         if ok1 and ok2:
@@ -335,6 +397,27 @@ def main():
 
     elif cmd == "logs":
         tail_logs()
+
+    elif cmd == "cleanlogs":
+        print("\n清理日志文件...")
+        cleanup_old_logs()
+        rotate_log(LOGS_DIR / "webrouter.log")
+        rotate_log(LOGS_DIR / "wr-proxy.log")
+        print("  清理完成")
+
+    elif cmd == "logstats":
+        print("\n日志文件大小统计:")
+        for name in ["webrouter", "wr-proxy"]:
+            log = LOGS_DIR / f"{name}.log"
+            if log.exists():
+                size = log.stat().st_size
+                print(f"  {name}.log: {size // 1024}KB")
+                # 列出备份文件
+                for i in range(1, LOG_BACKUP_COUNT + 1):
+                    bak = log.with_suffix(f".log.{i}.gz")
+                    if bak.exists():
+                        print(f"  {name}.log.{i}.gz: {bak.stat().st_size // 1024}KB")
+        print()
 
     else:
         print(f"未知命令: {cmd}")

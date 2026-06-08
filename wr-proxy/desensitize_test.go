@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -10,20 +13,20 @@ import (
 
 func newDesensitizeToken(level string) *Token {
 	return &Token{
-		ID:                  1,
-		Name:                "test",
-		Key:                 "sk-wr-test",
-		DesensitizeEnabled:  true,
-		DesensitizeLevel:    level,
+		ID:                 1,
+		Name:               "test",
+		Key:                "sk-wr-test",
+		DesensitizeEnabled: true,
+		DesensitizeLevel:   level,
 	}
 }
 
 func newNoDesensitizeToken() *Token {
 	return &Token{
-		ID:                  1,
-		Name:                "test",
-		Key:                 "sk-wr-test",
-		DesensitizeEnabled:  false,
+		ID:                 1,
+		Name:               "test",
+		Key:                "sk-wr-test",
+		DesensitizeEnabled: false,
 	}
 }
 
@@ -399,7 +402,7 @@ func TestDesensitizeJSONStructure(t *testing.T) {
 	token := newDesensitizeToken(DesensitizeStandard)
 
 	original := map[string]interface{}{
-		"model":    "gpt-4",
+		"model": "gpt-4",
 		"messages": []interface{}{
 			map[string]interface{}{
 				"role":    "user",
@@ -436,9 +439,9 @@ func TestDesensitizeJSONStructure(t *testing.T) {
 
 func TestTruncateSensitive(t *testing.T) {
 	tests := []struct {
-		input   string
-		maxLen  int
-		expect  string
+		input  string
+		maxLen int
+		expect string
 	}{
 		{"13812345678", 8, "138...678"},
 		{"abc", 8, "***"},

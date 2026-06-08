@@ -1,0 +1,299 @@
+<p align="center">
+  <img src="docs/images/logo.svg" alt="WebRouter" width="120" />
+</p>
+
+<p align="center">
+  <a href="https://webrouter-demo.fly.dev">
+    <img src="https://img.shields.io/badge/在线演示-Fly.io-9cf?style=for-the-badge" alt="在线演示 Fly.io" />
+  </a>
+</p>
+
+<h1 align="center">WebRouter</h1>
+
+<p align="center">
+  <strong>统一 AI API 网关</strong> — 一个入口管理所有大模型服务<br/>
+  一把 Key → OpenAI、Anthropic、Google、DeepSeek、通义千问……
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#核心功能">核心功能</a> ·
+  <a href="#架构">架构</a> ·
+  <a href="#许可证">许可证</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.8+-blue" alt="Python 3.8+" />
+  <img src="https://img.shields.io/badge/Go-1.21+-00ADD8" alt="Go 1.21+" />
+  <img src="https://img.shields.io/badge/License-BSL%201.1-blue" alt="License: BSL 1.1" />
+  <img src="https://img.shields.io/badge/Status-Active-brightgreen" alt="Status: Active" />
+</p>
+
+---
+
+## 为什么用 WebRouter？
+
+管理多个 AI API 数据源很痛苦——Key 散落各处、成本不可见、上游挂了没感知。WebRouter 提供一个**统一控制面**。
+
+- **受够了到处写 provider URL？** → 一个网关地址，自动路由到最优数据源
+- **担心上游宕机？** → 自动健康检测、冷却降级、故障转移
+- **不知道花了多少钱？** → 按模型/Token/团队的实时成本追踪与额度管理
+- **团队共用 API Key？** → 独立 Token + 配额隔离 + 模型白名单
+
+## 核心功能
+
+### 🧠 智能路由
+设置 `model: "auto"`，WebRouter 根据请求复杂度自动选模型——简单请求走经济型，复杂推理走高端模型。
+
+### 💓 健康监控
+自动健康检测 + 延迟追踪。失效 Provider 进入冷却，流量自动切换——无需人工干预。
+
+### 💰 成本追踪
+按模型、按 Token、按团队的实时成本核算，额度管理 + 预算告警。
+
+### 🔐 隐私脱敏
+内置脱敏引擎，请求到达上游前自动剥离手机号、身份证号、邮箱等 PII 信息。
+
+### 👥 团队管理
+邀请成员、分配额度、限制模型访问。每人一把独立 Key，权限隔离。
+
+### ⚡ 高性能代理
+`wr-proxy` Go 网关负责请求转发、退避重试、流式传输、成本计量——延迟开销极小。
+
+### 📡 多数据源类型
+| 类型 | 说明 | 健康 | 延迟 | 成本 |
+|------|------|:----:|:----:|:----:|
+| `direct` | 官方直连（OpenAI、Anthropic、Google…） | ✅ | ✅ | — |
+| `aggregate` | 聚合平台（OhMyGPT、API2D…） | ✅ | ✅ | 手动 |
+| `newapi` | 自建 New-API / One-API | ✅ | ✅ | ✅ |
+| `litellm` | LiteLLM 代理 | ✅ | ✅ | — |
+| `custom` | 任何 OpenAI 兼容网关 | ✅ | ✅ | — |
+
+### 🛠️ CLI 配置导出
+一键导出 Claude Code、Codex、Cursor、Continue 等工具的环境变量和配置。
+
+---
+
+## 快速开始
+
+### 在线体验
+
+不想安装？立即访问 **[webrouter-demo.fly.dev](https://webrouter-demo.fly.dev)** 在线体验（账号 `demo` / 密码 `demo123456`）。
+
+### 环境要求
+
+- Python 3.8+
+- Go 1.21+（仅从源码编译 wr-proxy 时需要，已含预编译二进制）
+- 内存 2 GB+
+
+### 安装并启动
+
+```bash
+git clone https://github.com/<org>/webrouter.git
+cd webrouter
+bash deploy/install.sh
+```
+
+安装脚本自动检测系统和架构，创建虚拟环境，安装依赖，启动双进程。
+
+### 打开管理面板
+
+```bash
+open http://localhost:5050
+# 默认账号：admin / admin123
+```
+
+### 添加第一个数据源
+
+1. 进入 **数据源** → **+ 添加**
+2. 选择类型 `direct`，填入 OpenAI 的 Base URL 和 API Key
+3. 点击 **🔍 检测** 验证连通性
+4. 网关已就绪：`http://localhost:5051/v1/chat/completions`
+
+### Docker 部署
+
+```bash
+cd webrouter
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+---
+
+## 产品截图
+
+<p align="center">
+  <img src="docs/images/webrouter-1.png" alt="WebRouter 仪表盘" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/images/webrouter-2.png" alt="WebRouter 数据源管理" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/images/webrouter-3.png" alt="WebRouter 健康监控" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/images/webrouter-4.png" alt="WebRouter 计费分析" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/images/webrouter-5.png" alt="WebRouter 系统设置" width="800" />
+</p>
+
+---
+
+## 架构
+
+```
+┌─────────────┐     HTTP      ┌─────────────────┐
+│  浏览器/CLI  │ ───────────→ │    WebRouter     │
+│             │ ←──────────── │    (Flask)       │
+└─────────────┘               │    :5050         │
+                              └──────┬──────────┘
+                                     │
+                              ┌──────▼──────┐
+                              │  wr-proxy    │
+                              │  (Go) :5051  │
+                              └──────┬──────┘
+                                     │
+                     ┌───────────────┼───────────────┐
+                     │               │               │
+              ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
+              │   direct    │ │  aggregate  │ │   custom    │
+              │  (官方直连)  │ │  (聚合平台)  │ │ (自定义网关) │
+              └─────────────┘ └─────────────┘ └─────────────┘
+```
+
+| 组件 | 技术栈 | 职责 |
+|------|--------|------|
+| **WebRouter**（backend） | Python Flask | 管理面板、REST API、数据模型、定时任务 |
+| **wr-proxy** | Go 1.22 | 高性能代理网关：路由、重试、脱敏、计量 |
+
+两个组件共享 SQLite 数据库（也支持 MySQL/PostgreSQL）存取配置和请求日志。
+
+---
+
+## 目录结构
+
+```
+webrouter/
+├── backend/                # Flask 后端
+│   ├── app.py             # 应用入口
+│   ├── config.py          # 配置
+│   ├── models/            # 数据模型
+│   ├── routes/            # 12 个 API 蓝图 (/api/*)
+│   ├── services/          # 业务逻辑
+│   ├── static/            # 前端 SPA
+│   │   ├── index.html
+│   │   ├── js/            # 21 个页面模块
+│   │   ├── css/
+│   │   └── i18n/          # en.json, zh-CN.json
+│   └── start.py           # 进程管理器
+├── wr-proxy/               # Go 代理网关
+│   ├── main.go
+│   ├── proxy.go            # HTTP 转发
+│   ├── smart_model.go      # 智能路由
+│   ├── retry.go            # 退避重试
+│   ├── desensitize.go      # 脱敏引擎
+│   ├── meter.go            # 成本计量
+│   └── ...
+├── deploy/                 # 部署配置
+│   ├── install.sh
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── nginx.conf
+├── docs/                   # 项目文档
+├── data/                   # 运行数据
+└── .env                    # 环境配置（自动生成）
+```
+
+---
+
+## 配置说明
+
+所有设置通过 `.env` 文件管理（首次安装自动生成）：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `SESSION_SECRET` | Flask 会话密钥 | 自动生成 |
+| `DATABASE_URI` | 数据库连接 | SQLite |
+| `REDIS_URL` | Redis 连接（可选，缓存用） | — |
+| `FLASK_ENV` | 运行环境 | `production` |
+| `FLASK_HOST` | 监听地址 | `0.0.0.0` |
+| `FLASK_PORT` | Flask 端口 | `5050` |
+| `WR_PROXY_PORT` | wr-proxy 端口 | `5051` |
+| `NEWAPI_URL` | New-API sidecar 地址 | `http://localhost:3000` |
+| `ENABLE_SCHEDULER` | 启用定时健康检测与告警 | `0`（debug 模式关闭） |
+
+### 进程管理
+
+```bash
+python3 backend/start.py start     # 启动所有服务
+python3 backend/start.py stop      # 停止所有服务
+python3 backend/start.py restart   # 重启
+python3 backend/start.py status    # 查看状态
+python3 backend/start.py logs      # 查看日志
+```
+
+也可使用安装时生成的脚本：
+
+```bash
+./start.sh    # 启动
+./stop.sh     # 停止
+```
+
+---
+
+## 路线图
+
+- [ ] **Plugin SDK** — 可扩展插件接口（企业版模块）
+- [ ] **SSO / SAML / OIDC** — 企业单点登录
+- [ ] **审计日志** — 防篡改操作审计
+- [ ] **集群模式** — 多实例共享状态
+- [ ] **云托管版** — 零运维托管服务
+- [ ] **高级路由 DSL** — 按部门/项目/标签自定义路由规则
+
+> 社区版与企业版功能对比详见 [LICENSING.md](LICENSING.md)。
+
+---
+
+## 参与贡献
+
+欢迎贡献！提交 PR 前：
+
+1. 签署 [贡献者许可协议 (CLA)](CONTRIBUTING.md) — 授予项目再许可权
+2. 遵循现有代码风格
+3. 本地测试通过
+
+详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
+## 许可证
+
+WebRouter 社区版采用 **Business Source License 1.1** 协议。
+
+- ✅ 个人使用和企业内部生产部署免费
+- ❌ Change Date 前禁止商业转售（含托管 SaaS、OEM 嵌入）
+- 🔄 **2029-06-01** 起自动转为 **Apache-2.0** 协议
+
+完整文本见 [LICENSE](LICENSE)，双版策略见 [LICENSING.md](LICENSING.md)。
+
+---
+
+## 致谢
+
+WebRouter 基于以下开源项目构建：
+
+- [Flask](https://flask.palletsprojects.com/) — Python Web 框架
+- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — 纯 Go SQLite（无 CGO）
+- [APScheduler](https://apscheduler.readthedocs.io/) — 任务调度
+- [Font Awesome](https://fontawesome.com/) — 图标
+
+---
+
+<p align="center">
+  <strong>一个网关，全部 AI API。</strong>
+</p>

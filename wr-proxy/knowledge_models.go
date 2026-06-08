@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 知识捕获模块 — 数据模型
@@ -23,7 +26,7 @@ type KnowledgeDomain struct {
 	DomainCode  string `json:"domain_code"`
 	DomainName  string `json:"domain_name"`
 	Department  string `json:"department"`
-	Status      string `json:"status"`       // active/pending/merged
+	Status      string `json:"status"` // active/pending/merged
 	SampleCount int    `json:"sample_count"`
 	Keywords    string `json:"auto_keywords"` // JSON array
 	Description string `json:"description"`
@@ -48,14 +51,14 @@ var initialDomains = []struct {
 
 // DomainRiskConfig 领域风险配置
 type DomainRiskConfig struct {
-	DomainCode           string
-	RiskLevel            string  // high/medium/low
-	MinVerification      string  // auto/verified
-	MaxAgeDays           int     // 知识最大有效期
-	DisclaimerTemplate   string  // 免责声明模板
-	AllowFactual         bool    // 是否注入 factual 数据
-	AllowAnalytical      bool    // 是否注入 analytical 结论
-	AllowProcedural      bool    // 是否注入 procedural 流程
+	DomainCode         string
+	RiskLevel          string // high/medium/low
+	MinVerification    string // auto/verified
+	MaxAgeDays         int    // 知识最大有效期
+	DisclaimerTemplate string // 免责声明模板
+	AllowFactual       bool   // 是否注入 factual 数据
+	AllowAnalytical    bool   // 是否注入 analytical 结论
+	AllowProcedural    bool   // 是否注入 procedural 流程
 }
 
 // CaptureStats 捕获统计计数器
@@ -70,9 +73,9 @@ type CaptureStats struct {
 
 // KnowledgeVector 知识条目向量嵌入
 type KnowledgeVector struct {
-	ItemID    int     `json:"item_id"`
-	Vector    string  `json:"vector"` // JSON array of float64
-	Model     string  `json:"model"`
-	Dimension int     `json:"dimension"`
-	CreatedAt string  `json:"created_at"`
+	ItemID    int    `json:"item_id"`
+	Vector    string `json:"vector"` // JSON array of float64
+	Model     string `json:"model"`
+	Dimension int    `json:"dimension"`
+	CreatedAt string `json:"created_at"`
 }

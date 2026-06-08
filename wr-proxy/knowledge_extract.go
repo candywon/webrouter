@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -30,13 +33,13 @@ var extractBatch = KnowledgeExtractBatch{
 
 // ExtractionResult LLM 单条 raw 提取结果
 type ExtractionResult struct {
-	HasKnowledge bool     `json:"has_knowledge"`
+	HasKnowledge  bool     `json:"has_knowledge"`
 	KnowledgeType string   `json:"knowledge_type,omitempty"` // factual/analytical/procedural
-	Confidence   float64  `json:"confidence"`
-	DomainCode   string   `json:"domain_code,omitempty"`
-	Title        string   `json:"title,omitempty"`
-	Summary      string   `json:"summary,omitempty"`
-	DataPoints   []string `json:"data_points,omitempty"` // factual 类型的数据点
+	Confidence    float64  `json:"confidence"`
+	DomainCode    string   `json:"domain_code,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+	DataPoints    []string `json:"data_points,omitempty"` // factual 类型的数据点
 }
 
 // rawEntry 从数据库查询的原始对话条目
@@ -83,8 +86,7 @@ func ExtractRawToKnowledge() (processed int, err error) {
 
 	// 2. 逐条调用 LLM 评估 + 提取
 	for i, entry := range entries {
-		LogInfo("[extract] processing raw entry %d/%d (id=%d, reqID=%s)",
-			i+1, len(entries), entry.ID, entry.RequestID)
+		_ = i // silence unused variable
 
 		// 2.1 标记为 processing
 		_, err = db.Exec(`UPDATE wr_knowledge_raw SET status = 'processing' WHERE id = ?`, entry.ID)
@@ -105,7 +107,6 @@ func ExtractRawToKnowledge() (processed int, err error) {
 			// 没有知识价值，跳过
 			db.Exec(`UPDATE wr_knowledge_raw SET status = 'skipped', processed_at = ? WHERE id = ?`,
 				time.Now().UTC().Format("2006-01-02 15:04:05"), entry.ID)
-			LogInfo("[extract] entry %d skipped (no knowledge value)", entry.ID)
 			continue
 		}
 
@@ -140,6 +141,18 @@ func ExtractRawToKnowledge() (processed int, err error) {
 		// 2.5 标记为 done
 		db.Exec(`UPDATE wr_knowledge_raw SET status = 'done', processed_at = ? WHERE id = ?`,
 			time.Now().UTC().Format("2006-01-02 15:04:05"), entry.ID)
+
+		// 提取完成后立即删除 raw 原文（数据安全好实践）
+		db.Exec(`DELETE FROM wr_knowledge_raw WHERE id = ?`, entry.ID)
+
+		// 审计日志：知识提取
+		LogAudit(AuditKnowledgeExtract, AuditResourceItem,
+			entry.RequestID, entry.TokenID, map[string]interface{}{
+				"raw_id":         entry.ID,
+				"item_id":        itemID,
+				"knowledge_type": result.KnowledgeType,
+				"domain":         result.DomainCode,
+			}, "")
 
 		LogInfo("[extract] entry %d → knowledge item %d (type=%s, domain=%s, confidence=%.0f%%)",
 			entry.ID, itemID, result.KnowledgeType, result.DomainCode, result.Confidence*100)
@@ -317,7 +330,7 @@ func saveKnowledgeItem(entry rawEntryForAssess, result ExtractionResult) (int64,
 		truncate(result.Title, 200),
 		truncate(result.Summary, 2000),
 		result.DomainCode,
-		"", // department 留空，后续可由用户设置
+		"",       // department 留空，后续可由用户设置
 		entry.ID, // 用 raw id 作为 source_request_id 替代
 		entry.TurnCount,
 		truncate(entry.Response, 1000),
@@ -326,7 +339,7 @@ func saveKnowledgeItem(entry rawEntryForAssess, result ExtractionResult) (int64,
 		dataPointsJSON,
 		result.Confidence,
 		verification,
-		0,  // token_id
+		0, // token_id
 		entry.TokenName,
 		entry.ModelName,
 		time.Now().UTC().Format("2006-01-02 15:04:05"),
@@ -379,7 +392,17 @@ func callExtractionLLM(prompt string) (string, error) {
 		return "", fmt.Errorf("no available provider")
 	}
 
-	provider := providers[0]
+	// 选择一个可用的 Provider（不盲目取第一个）
+	var provider *Provider
+	for _, p := range providers {
+		if p.IsAvailable("") {
+			provider = p
+			break
+		}
+	}
+	if provider == nil {
+		return "", fmt.Errorf("no healthy provider available")
+	}
 
 	body := map[string]interface{}{
 		"model": extractBatch.Model,
@@ -387,20 +410,26 @@ func callExtractionLLM(prompt string) (string, error) {
 			{"role": "system", "content": "你是一个企业知识提取专家。请严格按 JSON 格式输出，不要其他内容。"},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":    1000,
-		"temperature":   0.1,
+		"max_tokens":      1000,
+		"temperature":     0.1,
 		"response_format": map[string]string{"type": "json_object"},
 	}
 
 	bodyBytes, _ := json.Marshal(body)
 
-	httpReq, err := http.NewRequest("POST", provider.BaseURL+"/v1/chat/completions",
+	// 构造上游 URL（处理 /v1 重复问题）
+	upstreamURL := provider.BaseURL + "/v1/chat/completions"
+	if strings.HasSuffix(provider.BaseURL, "/v1") {
+		upstreamURL = provider.BaseURL + "/chat/completions"
+	}
+
+	httpReq, err := http.NewRequest("POST", upstreamURL,
 		bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", provider.APIKey)
+	httpReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
 
 	client := &http.Client{Timeout: time.Duration(extractBatch.TimeoutSec) * time.Second}
 	resp, err := client.Do(httpReq)

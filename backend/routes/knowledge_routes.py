@@ -1,14 +1,44 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """企业知识库 API — 知识列表/搜索/统计/域名管理"""
 import json
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 from extensions import db
+from i18n.messages import get_message
 from models.knowledge import (
     KnowledgeRaw, KnowledgeItem, KnowledgeDomain,
-    KnowledgeDomainRisk, KnowledgeAnalysis,
+    KnowledgeDomainRisk, KnowledgeAnalysis, AuditLog,
 )
+from models.wr_models import SystemSetting
 
 knowledge_bp = Blueprint('knowledge', __name__)
+
+
+@knowledge_bp.route('/status')
+def knowledge_status():
+    """Return whether the Knowledge Base feature has been enabled."""
+    enabled = bool(SystemSetting.get('knowledge_enabled', False))
+    return jsonify({'enabled': enabled})
+
+
+@knowledge_bp.route('/enable', methods=['POST'])
+def enable_knowledge():
+    """Enable the Knowledge Base feature after explicit confirmation."""
+    data = request.get_json(silent=True) or {}
+    if not data.get('confirmed'):
+        return jsonify({'enabled': False, 'error': 'Confirmation is required'}), 400
+
+    SystemSetting.set(
+        'knowledge_enabled',
+        True,
+        value_type='bool',
+        description='Enable the Knowledge Base module',
+        category='knowledge',
+        editable=True,
+    )
+    return jsonify({'enabled': True})
 
 
 # ============================================================
@@ -117,7 +147,7 @@ def get_raw(raw_id):
     """单条 raw 详情"""
     item = KnowledgeRaw.query.get(raw_id)
     if not item:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     return jsonify(item.to_dict())
 
 
@@ -172,7 +202,7 @@ def get_item(item_id):
     """单条知识详情"""
     item = KnowledgeItem.query.get(item_id)
     if not item:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     return jsonify(item.to_dict())
 
 
@@ -231,17 +261,17 @@ def create_domain():
     """创建业务域"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     code = (data.get('domain_code') or '').strip()
     name = (data.get('domain_name') or '').strip()
     if not code or not name:
-        return jsonify({'error': 'domain_code 和 domain_name 不能为空'}), 400
+        return jsonify({'error': get_message('domain_name_required', request)}), 400
 
     # 检查重复
     existing = KnowledgeDomain.query.filter_by(domain_code=code).first()
     if existing:
-        return jsonify({'error': f'域代码 {code} 已存在'}), 400
+        return jsonify({'error': get_message('domain_code_exists', request).format(code=code)}), 400
 
     domain = KnowledgeDomain(
         domain_code=code,
@@ -254,7 +284,7 @@ def create_domain():
     db.session.add(domain)
     db.session.commit()
 
-    return jsonify({'message': '业务域已创建', 'domain': domain.to_dict()}), 201
+    return jsonify({'message': get_message('domain_created', request), 'domain': domain.to_dict()}), 201
 
 
 @knowledge_bp.route('/domains/<domain_code>')
@@ -262,7 +292,7 @@ def get_domain(domain_code):
     """业务域详情"""
     domain = KnowledgeDomain.query.get(domain_code)
     if not domain:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     return jsonify(domain.to_dict())
 
 
@@ -271,11 +301,11 @@ def update_domain(domain_code):
     """更新业务域"""
     domain = KnowledgeDomain.query.get(domain_code)
     if not domain:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'domain_name' in data:
         domain.domain_name = data['domain_name'].strip()
@@ -289,7 +319,7 @@ def update_domain(domain_code):
         domain.description = data['description']
 
     db.session.commit()
-    return jsonify({'message': '业务域已更新', 'domain': domain.to_dict()})
+    return jsonify({'message': get_message('domain_updated', request), 'domain': domain.to_dict()})
 
 
 @knowledge_bp.route('/domains/<domain_code>/confirm', methods=['POST'])
@@ -297,13 +327,13 @@ def confirm_domain(domain_code):
     """确认业务域（pending → active）"""
     domain = KnowledgeDomain.query.get(domain_code)
     if not domain:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     domain.status = 'active'
     domain.confirmed_at = datetime.utcnow()
     db.session.commit()
 
-    return jsonify({'message': '业务域已确认', 'domain': domain.to_dict()})
+    return jsonify({'message': get_message('domain_confirmed', request), 'domain': domain.to_dict()})
 
 
 @knowledge_bp.route('/domains/<domain_code>/merge', methods=['POST'])
@@ -311,16 +341,16 @@ def merge_domain(domain_code):
     """合并业务域：将当前域合并到目标域"""
     domain = KnowledgeDomain.query.get(domain_code)
     if not domain:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     data = request.get_json()
     target_code = data.get('target_code', '').strip()
     if not target_code:
-        return jsonify({'error': 'target_code 不能为空'}), 400
+        return jsonify({'error': get_message('field_required_target_code', request)}), 400
 
     target = KnowledgeDomain.query.get(target_code)
     if not target:
-        return jsonify({'error': f'目标域 {target_code} 不存在'}), 404
+        return jsonify({'error': get_message('target_domain_not_found', request).format(target_code=target_code)}), 404
 
     # 将该域下的知识条目迁移到目标域
     migrated = KnowledgeItem.query.filter_by(domain_code=domain_code).update(
@@ -334,7 +364,7 @@ def merge_domain(domain_code):
     db.session.commit()
 
     return jsonify({
-        'message': f'已合并到 {target.domain_name}，迁移 {migrated} 条知识',
+        'message': get_message('merged_to_domain', request).format(domain=target.domain_name, migrated=migrated),
         'migrated': migrated,
         'domain': domain.to_dict(),
     })
@@ -345,7 +375,7 @@ def domain_stats(domain_code):
     """业务域统计信息"""
     domain = KnowledgeDomain.query.get(domain_code)
     if not domain:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     # 知识条目统计
     from sqlalchemy import func
@@ -392,7 +422,7 @@ def get_domain_risk(domain_code):
     """单个领域风险配置"""
     config = KnowledgeDomainRisk.query.get(domain_code)
     if not config:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     return jsonify(config.to_dict())
 
 
@@ -401,11 +431,11 @@ def update_domain_risk(domain_code):
     """更新领域风险配置"""
     config = KnowledgeDomainRisk.query.get(domain_code)
     if not config:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'risk_level' in data:
         config.risk_level = data['risk_level']
@@ -423,12 +453,60 @@ def update_domain_risk(domain_code):
         config.allow_procedural_injection = bool(data['allow_procedural_injection'])
 
     db.session.commit()
-    return jsonify({'message': '风险配置已更新', 'config': config.to_dict()})
+    return jsonify({'message': get_message('risk_config_updated', request), 'config': config.to_dict()})
 
 
 # ============================================================
 # 分析记录
 # ============================================================
+
+def _audit_log_to_dict(item):
+    detail = item.detail
+    if detail:
+        try:
+            detail = json.loads(detail)
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        'id': item.id,
+        'action': item.action,
+        'resource_type': item.resource_type,
+        'resource_id': item.resource_id,
+        'token_id': item.token_id,
+        'detail': detail,
+        'client_ip': item.client_ip,
+        'created_at': item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+@knowledge_bp.route('/audit_log')
+def audit_log():
+    """Audit log list."""
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = request.args.get('per_page', 20, type=int)
+    per_page = max(1, min(per_page, 100))
+
+    q = AuditLog.query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+    total = q.count()
+    items = q.offset((page - 1) * per_page).limit(per_page).all()
+
+    return jsonify({
+        'items': [_audit_log_to_dict(item) for item in items],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+    })
+
+
+@knowledge_bp.route('/audit_log/<int:log_id>')
+def get_audit_log(log_id):
+    """Audit log detail."""
+    item = AuditLog.query.get(log_id)
+    if not item:
+        return jsonify({'error': get_message('not_found', request)}), 404
+    return jsonify(_audit_log_to_dict(item))
+
 
 @knowledge_bp.route('/analyses')
 def list_analyses():
@@ -459,7 +537,7 @@ def get_analysis(task_id):
     """分析详情"""
     item = KnowledgeAnalysis.query.get(task_id)
     if not item:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     return jsonify(item.to_dict())
 
 
@@ -475,11 +553,11 @@ def analyze_knowledge():
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     domain_code = data.get('domain_code', '').strip()
     if not domain_code:
-        return jsonify({'error': 'domain_code 不能为空'}), 400
+        return jsonify({'error': get_message('domain_code_required', request)}), 400
 
     # 调用 wr-proxy 的分析端点
     proxy_url = os.environ.get('WR_PROXY_URL', 'http://127.0.0.1:5051')
@@ -495,7 +573,7 @@ def analyze_knowledge():
         # wr-proxy 不可用时，返回本地统计
         items = KnowledgeItem.query.filter_by(domain_code=domain_code).all()
         return jsonify({
-            'result': f'分析服务暂不可用。该域目前有 {len(items)} 条知识。',
+            'result': get_message('analysis_service_unavailable', request).format(n=len(items)),
             'status': 'local_fallback',
             'item_count': len(items),
         })
@@ -521,7 +599,7 @@ def extract_knowledge():
         return jsonify(result), resp.status_code
     except Exception as e:
         return jsonify({
-            'error': f'提取服务不可用: {e}',
+            'error': get_message('extract_service_unavailable', request).format(e=e),
         }), 503
 
 
@@ -561,7 +639,7 @@ def approve_item(item_id):
     """审核通过：标记为 verified"""
     item = KnowledgeItem.query.get(item_id)
     if not item:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     data = request.get_json() or {}
 
@@ -577,7 +655,7 @@ def approve_item(item_id):
     item.verified_at = datetime.utcnow()
     db.session.commit()
 
-    return jsonify({'message': '已审核通过', 'item': item.to_dict()})
+    return jsonify({'message': get_message('approved', request), 'item': item.to_dict()})
 
 
 @knowledge_bp.route('/reviews/<int:item_id>/reject', methods=['POST'])
@@ -585,13 +663,13 @@ def reject_item(item_id):
     """审核拒绝：标记为 rejected"""
     item = KnowledgeItem.query.get(item_id)
     if not item:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     item.verification = 'rejected'
     item.verified_at = datetime.utcnow()
     db.session.commit()
 
-    return jsonify({'message': '已拒绝', 'item': item.to_dict()})
+    return jsonify({'message': get_message('rejected', request), 'item': item.to_dict()})
 
 
 @knowledge_bp.route('/reviews/<int:item_id>/edit', methods=['PUT'])
@@ -599,11 +677,11 @@ def edit_review_item(item_id):
     """编辑审核中的知识条目"""
     item = KnowledgeItem.query.get(item_id)
     if not item:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'title' in data:
         item.title = data['title'].strip()
@@ -617,7 +695,7 @@ def edit_review_item(item_id):
         item.type = data['type']
 
     db.session.commit()
-    return jsonify({'message': '已更新', 'item': item.to_dict()})
+    return jsonify({'message': get_message('updated', request), 'item': item.to_dict()})
 
 
 @knowledge_bp.route('/reviews/batch-approve', methods=['POST'])
@@ -625,7 +703,7 @@ def batch_approve():
     """批量审核通过"""
     data = request.get_json()
     if not data or 'ids' not in data:
-        return jsonify({'error': 'ids 不能为空'}), 400
+        return jsonify({'error': get_message('field_required_ids', request)}), 400
 
     ids = data.get('ids', [])
     count = KnowledgeItem.query.filter(
@@ -637,7 +715,7 @@ def batch_approve():
     }, synchronize_session='fetch')
 
     db.session.commit()
-    return jsonify({'message': f'已批量通过 {count} 条', 'count': count})
+    return jsonify({'message': get_message('batch_approved', request).format(count=count), 'count': count})
 
 
 # ============================================================
@@ -663,7 +741,7 @@ def rag_feedback():
         )
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'RAG 反馈服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('rag_feedback_service_unavailable', request).format(e=e)}), 503
 
 
 @knowledge_bp.route('/rag_feedback_stats')
@@ -674,7 +752,7 @@ def rag_feedback_stats():
         resp = req_lib.get(_proxy_url('/admin/knowledge/rag_feedback_stats'), timeout=10)
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'RAG 统计服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('rag_stats_service_unavailable', request).format(e=e)}), 503
 
 
 @knowledge_bp.route('/memory_list')
@@ -686,7 +764,7 @@ def memory_list():
         resp = req_lib.get(_proxy_url('/admin/knowledge/memory_list'), params=params, timeout=10)
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'记忆服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('memory_service_unavailable', request).format(e=e)}), 503
 
 
 @knowledge_bp.route('/memory/<int:memory_id>', methods=['DELETE'])
@@ -696,10 +774,10 @@ def memory_delete(memory_id):
     token_id = request.args.get('token_id', 0, type=int)
     mem = AgentMemory.query.get(memory_id)
     if not mem or (token_id and mem.token_id != token_id):
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     db.session.delete(mem)
     db.session.commit()
-    return jsonify({'message': '记忆已删除'})
+    return jsonify({'message': get_message('memory_deleted', request)})
 
 
 @knowledge_bp.route('/memory/<int:memory_id>', methods=['PUT'])
@@ -708,11 +786,11 @@ def memory_update(memory_id):
     from models.knowledge import AgentMemory
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
     token_id = request.args.get('token_id', 0, type=int)
     mem = AgentMemory.query.get(memory_id)
     if not mem or (token_id and mem.token_id != token_id):
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     if 'content' in data:
         mem.content = data['content']
     if 'title' in data:
@@ -722,7 +800,7 @@ def memory_update(memory_id):
     if 'expires_at' in data and data['expires_at']:
         mem.expires_at = data['expires_at']
     db.session.commit()
-    return jsonify({'message': '记忆已更新', 'memory': mem.to_dict()})
+    return jsonify({'message': get_message('memory_updated', request), 'memory': mem.to_dict()})
 
 
 @knowledge_bp.route('/knowledge_export')
@@ -734,7 +812,7 @@ def knowledge_export():
         resp = req_lib.get(_proxy_url('/admin/knowledge/export'), params=params, timeout=30)
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'导出服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('export_service_unavailable', request).format(e=e)}), 503
 
 
 @knowledge_bp.route('/conversation_compress', methods=['POST'])
@@ -749,7 +827,7 @@ def conversation_compress():
         )
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'压缩服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('compress_service_unavailable', request).format(e=e)}), 503
 
 
 @knowledge_bp.route('/rag_stats')
@@ -760,7 +838,7 @@ def rag_stats():
         resp = req_lib.get(_proxy_url('/admin/knowledge/rag_stats'), timeout=10)
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'RAG 统计服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('rag_stats_service_unavailable', request).format(e=e)}), 503
 
 
 @knowledge_bp.route('/embedding_backfill', methods=['POST'])
@@ -776,4 +854,4 @@ def embedding_backfill():
         )
         return jsonify(resp.json()), resp.status_code
     except Exception as e:
-        return jsonify({'error': f'向量服务不可用: {e}'}), 503
+        return jsonify({'error': get_message('vector_service_unavailable', request).format(e=e)}), 503

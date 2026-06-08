@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 鉴权模块：Token 验证、过期检查、配额检查、限速
@@ -17,7 +20,7 @@ type RateLimiter struct {
 }
 
 type rateCounter struct {
-	count    int
+	count       int
 	windowStart time.Time
 }
 
@@ -145,4 +148,39 @@ func isIPAllowed(ip string, whitelistJSON string) bool {
 		}
 	}
 	return false
+}
+
+// authenticateRequest 验证请求中的 Authorization Token（包装 Authenticate）
+func authenticateRequest(r *http.Request) (*Token, *AuthResult) {
+	key := extractBearerToken(r)
+	if key == "" {
+		return nil, &AuthResult{Error: "缺少 Authorization 头", StatusCode: 401}
+	}
+
+	token, err := LoadTokenByKey(key)
+	if err != nil || token == nil {
+		return nil, &AuthResult{Error: "无效的 Token", StatusCode: 401}
+	}
+
+	result := Authenticate(r, token)
+	if result.Error != "" {
+		return nil, result
+	}
+	return token, nil
+}
+
+// extractBearerToken 从请求头中提取 Bearer Token
+func extractBearerToken(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		// 也检查 X-Api-Key
+		return r.Header.Get("X-Api-Key")
+	}
+	if strings.HasPrefix(auth, "Bearer ") {
+		return auth[7:]
+	}
+	if strings.HasPrefix(auth, "sk-") {
+		return auth
+	}
+	return auth
 }

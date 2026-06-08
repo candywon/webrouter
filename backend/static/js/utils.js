@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* 工具函数 */
 
 function formatNumber(n) {
@@ -14,16 +17,16 @@ function formatYuan(cents) {
 
 function statusBadge(status) {
   const map = {
-    healthy: ['● 正常', 'badge-healthy'],
-    warning: ['⚠ 警告', 'badge-warning'],
-    dead: ['✕ 失效', 'badge-dead'],
-    rate_limited: ['⏱ 限速', 'badge-warning'],
-    auth_failed: ['✕ 认证失败', 'badge-dead'],
-    timeout: ['⏱ 超时', 'badge-warning'],
-    unhealthy: ['✕ 异常', 'badge-dead'],
-    disabled: ['⏸ 已禁用', 'badge-unknown'],
-    unknown: ['? 未知', 'badge-unknown'],
-    unchecked: ['○ 未检测', 'badge-unknown'],
+    healthy: [I18n.t("common.statusHealthy"), 'badge-healthy'],
+    warning: [I18n.t("common.statusWarning"), 'badge-warning'],
+    dead: [I18n.t("common.statusDead"), 'badge-dead'],
+    rate_limited: [I18n.t("common.statusRateLimited"), 'badge-warning'],
+    auth_failed: [I18n.t("common.statusAuthFailed"), 'badge-dead'],
+    timeout: [I18n.t("common.statusTimeout"), 'badge-warning'],
+    unhealthy: [I18n.t("common.statusUnhealthy"), 'badge-dead'],
+    disabled: [I18n.t("common.statusDisabled"), 'badge-unknown'],
+    unknown: [I18n.t("common.statusUnknown"), 'badge-unknown'],
+    unchecked: [I18n.t("common.statusUnchecked"), 'badge-unknown'],
   };
   const [text, cls] = map[status] || ['? ' + status, 'badge-unknown'];
   return `<span class="badge ${cls}">${text}</span>`;
@@ -31,7 +34,7 @@ function statusBadge(status) {
 
 function copyToClipboard(text) {
   navigator.clipboard.writeText(text).then(() => {
-    showToast('已复制到剪贴板');
+    showToast(I18n.t("common.copiedToClipboard"));
   });
 }
 
@@ -63,9 +66,9 @@ function esc(str) {
 
 // 格式化冷却倒计时
 function formatCooldown(secs) {
-  if (secs <= 0) return '已过期';
-  if (secs < 60) return secs + '秒';
+  if (secs <= 0) return I18n.t('common.expired');
+  if (secs < 60) return secs + I18n.t("common.seconds");
   const m = Math.floor(secs / 60);
   const s = secs % 60;
-  return m + '分' + s + '秒';
+  return m + I18n.t('common.minutes') + s + I18n.t("common.seconds");
 }

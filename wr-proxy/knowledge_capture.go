@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -8,12 +11,18 @@ import (
 
 // 知识捕获全局变量
 var (
-	knowledgeCh    chan KnowledgeEntry
-	knowledgeOnce  sync.Once
-	knowledgeStats CaptureStats
+	knowledgeCh      chan KnowledgeEntry
+	knowledgeOnce    sync.Once
+	knowledgeStats   CaptureStats
 	knowledgeStatsMu sync.Mutex
-	knowledgeEnabled bool // 全局开关
 )
+
+// IsKnowledgeEnabled 动态读取知识库开关（从 wr_system_settings）
+func IsKnowledgeEnabled() bool {
+	v := LoadSetting("knowledge_capture_enabled", false)
+	b, _ := v.(bool)
+	return b
+}
 
 // InitKnowledge 初始化知识捕获模块（带缓冲 channel + worker）
 func InitKnowledge() {
@@ -29,7 +38,7 @@ func InitKnowledge() {
 func DeliverKnowledge(token *Token, reqID, model, endpoint, clientIP string,
 	sanitizedPrompt, sanitizedResponse string, body []byte) {
 
-	if !knowledgeEnabled {
+	if !IsKnowledgeEnabled() {
 		return
 	}
 	if !token.KnowledgeCaptureEnabled {
@@ -104,13 +113,18 @@ func processKnowledgeEntry(entry KnowledgeEntry) {
 		return
 	}
 
+	// 审计日志：知识捕获
+	LogAudit(AuditKnowledgeCapture, AuditResourceRaw, entry.RequestID, entry.TokenID, map[string]interface{}{
+		"model":    entry.Model,
+		"turns":    entry.TurnCount,
+		"token":    entry.TokenName,
+		"endpoint": entry.Endpoint,
+	}, entry.ClientIP)
+
 	knowledgeStatsMu.Lock()
 	knowledgeStats.TotalSaved++
 	knowledgeStats.TodaySaved++
 	knowledgeStatsMu.Unlock()
-
-	LogInfo("[knowledge] saved entry: reqID=%s token=%d turns=%d respLen=%d",
-		entry.RequestID, entry.TokenID, entry.TurnCount, len(entry.Response))
 }
 
 // GetCaptureStats 获取捕获统计信息

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """Provider Channel 渠道模型 — 一个 Provider 下挂多个 URL/Key/模型组合"""
 import json
 from extensions import db

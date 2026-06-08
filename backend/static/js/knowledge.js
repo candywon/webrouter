@@ -1,28 +1,97 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* 企业知识库管理页面 */
 const KnowledgePage = {
   activeTab: 'stats',
+  _enabled: null, // null = 未检查, true/false
 
-  load() {
+  async load() {
+    // 先检查知识库是否已开通
+    try {
+      const res = await fetch('/api/knowledge/status');
+      const data = await res.json();
+      this._enabled = data.enabled;
+    } catch (e) {
+      this._enabled = false;
+    }
+
+    if (!this._enabled) {
+      this.renderOnboarding();
+      return;
+    }
+
     this.render();
     this.loadStats();
+  },
+
+  renderOnboarding() {
+    const el = document.getElementById('knowledge-page-content');
+    el.innerHTML = `
+      <div class="page-header">
+        <span class="page-title">${I18n.t('knowledge.enterpriseKnowledge')}</span>
+      </div>
+      <div class="empty-state" style="padding:60px 20px;text-align:center;">
+        <div class="icon" style="font-size:64px;margin-bottom:20px;">🔐</div>
+        <h2 style="margin-bottom:12px;color:var(--text-primary);">${I18n.t('knowledge.notEnabled')}</h2>
+        <p style="color:var(--text-secondary);max-width:480px;margin:0 auto 8px;line-height:1.6;">
+          ${I18n.t('knowledge.onboardingDesc')}
+        </p>
+        <p style="color:var(--text-muted);font-size:13px;max-width:480px;margin:0 auto 24px;">
+          ${I18n.t('knowledge.dataLocal')}
+        </p>
+        <button class="btn-primary" style="font-size:15px;padding:10px 32px;"
+                onclick="KnowledgePage.enableKnowledge()">${I18n.t('knowledge.enableBtn')}</button>
+      </div>
+    `;
+  },
+
+  async enableKnowledge() {
+    // 第一次：请求确认
+    if (!confirm(I18n.t('knowledge.confirmEnable'))) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/knowledge/enable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.enabled) {
+        this._enabled = true;
+        this.render();
+        this.loadStats();
+        if (typeof showToast === 'function') showToast(I18n.t("knowledge.enabled"));
+      }
+    } catch (e) {
+      alert(I18n.t("knowledge.enableFailed") + (e.message || I18n.t("common.networkError")));
+    }
   },
 
   render() {
     const el = document.getElementById('knowledge-page-content');
     el.innerHTML = `
       <div class="page-header">
-        <span class="page-title">企业知识库</span>
+        <span class="page-title">${I18n.t('knowledge.enterpriseKnowledge')}</span>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('stats')">捕获统计</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('raw')">原始对话</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('items')">知识条目</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('reviews')">审核队列</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('domains')">业务域</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyze')">单域分析</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyses')">分析记录</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('extract')">知识提取</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('search')">搜索</button>
-          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('memories')">记忆管理</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('stats')">${I18n.t('knowledge.captureStats')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('raw')">${I18n.t('knowledge.rawDialogs')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('items')">${I18n.t('knowledge.knowledgeItems')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('reviews')">${I18n.t('knowledge.reviewQueue')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('domains')">${I18n.t('knowledge.domains')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyze')">${I18n.t('knowledge.singleDomainAnalysis')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('analyses')">${I18n.t('knowledge.analysisRecords')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('extract')">${I18n.t('knowledge.extract')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('search')">${I18n.t('common.search')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('memories')">${I18n.t('knowledge.memoryManagement')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('compliance')">${I18n.t('knowledge.compliance')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('quality')">${I18n.t('knowledge.searchQuality')}</button>
+          <button class="btn btn-sm" onclick="KnowledgePage.switchTab('audit')">${I18n.t('knowledge.auditLog')}</button>
         </div>
       </div>
       <div id="knowledge-tab-content"></div>
@@ -43,6 +112,9 @@ const KnowledgePage = {
       case 'extract': this.renderExtract(); break;
       case 'search': this.renderSearch(); break;
       case 'memories': this.loadMemories(1); break;
+      case 'compliance': this.renderCompliance(); break;
+      case 'quality': this.loadQuality(); break;
+      case 'audit': this.loadAuditLog(1); break;
     }
   },
 
@@ -58,46 +130,46 @@ const KnowledgePage = {
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-value">${data.raw.total}</div>
-            <div class="stat-label">原始对话总数</div>
+            <div class="stat-label">${I18n.t('knowledge.rawTotal')}</div>
           </div>
           <div class="stat-card">
             <div class="stat-value" style="color:#f59e0b">${data.raw.pending}</div>
-            <div class="stat-label">待处理</div>
+            <div class="stat-label">${I18n.t('knowledge.pending')}</div>
           </div>
           <div class="stat-card">
             <div class="stat-value" style="color:#10b981">${data.raw.done}</div>
-            <div class="stat-label">已处理</div>
+            <div class="stat-label">${I18n.t('knowledge.done')}</div>
           </div>
           <div class="stat-card">
             <div class="stat-value">${data.raw.today}</div>
-            <div class="stat-label">今日新增</div>
+            <div class="stat-label">${I18n.t('knowledge.todayNew')}</div>
           </div>
           <div class="stat-card">
             <div class="stat-value" style="color:#8b5cf6">${data.items.total}</div>
-            <div class="stat-label">知识条目</div>
+            <div class="stat-label">${I18n.t('knowledge.knowledgeItems')}</div>
           </div>
           <div class="stat-card">
             <div class="stat-value">${data.domains.total}</div>
-            <div class="stat-label">业务域</div>
+            <div class="stat-label">${I18n.t('knowledge.domains')}</div>
           </div>
         </div>
         <div class="card" style="margin-top:16px">
-          <div class="card-header"><span class="card-title">知识条目分布</span></div>
+          <div class="card-header"><span class="card-title">${I18n.t('knowledge.itemsDistribution')}</span></div>
           <div style="padding:20px">
-            <p>按类型：${this.objToText(data.items.by_type || {})}</p>
-            <p style="margin-top:8px">按验证状态：${this.objToText(data.items.by_verification || {})}</p>
+            <p>${I18n.t('knowledge.byType')}${this.objToText(data.items.by_type || {})}</p>
+            <p style="margin-top:8px">${I18n.t('knowledge.byVerification')}${this.objToText(data.items.by_verification || {})}</p>
           </div>
         </div>
       `;
     } catch (e) {
       document.getElementById('knowledge-tab-content').innerHTML =
-        `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+        `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
     }
   },
 
   objToText(obj) {
     const entries = Object.entries(obj);
-    if (!entries.length) return '无数据';
+    if (!entries.length) return I18n.t('common.noData');
     return entries.map(([k, v]) => `${k}: ${v}`).join('、');
   },
 
@@ -106,23 +178,23 @@ const KnowledgePage = {
   // ============================================================
   async loadRaw(page = 1) {
     const el = document.getElementById('knowledge-tab-content');
-    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>${I18n.t('common.loading')}</p></div>`;
     try {
       const res = await fetch(`/api/knowledge/raw?page=${page}&per_page=20`);
       const data = await res.json();
       if (!data.items.length) {
-        el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无原始对话数据</p></div>';
+        el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>${I18n.t('knowledge.noRawData')}</p></div>`;
         return;
       }
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">原始对话 (${data.total} 条)</span>
-            <span class="text-sm text-muted">第 ${data.page} 页 / 共 ${Math.ceil(data.total / data.per_page) || 1} 页</span>
+            <span class="card-title">${I18n.t('knowledge.rawDialogsWith', {count: data.total})}</span>
+            <span class="text-sm text-muted">${I18n.t('common.pageOf', {page: data.page, total: Math.ceil(data.total / data.per_page) || 1})}</span>
           </div>
           <table class="table">
             <thead><tr>
-              <th>ID</th><th>Token</th><th>模型</th><th>轮数</th><th>状态</th><th>时间</th><th>操作</th>
+              <th>${I18n.t('common.id')}</th><th>${I18n.t('common.tokens')}</th><th>${I18n.t('common.model')}</th><th>${I18n.t('knowledge.turns')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('common.time')}</th><th>${I18n.t('common.actions')}</th>
             </tr></thead>
             <tbody>
               ${data.items.map(i => `<tr>
@@ -132,18 +204,18 @@ const KnowledgePage = {
                 <td>${i.turn_count}</td>
                 <td><span class="badge badge-${this.statusColor(i.status)}">${i.status}</span></td>
                 <td class="text-sm text-muted">${i.created_at ? i.created_at.slice(0, 19) : '-'}</td>
-                <td><button class="btn btn-sm" onclick="KnowledgePage.showRawDetail(${i.id})">查看</button></td>
+                <td><button class="btn btn-sm" onclick="KnowledgePage.showRawDetail(${i.id})">${I18n.t('common.view')}</button></td>
               </tr>`).join('')}
             </tbody>
           </table>
           <div style="padding:12px 20px;display:flex;gap:8px;justify-content:center">
-            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadRaw(${data.page - 1})">上一页</button>` : ''}
-            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadRaw(${data.page + 1})">下一页</button>` : ''}
+            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadRaw(${data.page - 1})">${I18n.t('common.prevPage')}</button>` : ''}
+            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadRaw(${data.page + 1})">${I18n.t('common.nextPage')}</button>` : ''}
           </div>
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
     }
   },
 
@@ -159,25 +231,25 @@ const KnowledgePage = {
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">原始对话详情 #${d.id}</span>
-            <button class="btn btn-sm" onclick="KnowledgePage.loadRaw(1)">返回列表</button>
+            <span class="card-title">${I18n.t('knowledge.rawDialogDetail')}${d.id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadRaw(1)">${I18n.t('common.backToList')}</button>
           </div>
           <div style="padding:20px">
-            <p><b>Token:</b> ${d.token_name} (ID: ${d.token_id})</p>
-            <p><b>模型:</b> <code>${d.model_name}</code></p>
-            <p><b>状态:</b> <span class="badge badge-${this.statusColor(d.status)}">${d.status}</span></p>
-            <p><b>对话轮数:</b> ${d.turn_count}</p>
-            <p><b>时间:</b> ${d.created_at ? d.created_at.slice(0, 19) : '-'}</p>
+            <p><b>${I18n.t('knowledge.tokenLabel')}</b> ${d.token_name} (ID: ${d.token_id})</p>
+            <p><b>${I18n.t('knowledge.modelLabel')}</b> <code>${d.model_name}</code></p>
+            <p><b>${I18n.t('knowledge.statusLabel')}</b> <span class="badge badge-${this.statusColor(d.status)}">${d.status}</span></p>
+            <p><b>${I18n.t('knowledge.turnCountLabel')}</b> ${d.turn_count}</p>
+            <p><b>${I18n.t('knowledge.timeLabel')}</b> ${d.created_at ? d.created_at.slice(0, 19) : '-'}</p>
             <hr>
-            <p><b>Prompt:</b></p>
+            <p><b>${I18n.t('knowledge.promptLabel')}</b></p>
             <pre style="max-height:200px;overflow:auto;white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:12px">${this.escapeHtml(d.prompt)}</pre>
-            <p><b>Response:</b></p>
+            <p><b>${I18n.t('knowledge.responseLabel')}</b></p>
             <pre style="max-height:300px;overflow:auto;white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:12px">${this.escapeHtml(d.response)}</pre>
           </div>
         </div>
       `;
     } catch (e) {
-      alert('加载详情失败: ' + e.message);
+      alert(I18n.t("tokens.loadDetailFailed") + e.message);
     }
   },
 
@@ -194,29 +266,29 @@ const KnowledgePage = {
     } catch (e) {}
 
     const el = document.getElementById('knowledge-tab-content');
-    const deptFilter = departments.length ? `<label style="font-size:12px;color:var(--text-muted)">部门:</label>
+    const deptFilter = departments.length ? `<label style="font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.department')}:</label>
       <select id="items-dept-filter" onchange="KnowledgePage.loadItems(1)" style="padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
-        <option value="">全部</option>
+        <option value="">${I18n.t('common.all')}</option>
         ${departments.map(d => `<option value="${d}">${d}</option>`).join('')}
       </select>` : '';
-    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>${I18n.t('common.loading')}</p></div>`;
     try {
       const dept = document.getElementById('items-dept-filter')?.value || '';
       const res = await fetch(`/api/knowledge/items?page=${page}&per_page=20${dept ? '&department=' + encodeURIComponent(dept) : ''}`);
       const data = await res.json();
       if (!data.items.length) {
-        el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无知识条目</p></div>';
+        el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>${I18n.t('knowledge.noItems')}</p></div>`;
         return;
       }
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">知识条目 (${data.total} 条)</span>
+            <span class="card-title">${I18n.t('knowledge.itemsWith', {total: data.total})}</span>
             ${deptFilter ? '<div style="display:flex;gap:8px;align-items:center">' + deptFilter + '</div>' : ''}
           </div>
           <table class="table">
             <thead><tr>
-              <th>ID</th><th>类型</th><th>标题</th><th>部门</th><th>领域</th><th>置信度</th><th>验证</th><th>时间</th>
+              <th>${I18n.t('common.id')}</th><th>${I18n.t('common.type')}</th><th>${I18n.t('common.title')}</th><th>${I18n.t('knowledge.department')}</th><th>${I18n.t('knowledge.domain')}</th><th>${I18n.t('knowledge.confidence')}</th><th>${I18n.t('knowledge.verification')}</th><th>${I18n.t('common.time')}</th>
             </tr></thead>
             <tbody>
               ${data.items.map(i => `<tr>
@@ -232,13 +304,13 @@ const KnowledgePage = {
             </tbody>
           </table>
           <div style="padding:12px 20px;display:flex;gap:8px;justify-content:center">
-            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadItems(${data.page - 1})">上一页</button>` : ''}
-            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadItems(${data.page + 1})">下一页</button>` : ''}
+            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadItems(${data.page - 1})">${I18n.t('common.prevPage')}</button>` : ''}
+            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadItems(${data.page + 1})">${I18n.t('common.nextPage')}</button>` : ''}
           </div>
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
     }
   },
 
@@ -254,24 +326,24 @@ const KnowledgePage = {
   // ============================================================
   async loadReviews(page = 1) {
     const el = document.getElementById('knowledge-tab-content');
-    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>${I18n.t('common.loading')}</p></div>`;
     try {
       const res = await fetch(`/api/knowledge/reviews?page=${page}&per_page=20`);
       const data = await res.json();
       if (!data.items.length) {
-        el.innerHTML = '<div class="empty-state"><div class="icon">✅</div><p>审核队列为空，所有知识条目已审核完毕</p></div>';
+        el.innerHTML = `<div class="empty-state"><div class="icon">✅</div><p>${I18n.t('knowledge.reviewEmpty')}</p></div>`;
         return;
       }
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">审核队列 (${data.total} 条待审)</span>
-            <button class="btn btn-sm" onclick="KnowledgePage.batchApprove()" style="color:#10b981">批量通过</button>
+            <span class="card-title">${I18n.t('knowledge.reviewQueueWith', {total: data.total})}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.batchApprove()" style="color:#10b981">${I18n.t('knowledge.batchApprove')}</button>
           </div>
           <table class="table">
             <thead><tr>
               <th><input type="checkbox" id="review-select-all" onchange="KnowledgePage.toggleAllReviews(this.checked)"/></th>
-              <th>ID</th><th>类型</th><th>标题</th><th>领域</th><th>置信度</th><th>时间</th><th>操作</th>
+              <th>${I18n.t('common.id')}</th><th>${I18n.t('common.type')}</th><th>${I18n.t('common.title')}</th><th>${I18n.t('knowledge.domain')}</th><th>${I18n.t('knowledge.confidence')}</th><th>${I18n.t('common.time')}</th><th>${I18n.t('common.actions')}</th>
             </tr></thead>
             <tbody>
               ${data.items.map(i => `<tr>
@@ -283,21 +355,21 @@ const KnowledgePage = {
                 <td>${(i.confidence * 100).toFixed(0)}%</td>
                 <td class="text-sm text-muted">${i.created_at ? i.created_at.slice(0, 10) : '-'}</td>
                 <td>
-                  <button class="btn btn-sm" onclick="KnowledgePage.showReviewEdit(${i.id})">编辑</button>
-                  <button class="btn btn-sm" style="color:#10b981" onclick="KnowledgePage.approveItem(${i.id})">通过</button>
-                  <button class="btn btn-sm" style="color:var(--color-danger)" onclick="KnowledgePage.rejectItem(${i.id})">拒绝</button>
+                  <button class="btn btn-sm" onclick="KnowledgePage.showReviewEdit(${i.id})">${I18n.t('common.edit')}</button>
+                  <button class="btn btn-sm" style="color:#10b981" onclick="KnowledgePage.approveItem(${i.id})">${I18n.t('knowledge.approve')}</button>
+                  <button class="btn btn-sm" style="color:var(--color-danger)" onclick="KnowledgePage.rejectItem(${i.id})">${I18n.t('knowledge.reject')}</button>
                 </td>
               </tr>`).join('')}
             </tbody>
           </table>
           <div style="padding:12px 20px;display:flex;gap:8px;justify-content:center">
-            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadReviews(${data.page - 1})">上一页</button>` : ''}
-            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadReviews(${data.page + 1})">下一页</button>` : ''}
+            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadReviews(${data.page - 1})">${I18n.t('common.prevPage')}</button>` : ''}
+            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadReviews(${data.page + 1})">${I18n.t('common.nextPage')}</button>` : ''}
           </div>
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
     }
   },
 
@@ -310,25 +382,25 @@ const KnowledgePage = {
   },
 
   async approveItem(id) {
-    if (!confirm('确认通过该知识条目？')) return;
+    if (!confirm(I18n.t("knowledge.confirmApprove"))) return;
     try {
       const res = await fetch(`/api/knowledge/reviews/${id}/approve`, { method: 'POST' });
       const data = await res.json();
-      if (data.error) { alert('审核失败：' + data.error); return; }
-      alert('已通过');
+      if (data.error) { alert(I18n.t("knowledge.reviewFailed") + data.error); return; }
+      alert(I18n.t("knowledge.approved"));
       this.loadReviews(1);
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   async rejectItem(id) {
-    if (!confirm('确认拒绝该知识条目？')) return;
+    if (!confirm(I18n.t("knowledge.confirmReject"))) return;
     try {
       const res = await fetch(`/api/knowledge/reviews/${id}/reject`, { method: 'POST' });
       const data = await res.json();
-      if (data.error) { alert('操作失败：' + data.error); return; }
-      alert('已拒绝');
+      if (data.error) { alert(I18n.t("knowledge.operationFailed") + data.error); return; }
+      alert(I18n.t("knowledge.rejected"));
       this.loadReviews(1);
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   async showReviewEdit(id) {
@@ -339,23 +411,23 @@ const KnowledgePage = {
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">编辑知识条目 #${id}</span>
-            <button class="btn btn-sm" onclick="KnowledgePage.loadReviews(1)">返回</button>
+            <span class="card-title">${I18n.t('knowledge.editItem')}${id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadReviews(1)">${I18n.t('common.back')}</button>
           </div>
           <div style="padding:20px">
             <div style="margin-bottom:12px">
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">标题</label>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('common.title')}</label>
               <input type="text" id="edit-item-title" value="${this.escapeHtml(item.title)}"
                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
             </div>
             <div style="margin-bottom:12px">
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">摘要</label>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.summary')}</label>
               <textarea id="edit-item-summary" rows="4"
                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">${this.escapeHtml(item.summary)}</textarea>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
               <div>
-                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">类型</label>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('common.type')}</label>
                 <select id="edit-item-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
                   <option value="factual" ${item.type==='factual'?'selected':''}>factual</option>
                   <option value="analytical" ${item.type==='analytical'?'selected':''}>analytical</option>
@@ -363,27 +435,27 @@ const KnowledgePage = {
                 </select>
               </div>
               <div>
-                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">置信度</label>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.confidence')}</label>
                 <input type="number" id="edit-item-confidence" value="${item.confidence}" min="0" max="1" step="0.01"
                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
               </div>
               <div>
-                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">领域</label>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.domain')}</label>
                 <input type="text" id="edit-item-domain" value="${item.domain_code || ''}"
                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
               </div>
             </div>
             <hr style="margin:16px 0;border-color:var(--border)"/>
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">原始引用：</p>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${I18n.t('knowledge.sourceQuote')}</p>
             <pre style="max-height:200px;overflow:auto;white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:12px">${this.escapeHtml(item.source_quote)}</pre>
             <div style="margin-top:16px;display:flex;gap:8px">
-              <button class="btn" onclick="KnowledgePage.saveReviewEdit(${id})">保存</button>
-              <button class="btn" onclick="KnowledgePage.loadReviews(1)">取消</button>
+              <button class="btn" onclick="KnowledgePage.saveReviewEdit(${id})">${I18n.t('common.save')}</button>
+              <button class="btn" onclick="KnowledgePage.loadReviews(1)">${I18n.t('common.cancel')}</button>
             </div>
           </div>
         </div>
       `;
-    } catch (e) { alert('加载失败：' + e.message); }
+    } catch (e) { alert(I18n.t('common.loadFailed') + '：' + e.message); }
   },
 
   async saveReviewEdit(id) {
@@ -398,16 +470,16 @@ const KnowledgePage = {
         body: JSON.stringify({ title, summary, type, confidence }),
       });
       const data = await res.json();
-      if (data.error) { alert('保存失败：' + data.error); return; }
-      alert('已保存');
+      if (data.error) { alert(I18n.t('common.saveFailed') + data.error); return; }
+      alert(I18n.t("knowledge.saved"));
       this.loadReviews(1);
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   async batchApprove() {
     const ids = this.getSelectedReviewIds();
-    if (!ids.length) { alert('请先勾选要审核通过的条目'); return; }
-    if (!confirm(`确认批量通过 ${ids.length} 条知识？`)) return;
+    if (!ids.length) { alert(I18n.t("knowledge.selectItemsFirst")); return; }
+    if (!confirm(I18n.t('knowledge.confirmBatchApprove', {count: ids.length}))) return;
     try {
       const res = await fetch('/api/knowledge/reviews/batch-approve', {
         method: 'POST',
@@ -415,10 +487,10 @@ const KnowledgePage = {
         body: JSON.stringify({ ids }),
       });
       const data = await res.json();
-      if (data.error) { alert('批量审核失败：' + data.error); return; }
-      alert(data.message || '批量通过成功');
+      if (data.error) { alert(I18n.t("knowledge.batchReviewFailed") + data.error); return; }
+      alert(data.message || I18n.t("knowledge.batchApproveSuccess"));
       this.loadReviews(1);
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   // ============================================================
@@ -426,7 +498,7 @@ const KnowledgePage = {
   // ============================================================
   async loadDomains() {
     const el = document.getElementById('knowledge-tab-content');
-    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>${I18n.t('common.loading')}</p></div>`;
     try {
       const [domRes, riskRes] = await Promise.all([
         fetch('/api/knowledge/domains'),
@@ -440,12 +512,12 @@ const KnowledgePage = {
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">业务域 (${domData.total})</span>
-            <button class="btn btn-sm" onclick="KnowledgePage.showCreateDomain()">新增业务域</button>
+            <span class="card-title">${I18n.t('knowledge.domainsWith', {total: domData.total})}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.showCreateDomain()">${I18n.t('knowledge.addDomain')}</button>
           </div>
           <table class="table">
             <thead><tr>
-              <th>代码</th><th>名称</th><th>部门</th><th>状态</th><th>知识条数</th><th>风险等级</th><th>最小验证</th><th>操作</th>
+              <th>${I18n.t('knowledge.code')}</th><th>${I18n.t('common.name')}</th><th>${I18n.t('knowledge.department')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('knowledge.itemCount')}</th><th>${I18n.t('knowledge.riskLevel')}</th><th>${I18n.t('knowledge.minVerification')}</th><th>${I18n.t('common.actions')}</th>
             </tr></thead>
             <tbody>
               ${domData.domains.map(d => {
@@ -461,10 +533,10 @@ const KnowledgePage = {
                   <td>${r.risk_level || '-'}</td>
                   <td>${r.min_verification || '-'}</td>
                   <td>
-                    ${isPending ? `<button class="btn btn-sm" style="color:#10b981" onclick="KnowledgePage.confirmDomain('${d.domain_code}')">确认</button>` : ''}
-                    ${!isPending && !isMerged ? `<button class="btn btn-sm" onclick="KnowledgePage.showDomainStats('${d.domain_code}')">统计</button>
-                    <button class="btn btn-sm" onclick="KnowledgePage.showMergeDomain('${d.domain_code}')">合并</button>` : ''}
-                    ${isMerged ? `<span class="text-sm text-muted">已合并</span>` : ''}
+                    ${isPending ? `<button class="btn btn-sm" style="color:#10b981" onclick="KnowledgePage.confirmDomain('${d.domain_code}')">${I18n.t('common.confirm')}</button>` : ''}
+                    ${!isPending && !isMerged ? `<button class="btn btn-sm" onclick="KnowledgePage.showDomainStats('${d.domain_code}')">${I18n.t('knowledge.stats')}</button>
+                    <button class="btn btn-sm" onclick="KnowledgePage.showMergeDomain('${d.domain_code}')">${I18n.t('knowledge.merge')}</button>` : ''}
+                    ${isMerged ? `<span class="text-sm text-muted">${I18n.t('knowledge.merged')}</span>` : ''}
                   </td>
                 </tr>`;
               }).join('')}
@@ -481,7 +553,7 @@ const KnowledgePage = {
         }
       });
     } catch (e) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
     }
   },
 
@@ -495,14 +567,14 @@ const KnowledgePage = {
   },
 
   async confirmDomain(code) {
-    if (!confirm(`确认将业务域 "${code}" 标记为 active？`)) return;
+    if (!confirm(I18n.t('knowledge.confirmDomain', {code}))) return;
     try {
       const res = await fetch(`/api/knowledge/domains/${code}/confirm`, { method: 'POST' });
       const data = await res.json();
-      if (data.error) { alert('操作失败：' + data.error); return; }
-      alert('已确认');
+      if (data.error) { alert(I18n.t("knowledge.operationFailed") + data.error); return; }
+      alert(I18n.t("knowledge.confirmed"));
       this.loadDomains();
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   async showCreateDomain() {
@@ -510,33 +582,33 @@ const KnowledgePage = {
     panel.innerHTML = `
       <div class="card">
         <div class="card-header">
-          <span class="card-title">新增业务域</span>
-          <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">关闭</button>
+          <span class="card-title">${I18n.t('knowledge.addDomain')}</span>
+          <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">${I18n.t('common.close')}</button>
         </div>
         <div style="padding:20px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
             <div>
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">域代码 *</label>
-              <input type="text" id="new-domain-code" placeholder="如: legal"
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.domainCodeRequired')}</label>
+              <input type="text" id="new-domain-code" placeholder="${I18n.t('knowledge.domainCodePlaceholder')}"
                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
             </div>
             <div>
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">域名称 *</label>
-              <input type="text" id="new-domain-name" placeholder="如: 法务部"
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.domainNameRequired')}</label>
+              <input type="text" id="new-domain-name" placeholder="${I18n.t('knowledge.domainNamePlaceholder')}"
                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
             </div>
           </div>
           <div style="margin-bottom:16px">
-            <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">部门</label>
-            <input type="text" id="new-domain-dept" placeholder="如: 法务合规部"
+            <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.department')}</label>
+            <input type="text" id="new-domain-dept" placeholder="${I18n.t('knowledge.deptPlaceholder')}"
               style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
           </div>
           <div style="margin-bottom:16px">
-            <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">描述</label>
+            <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('common.description')}</label>
             <textarea id="new-domain-desc" rows="2"
               style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"></textarea>
           </div>
-          <button class="btn" onclick="KnowledgePage.createDomain()">创建</button>
+          <button class="btn" onclick="KnowledgePage.createDomain()">${I18n.t('common.create')}</button>
         </div>
       </div>
     `;
@@ -547,7 +619,7 @@ const KnowledgePage = {
     const name = document.getElementById('new-domain-name').value.trim();
     const dept = document.getElementById('new-domain-dept').value.trim();
     const desc = document.getElementById('new-domain-desc').value.trim();
-    if (!code || !name) { alert('域代码和名称不能为空'); return; }
+    if (!code || !name) { alert(I18n.t("knowledge.domainCodeNameRequired")); return; }
     try {
       const res = await fetch('/api/knowledge/domains', {
         method: 'POST',
@@ -555,41 +627,41 @@ const KnowledgePage = {
         body: JSON.stringify({ domain_code: code, domain_name: name, department: dept, description: desc }),
       });
       const data = await res.json();
-      if (data.error) { alert('创建失败：' + data.error); return; }
-      alert('创建成功');
+      if (data.error) { alert(I18n.t("knowledge.createFailed") + data.error); return; }
+      alert(I18n.t("knowledge.created"));
       this.loadDomains();
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   async showDomainStats(code) {
     const panel = document.getElementById('domain-action-panel');
-    panel.innerHTML = '<div class="card"><div style="padding:20px"><p class="text-muted">加载中...</p></div></div>';
+    panel.innerHTML = `<div class="card"><div style="padding:20px"><p class="text-muted">${I18n.t('common.loading')}</p></div></div>`;
     try {
       const res = await fetch(`/api/knowledge/domains/${code}/stats`);
       const data = await res.json();
       if (data.error) { panel.innerHTML = `<div class="card"><div style="padding:20px"><p style="color:var(--color-danger)">${data.error}</p></div></div>`; return; }
       const d = data.domain;
-      const ibt = Object.entries(data.items.by_type || {}).map(([k,v]) => `${k}: ${v}`).join('、') || '无';
-      const ibv = Object.entries(data.items.by_verification || {}).map(([k,v]) => `${k}: ${v}`).join('、') || '无';
+      const ibt = Object.entries(data.items.by_type || {}).map(([k,v]) => `${k}: ${v}`).join('、') || I18n.t('common.noData');
+      const ibv = Object.entries(data.items.by_verification || {}).map(([k,v]) => `${k}: ${v}`).join('、') || I18n.t('common.noData');
       panel.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">业务域统计 — ${d.domain_name} (${code})</span>
-            <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">关闭</button>
+            <span class="card-title">${I18n.t('knowledge.domainStats')}${d.domain_name} (${code})</span>
+            <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">${I18n.t('common.close')}</button>
           </div>
           <div style="padding:20px">
             <div class="stats-grid" style="margin-bottom:16px">
-              <div class="stat-card"><div class="stat-value">${data.items.total}</div><div class="stat-label">知识条目</div></div>
-              <div class="stat-card"><div class="stat-value" style="color:#f59e0b">${data.raw_pending}</div><div class="stat-label">待处理 Raw</div></div>
-              <div class="stat-card"><div class="stat-value">${d.sample_count || 0}</div><div class="stat-label">样本数</div></div>
+              <div class="stat-card"><div class="stat-value">${data.items.total}</div><div class="stat-label">${I18n.t('knowledge.knowledgeItems')}</div></div>
+              <div class="stat-card"><div class="stat-value" style="color:#f59e0b">${data.raw_pending}</div><div class="stat-label">${I18n.t('knowledge.pendingRaw')}</div></div>
+              <div class="stat-card"><div class="stat-value">${d.sample_count || 0}</div><div class="stat-label">${I18n.t('knowledge.sampleCount')}</div></div>
             </div>
-            <p><b>按类型：</b>${ibt}</p>
-            <p style="margin-top:8px"><b>按验证状态：</b>${ibv}</p>
-            <p style="margin-top:8px"><b>状态：</b><span class="badge badge-${d.status === 'active' ? 'success' : 'warning'}">${d.status}</span></p>
+            <p><b>${I18n.t('knowledge.byType')}</b>${ibt}</p>
+            <p style="margin-top:8px"><b>${I18n.t('knowledge.byVerification')}</b>${ibv}</p>
+            <p style="margin-top:8px"><b>${I18n.t('common.status')}：</b><span class="badge badge-${d.status === 'active' ? 'success' : 'warning'}">${d.status}</span></p>
           </div>
         </div>
       `;
-    } catch (e) { panel.innerHTML = `<div class="card"><div style="padding:20px"><p style="color:var(--color-danger)">加载失败：${e.message}</p></div></div>`; }
+    } catch (e) { panel.innerHTML = `<div class="card"><div style="padding:20px"><p style="color:var(--color-danger)">${I18n.t('common.loadFailed')}：${e.message}</p></div></div>`; }
   },
 
   async showMergeDomain(code) {
@@ -603,28 +675,28 @@ const KnowledgePage = {
       panel.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">合并业务域 — 将 "${code}" 合并到</span>
-            <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">关闭</button>
+            <span class="card-title">${I18n.t('knowledge.mergeDomainTitle', {code})}</span>
+            <button class="btn btn-sm" onclick="document.getElementById('domain-action-panel').innerHTML=''">${I18n.t('common.close')}</button>
           </div>
           <div style="padding:20px">
-            <p class="text-muted" style="margin-bottom:12px">合并后，"${code}" 下的所有知识条目将迁移到目标域，当前域将被标记为 merged。</p>
+            <p class="text-muted" style="margin-bottom:12px">${I18n.t('knowledge.mergeHint', {code})}</p>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px">
               <select id="merge-target" style="padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
-                <option value="">请选择目标域</option>
+                <option value="">${I18n.t('knowledge.selectTargetDomain')}</option>
                 ${options}
               </select>
-              <button class="btn" onclick="KnowledgePage.mergeDomain('${code}')">确认合并</button>
+              <button class="btn" onclick="KnowledgePage.mergeDomain('${code}')">${I18n.t('knowledge.confirmMerge')}</button>
             </div>
           </div>
         </div>
       `;
-    } catch (e) { alert('加载域列表失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.loadDomainsFailed") + e.message); }
   },
 
   async mergeDomain(code) {
     const target = document.getElementById('merge-target').value;
-    if (!target) { alert('请选择目标域'); return; }
-    if (!confirm(`确认将 "${code}" 合并到 "${target}"？此操作不可撤销。`)) return;
+    if (!target) { alert(I18n.t("knowledge.selectTargetDomain")); return; }
+    if (!confirm(I18n.t('knowledge.confirmMergeIrreversible', {code, target}))) return;
     try {
       const res = await fetch(`/api/knowledge/domains/${code}/merge`, {
         method: 'POST',
@@ -632,10 +704,10 @@ const KnowledgePage = {
         body: JSON.stringify({ target_code: target }),
       });
       const data = await res.json();
-      if (data.error) { alert('合并失败：' + data.error); return; }
-      alert(data.message || '合并成功');
+      if (data.error) { alert(I18n.t("knowledge.mergeFailed") + data.error); return; }
+      alert(data.message || I18n.t("knowledge.mergeSuccess"));
       this.loadDomains();
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   // ============================================================
@@ -645,18 +717,18 @@ const KnowledgePage = {
     const el = document.getElementById('knowledge-tab-content');
     el.innerHTML = `
       <div class="card">
-        <div class="card-header"><span class="card-title">LLM 知识提取</span></div>
+        <div class="card-header"><span class="card-title">${I18n.t('knowledge.llmExtract')}</span></div>
         <div style="padding:20px">
           <p class="text-muted" style="margin-bottom:16px">
-            从原始对话（wr_knowledge_raw）中自动提取结构化知识条目。<br>
-            LLM 将评估每条对话的知识价值，并提取为 factual/analytical/procedural 类型知识。
+            ${I18n.t('knowledge.extractDesc')}<br>
+            ${I18n.t('knowledge.extractDetail')}
           </p>
           <div style="display:flex;gap:8px;margin-bottom:16px">
             <input type="number" id="extract-batch-size" value="5" min="1" max="20"
               style="width:80px;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"
-              placeholder="批量大小"/>
-            <span style="line-height:36px;color:var(--text-muted)">条/批</span>
-            <button class="btn" onclick="KnowledgePage.runExtract()">开始提取</button>
+              placeholder="${I18n.t('knowledge.batchSize')}"/>
+            <span style="line-height:36px;color:var(--text-muted)">${I18n.t('knowledge.perBatch')}</span>
+            <button class="btn" onclick="KnowledgePage.runExtract()">${I18n.t('knowledge.startExtract')}</button>
           </div>
           <div id="extract-result"></div>
         </div>
@@ -667,7 +739,7 @@ const KnowledgePage = {
   async runExtract() {
     const batchSize = parseInt(document.getElementById('extract-batch-size').value) || 5;
     const el = document.getElementById('extract-result');
-    el.innerHTML = '<p class="text-muted">提取中，请稍候（可能需要几分钟）...</p>';
+    el.innerHTML = `<p class="text-muted">${I18n.t('knowledge.extracting')}</p>`;
     try {
       const res = await fetch('/api/knowledge/extract', {
         method: 'POST',
@@ -676,19 +748,19 @@ const KnowledgePage = {
       });
       const data = await res.json();
       if (data.error) {
-        el.innerHTML = `<p style="color:var(--color-danger)">提取失败：${data.error}</p>`;
+        el.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('knowledge.extractFailed')}${data.error}</p>`;
         return;
       }
       el.innerHTML = `
         <div style="padding:16px;background:var(--bg-secondary);border-radius:8px">
-          <p><b>提取完成</b></p>
-          <p>处理条数：${data.processed || 0}</p>
-          <p>耗时：${data.duration_ms || 0}ms</p>
+          <p><b>${I18n.t('knowledge.extractDone')}</b></p>
+          <p>${I18n.t('knowledge.processedCount')}${data.processed || 0}</p>
+          <p>${I18n.t('knowledge.duration')}${data.duration_ms || 0}ms</p>
           <p>${data.message || ''}</p>
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<p style="color:var(--color-danger)">请求失败：${e.message}</p>`;
+      el.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('knowledge.requestFailed')}${e.message}</p>`;
     }
   },
 
@@ -707,26 +779,26 @@ const KnowledgePage = {
     const el = document.getElementById('knowledge-tab-content');
     el.innerHTML = `
       <div class="card">
-        <div class="card-header"><span class="card-title">单域分析</span></div>
+        <div class="card-header"><span class="card-title">${I18n.t('knowledge.singleDomainAnalysis')}</span></div>
         <div style="padding:20px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
             <div>
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">业务域 *</label>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.domainRequired')}</label>
               <select id="analyze-domain" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
-                <option value="">请选择业务域</option>
+                <option value="">${I18n.t('knowledge.selectDomain')}</option>
                 ${domains.map(d => `<option value="${d.domain_code}">${d.domain_name} (${d.domain_code})</option>`).join('')}
               </select>
             </div>
             <div>
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">分析类型</label>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.analysisType')}</label>
               <select id="analyze-type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
-                <option value="domain_overview">领域概览</option>
-                <option value="trend">趋势分析</option>
-                <option value="gap">知识缺口分析</option>
+                <option value="domain_overview">${I18n.t('knowledge.domainOverview')}</option>
+                <option value="trend">${I18n.t('knowledge.trendAnalysis')}</option>
+                <option value="gap">${I18n.t('knowledge.gapAnalysis')}</option>
               </select>
             </div>
           </div>
-          <button class="btn" onclick="KnowledgePage.runAnalysis()">开始分析</button>
+          <button class="btn" onclick="KnowledgePage.runAnalysis()">${I18n.t('knowledge.startAnalysis')}</button>
           <div id="analyze-result" style="margin-top:16px"></div>
         </div>
       </div>
@@ -739,11 +811,11 @@ const KnowledgePage = {
     const el = document.getElementById('analyze-result');
 
     if (!domain) {
-      el.innerHTML = '<p style="color:var(--color-danger)">请选择业务域</p>';
+      el.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('knowledge.selectDomain')}</p>`;
       return;
     }
 
-    el.innerHTML = '<p class="text-muted">分析中，请稍候...</p>';
+    el.innerHTML = `<p class="text-muted">${I18n.t('knowledge.analyzing')}</p>`;
     try {
       const res = await fetch('/api/knowledge/analyze', {
         method: 'POST',
@@ -755,14 +827,14 @@ const KnowledgePage = {
       });
       const data = await res.json();
       if (data.error) {
-        el.innerHTML = `<p style="color:var(--color-danger)">分析失败：${data.error}</p>`;
+        el.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('knowledge.analysisFailed')}${data.error}</p>`;
         return;
       }
       // 简单 markdown 渲染
       const result = (data.result || '').replace(/\n/g, '<br>').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
       el.innerHTML = `<div style="padding:16px;background:var(--bg-secondary);border-radius:8px;white-space:pre-wrap;line-height:1.8">${result}</div>`;
     } catch (e) {
-      el.innerHTML = `<p style="color:var(--color-danger)">请求失败：${e.message}</p>`;
+      el.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('knowledge.requestFailed')}${e.message}</p>`;
     }
   },
 
@@ -771,20 +843,20 @@ const KnowledgePage = {
   // ============================================================
   async loadAnalyses(page = 1) {
     const el = document.getElementById('knowledge-tab-content');
-    el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>加载中...</p></div>';
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>${I18n.t('common.loading')}</p></div>`;
     try {
       const res = await fetch(`/api/knowledge/analyses?page=${page}&per_page=20`);
       const data = await res.json();
       if (!data.items.length) {
-        el.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无分析记录</p></div>';
+        el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>${I18n.t('knowledge.noAnalyses')}</p></div>`;
         return;
       }
       el.innerHTML = `
         <div class="card">
-          <div class="card-header"><span class="card-title">分析记录 (${data.total})</span></div>
+          <div class="card-header"><span class="card-title">${I18n.t('knowledge.analysesWith', {total: data.total})}</span></div>
           <table class="table">
             <thead><tr>
-              <th>任务ID</th><th>领域</th><th>类型</th><th>条数</th><th>状态</th><th>时间</th>
+              <th>${I18n.t('knowledge.taskId')}</th><th>${I18n.t('knowledge.domain')}</th><th>${I18n.t('common.type')}</th><th>${I18n.t('knowledge.count')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('common.time')}</th>
             </tr></thead>
             <tbody>
               ${data.items.map(i => `<tr>
@@ -800,7 +872,7 @@ const KnowledgePage = {
         </div>
       `;
     } catch (e) {
-      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>加载失败：${e.message}</p></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
     }
   },
 
@@ -811,13 +883,13 @@ const KnowledgePage = {
     const el = document.getElementById('knowledge-tab-content');
     el.innerHTML = `
       <div class="card">
-        <div class="card-header"><span class="card-title">知识搜索</span></div>
+        <div class="card-header"><span class="card-title">${I18n.t('knowledge.domainSearch')}</span></div>
         <div style="padding:20px">
           <div style="display:flex;gap:8px;margin-bottom:16px">
-            <input type="text" id="knowledge-search-input" placeholder="输入关键词搜索..."
+            <input type="text" id="knowledge-search-input" placeholder="${I18n.t('knowledge.searchPlaceholder')}"
               style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"
               onkeydown="if(event.key==='Enter')KnowledgePage.doSearch()"/>
-            <button class="btn" onclick="KnowledgePage.doSearch()">搜索</button>
+            <button class="btn" onclick="KnowledgePage.doSearch()">${I18n.t('common.search')}</button>
           </div>
           <div id="knowledge-search-results"></div>
         </div>
@@ -830,20 +902,20 @@ const KnowledgePage = {
     const q = document.getElementById('knowledge-search-input').value.trim();
     const el = document.getElementById('knowledge-search-results');
     if (!q) {
-      el.innerHTML = '<p class="text-muted">请输入搜索关键词</p>';
+      el.innerHTML = `<p class="text-muted">${I18n.t('knowledge.enterSearchKeyword')}</p>`;
       return;
     }
-    el.innerHTML = '<p class="text-muted">搜索中...</p>';
+    el.innerHTML = `<p class="text-muted">${I18n.t('knowledge.searching')}</p>`;
     try {
       const res = await fetch(`/api/knowledge/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       if (data.items.total === 0 && data.raw_count === 0) {
-        el.innerHTML = '<p class="text-muted">未找到匹配结果</p>';
+        el.innerHTML = `<p class="text-muted">${I18n.t('knowledge.noSearchResults')}</p>`;
         return;
       }
-      let html = `<p class="text-sm text-muted">找到 ${data.items.total} 条知识，${data.raw_count} 条原始对话</p>`;
+      let html = `<p class="text-sm text-muted">${I18n.t('knowledge.found')}${data.items.total} ${I18n.t('knowledge.itemsFound')}${data.raw_count} ${I18n.t('knowledge.rawFound')}</p>`;
       if (data.items.results.length) {
-        html += '<table class="table"><thead><tr><th>标题</th><th>类型</th><th>领域</th><th>置信度</th></tr></thead><tbody>';
+        html += `<table class="table"><thead><tr><th>${I18n.t('common.title')}</th><th>${I18n.t('common.type')}</th><th>${I18n.t('knowledge.domain')}</th><th>${I18n.t('knowledge.confidence')}</th></tr></thead><tbody>`;
         data.items.results.forEach(i => {
           html += `<tr>
             <td>${this.escapeHtml(i.title)}</td>
@@ -856,7 +928,7 @@ const KnowledgePage = {
       }
       el.innerHTML = html;
     } catch (e) {
-      el.innerHTML = `<p style="color:var(--color-danger)">搜索失败：${e.message}</p>`;
+      el.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('knowledge.searchFailed')}${e.message}</p>`;
     }
   },
 
@@ -867,23 +939,23 @@ const KnowledgePage = {
     const el = document.getElementById('knowledge-tab-content');
     el.innerHTML = `
       <div class="card">
-        <div class="card-header"><span class="card-title">记忆管理</span></div>
+        <div class="card-header"><span class="card-title">${I18n.t('knowledge.memoryManagement')}</span></div>
         <div style="padding:20px">
           <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
-            <label style="font-size:12px;color:var(--text-muted)">Token ID:</label>
+            <label style="font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.tokenIdLabel')}</label>
             <input type="number" id="mem-token-id" value="0" min="0"
               style="width:80px;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
-            <label style="font-size:12px;color:var(--text-muted)">分类:</label>
+            <label style="font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.categoryLabel')}</label>
             <select id="mem-category"
               style="padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">
-              <option value="">全部分类</option>
-              <option value="preference">偏好 (preference)</option>
-              <option value="fact">事实 (fact)</option>
-              <option value="context">上下文 (context)</option>
-              <option value="goal">目标 (goal)</option>
-              <option value="constraint">约束 (constraint)</option>
+              <option value="">${I18n.t('knowledge.allCategories')}</option>
+              <option value="preference">${I18n.t('knowledge.preference')}</option>
+              <option value="fact">${I18n.t('knowledge.fact')}</option>
+              <option value="context">${I18n.t('knowledge.context')}</option>
+              <option value="goal">${I18n.t('knowledge.goal')}</option>
+              <option value="constraint">${I18n.t('knowledge.constraint')}</option>
             </select>
-            <button class="btn btn-sm" onclick="KnowledgePage.loadMemories(1)">查询</button>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadMemories(1)">${I18n.t('common.query')}</button>
           </div>
           <div id="memories-table-container"></div>
         </div>
@@ -897,7 +969,7 @@ const KnowledgePage = {
     const tokenId = document.getElementById('mem-token-id').value;
     const category = document.getElementById('mem-category').value;
     const container = document.getElementById('memories-table-container');
-    container.innerHTML = '<p class="text-muted">加载中...</p>';
+    container.innerHTML = `<p class="text-muted">${I18n.t('common.loading')}</p>`;
     try {
       let url = `/api/knowledge/memory_list?limit=50`;
       if (tokenId && tokenId !== '0') url += `&token_id=${tokenId}`;
@@ -906,13 +978,13 @@ const KnowledgePage = {
       const data = await res.json();
       const memories = data.memories || [];
       if (!memories.length) {
-        container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>暂无记忆数据</p></div>';
+        container.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>${I18n.t('knowledge.noMemories')}</p></div>`;
         return;
       }
       container.innerHTML = `
         <table class="table">
           <thead><tr>
-            <th>ID</th><th>Token</th><th>分类</th><th>标题</th><th>内容</th><th>优先级</th><th>过期时间</th><th>操作</th>
+            <th>${I18n.t('common.id')}</th><th>${I18n.t('common.tokens')}</th><th>${I18n.t('common.category')}</th><th>${I18n.t('common.title')}</th><th>${I18n.t('common.content')}</th><th>${I18n.t('common.priority')}</th><th>${I18n.t('common.expiresAt')}</th><th>${I18n.t('common.actions')}</th>
           </tr></thead>
           <tbody>
             ${memories.map(m => `<tr>
@@ -922,18 +994,18 @@ const KnowledgePage = {
               <td>${this.escapeHtml(m.title)}</td>
               <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${this.escapeHtml(m.content)}">${this.escapeHtml(m.content.slice(0, 80))}${m.content.length > 80 ? '...' : ''}</td>
               <td>${'⭐'.repeat(m.priority || 3)}</td>
-              <td class="text-sm text-muted">${m.expires_at ? m.expires_at.slice(0, 16) : '永久'}</td>
+              <td class="text-sm text-muted">${m.expires_at ? m.expires_at.slice(0, 16) : I18n.t('common.permanent')}</td>
               <td>
-                <button class="btn btn-sm" onclick="KnowledgePage.showMemoryDetail(${m.id})">详情</button>
-                <button class="btn btn-sm" style="color:var(--color-danger)" onclick="KnowledgePage.deleteMemory(${m.id})">删除</button>
+                <button class="btn btn-sm" onclick="KnowledgePage.showMemoryDetail(${m.id})">${I18n.t('common.detail')}</button>
+                <button class="btn btn-sm" style="color:var(--color-danger)" onclick="KnowledgePage.deleteMemory(${m.id})">${I18n.t('common.delete')}</button>
               </td>
             </tr>`).join('')}
           </tbody>
         </table>
-        <p class="text-sm text-muted" style="padding:8px 0">共 ${memories.length} 条记忆</p>
+        <p class="text-sm text-muted" style="padding:8px 0">${I18n.t('knowledge.totalCount')}${memories.length} ${I18n.t('knowledge.memoryUnit')}</p>
       `;
     } catch (e) {
-      container.innerHTML = `<p style="color:var(--color-danger)">加载失败：${e.message}</p>`;
+      container.innerHTML = `<p style="color:var(--color-danger)">${I18n.t('common.loadFailed')}：${e.message}</p>`;
     }
   },
 
@@ -948,37 +1020,37 @@ const KnowledgePage = {
       const res = await fetch(`/api/knowledge/memory_list?token_id=${tokenId}&limit=200`);
       const data = await res.json();
       const mem = (data.memories || []).find(m => m.id === id);
-      if (!mem) { alert('记忆条目未找到'); return; }
+      if (!mem) { alert(I18n.t("knowledge.memoryNotFound")); return; }
       const el = document.getElementById('knowledge-tab-content');
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">记忆详情 #${mem.id}</span>
-            <button class="btn btn-sm" onclick="KnowledgePage.loadMemories(1)">返回列表</button>
+            <span class="card-title">${I18n.t('knowledge.memoryDetail')}${mem.id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadMemories(1)">${I18n.t('common.backToList')}</button>
           </div>
           <div style="padding:20px">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-              <p><b>Token:</b> ${mem.token_name} (ID: ${mem.token_id})</p>
-              <p><b>分类:</b> <span class="badge badge-${this.memCategoryColor(mem.category)}">${mem.category}</span></p>
-              <p><b>会话:</b> ${mem.session_id || '全局'}</p>
-              <p><b>优先级:</b> ${'⭐'.repeat(mem.priority || 3)} (${mem.priority || 3}/5)</p>
-              <p><b>创建时间:</b> ${mem.created_at ? mem.created_at.slice(0, 19) : '-'}</p>
-              <p><b>过期时间:</b> ${mem.expires_at ? mem.expires_at.slice(0, 19) : '永久'}</p>
+              <p><b>${I18n.t('knowledge.tokenLabel')}</b> ${mem.token_name} (ID: ${mem.token_id})</p>
+              <p><b>${I18n.t('knowledge.categoryLabel')}</b> <span class="badge badge-${this.memCategoryColor(mem.category)}">${mem.category}</span></p>
+              <p><b>${I18n.t('knowledge.sessionLabel')}</b> ${mem.session_id || I18n.t('knowledge.global')}</p>
+              <p><b>${I18n.t('knowledge.priorityLabel')}</b> ${'⭐'.repeat(mem.priority || 3)} (${mem.priority || 3}/5)</p>
+              <p><b>${I18n.t('knowledge.createdAtLabel')}</b> ${mem.created_at ? mem.created_at.slice(0, 19) : '-'}</p>
+              <p><b>${I18n.t('knowledge.expiresAtLabel')}</b> ${mem.expires_at ? mem.expires_at.slice(0, 19) : I18n.t('common.permanent')}</p>
             </div>
             <hr>
-            <p><b>标题:</b> ${this.escapeHtml(mem.title)}</p>
-            <p style="margin-top:8px"><b>内容:</b></p>
+            <p><b>${I18n.t('knowledge.titleLabel')}</b> ${this.escapeHtml(mem.title)}</p>
+            <p style="margin-top:8px"><b>${I18n.t('knowledge.contentLabel')}</b></p>
             <pre style="white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:13px">${this.escapeHtml(mem.content)}</pre>
-            <p style="margin-top:8px"><b>标签:</b> ${mem.tags || '[]'}</p>
+            <p style="margin-top:8px"><b>${I18n.t('knowledge.tagsLabel')}</b> ${mem.tags || '[]'}</p>
             <hr style="margin:16px 0;border-color:var(--border)">
             <div style="display:flex;gap:8px">
-              <button class="btn" onclick="KnowledgePage.showMemoryEdit(${mem.id})">编辑</button>
-              <button class="btn" style="color:var(--color-danger)" onclick="KnowledgePage.deleteMemory(${mem.id})">删除</button>
+              <button class="btn" onclick="KnowledgePage.showMemoryEdit(${mem.id})">${I18n.t('common.edit')}</button>
+              <button class="btn" style="color:var(--color-danger)" onclick="KnowledgePage.deleteMemory(${mem.id})">${I18n.t('common.delete')}</button>
             </div>
           </div>
         </div>
       `;
-    } catch (e) { alert('加载详情失败：' + e.message); }
+    } catch (e) { alert(I18n.t('knowledge.loadDetailFailed') + e.message); }
   },
 
   async showMemoryEdit(id) {
@@ -987,42 +1059,42 @@ const KnowledgePage = {
       const res = await fetch(`/api/knowledge/memory_list?token_id=${tokenId}&limit=200`);
       const data = await res.json();
       const mem = (data.memories || []).find(m => m.id === id);
-      if (!mem) { alert('记忆条目未找到'); return; }
+      if (!mem) { alert(I18n.t("knowledge.memoryNotFound")); return; }
       const el = document.getElementById('knowledge-tab-content');
       el.innerHTML = `
         <div class="card">
           <div class="card-header">
-            <span class="card-title">编辑记忆 #${id}</span>
-            <button class="btn btn-sm" onclick="KnowledgePage.showMemoryDetail(${id})">返回</button>
+            <span class="card-title">${I18n.t('knowledge.editMemory')}${id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.showMemoryDetail(${id})">${I18n.t('common.back')}</button>
           </div>
           <div style="padding:20px">
             <div style="margin-bottom:12px">
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">标题</label>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('common.title')}</label>
               <input type="text" id="edit-mem-title" value="${this.escapeHtml(mem.title)}"
                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
             </div>
             <div style="margin-bottom:12px">
-              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">内容</label>
+              <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('common.content')}</label>
               <textarea id="edit-mem-content" rows="6"
                 style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)">${this.escapeHtml(mem.content)}</textarea>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
               <div>
-                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">优先级 (1-5)</label>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.priorityRange')}</label>
                 <input type="number" id="edit-mem-priority" value="${mem.priority || 3}" min="1" max="5"
                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
               </div>
               <div>
-                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">过期时间（可选）</label>
+                <label style="display:block;margin-bottom:4px;font-size:12px;color:var(--text-muted)">${I18n.t('knowledge.expiresOptional')}</label>
                 <input type="datetime-local" id="edit-mem-expires" value="${mem.expires_at ? mem.expires_at.slice(0, 16) : ''}"
                   style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary)"/>
               </div>
             </div>
-            <button class="btn" onclick="KnowledgePage.saveMemoryEdit(${id})">保存</button>
+            <button class="btn" onclick="KnowledgePage.saveMemoryEdit(${id})">${I18n.t('common.save')}</button>
           </div>
         </div>
       `;
-    } catch (e) { alert('加载编辑失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.loadEditFailed") + e.message); }
   },
 
   async saveMemoryEdit(id) {
@@ -1031,7 +1103,7 @@ const KnowledgePage = {
     const priority = parseInt(document.getElementById('edit-mem-priority').value);
     const expiresAt = document.getElementById('edit-mem-expires').value || null;
     const tokenId = document.getElementById('mem-token-id').value || '0';
-    if (!title || !content) { alert('标题和内容不能为空'); return; }
+    if (!title || !content) { alert(I18n.t("knowledge.titleContentRequired")); return; }
     try {
       const body = { title, content, priority };
       if (expiresAt) body.expires_at = expiresAt;
@@ -1041,25 +1113,285 @@ const KnowledgePage = {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (data.error) { alert('保存失败：' + data.error); return; }
-      alert('已保存');
+      if (data.error) { alert(I18n.t('common.saveFailed') + data.error); return; }
+      alert(I18n.t("knowledge.saved"));
       this.showMemoryDetail(id);
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
   async deleteMemory(id) {
-    if (!confirm('确认删除该记忆条目？')) return;
+    if (!confirm(I18n.t("knowledge.confirmDeleteMemory"))) return;
     const tokenId = document.getElementById('mem-token-id').value || '0';
     try {
       const res = await fetch(`/api/knowledge/memory/${id}?token_id=${tokenId}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.error) { alert('删除失败：' + data.error); return; }
-      alert('已删除');
+      if (data.error) { alert(I18n.t('common.deleteFailed') + data.error); return; }
+      alert(I18n.t("knowledge.deleted"));
       this.fetchMemoriesTable();
-    } catch (e) { alert('请求失败：' + e.message); }
+    } catch (e) { alert(I18n.t("knowledge.requestFailed") + e.message); }
   },
 
-  escapeHtml(s) {
+  // ============================================================
+  // 合规说明（v2.0 — 企业数据资产管理定性）
+  // ============================================================
+  renderCompliance() {
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = `
+      <div style="max-width:900px">
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><span class="card-title">${I18n.t('knowledge.complianceTitle')}</span></div>
+          <div style="padding:20px;line-height:1.8">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">${I18n.t('knowledge.complianceLegal')}</p>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceWhat')}</h4>
+            <p>${I18n.t('knowledge.complianceWhatDetail')}</p>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceWhy')}</h4>
+            <p>${I18n.t('knowledge.complianceWhyDetail')}</p>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceScope')}</h4>
+            <ul style="margin:0;padding-left:20px">
+              <li>${I18n.t('knowledge.complianceScope1')}</li>
+              <li>${I18n.t('knowledge.complianceScope2')}</li>
+              <li>${I18n.t('knowledge.complianceScope3')}</li>
+              <li>${I18n.t('knowledge.complianceScope4')}</li>
+            </ul>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceSecurity')}</h4>
+            <ul style="margin:0;padding-left:20px">
+              <li>${I18n.t('knowledge.complianceSecurity1')}</li>
+              <li>${I18n.t('knowledge.complianceSecurity2')}</li>
+              <li>${I18n.t('knowledge.complianceSecurity3')}</li>
+            </ul>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceRetention')}</h4>
+            <p>${I18n.t('knowledge.complianceRetentionDetail')}</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">${I18n.t('knowledge.compliancePurpose')}</span></div>
+          <div style="padding:20px;line-height:1.8">
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">${I18n.t('knowledge.compliancePurposeDesc')}</p>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceLegalUse')}</h4>
+            <ul style="margin:0;padding-left:20px">
+              <li>${I18n.t('knowledge.complianceLegal1')}</li>
+              <li>${I18n.t('knowledge.complianceLegal2')}</li>
+              <li>${I18n.t('knowledge.complianceLegal3')}</li>
+              <li>${I18n.t('knowledge.complianceLegal4')}</li>
+            </ul>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceProhibited')}</h4>
+            <ul style="margin:0;padding-left:20px">
+              <li>${I18n.t('knowledge.complianceProhibit1')}</li>
+              <li>${I18n.t('knowledge.complianceProhibit2')}</li>
+              <li>${I18n.t('knowledge.complianceProhibit3')}</li>
+            </ul>
+
+            <h4 style="margin:16px 0 8px">${I18n.t('knowledge.complianceAnalogy')}</h4>
+            <p>${I18n.t('knowledge.complianceAnalogyDetail')}</p>
+
+            <div style="margin-top:20px;padding:12px 16px;background:var(--bg-secondary);border-radius:8px;border-left:3px solid var(--color-warning)">
+              <p style="font-size:13px;margin:0"><b>${I18n.t('knowledge.complianceObligation')}</b>${I18n.t('knowledge.complianceObligationDetail')}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  // ============================================================
+  // 审计日志
+  // ============================================================
+  async loadAuditLog(page = 1) {
+    const el = document.getElementById('knowledge-tab-content');
+    el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>${I18n.t('common.loading')}</p></div>`;
+    try {
+      const res = await fetch(`/api/knowledge/audit_log?page=${page}&per_page=20`);
+      const data = await res.json();
+      if (!data.items.length) {
+        el.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>${I18n.t('knowledge.noAuditLog')}</p></div>`;
+        return;
+      }
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">${I18n.t('knowledge.auditLogWith', {total: data.total})}</span>
+            <span class="text-sm text-muted">${I18n.t('common.pageOf', {page: data.page, total: Math.ceil(data.total / data.per_page) || 1})}</span>
+          </div>
+          <table class="table">
+            <thead><tr>
+              <th>${I18n.t('common.time')}</th><th>${I18n.t('knowledge.action')}</th><th>${I18n.t('knowledge.resourceType')}</th><th>${I18n.t('knowledge.resourceId')}</th><th>${I18n.t('common.tokens')}</th><th>${I18n.t('common.detail')}</th>
+            </tr></thead>
+            <tbody>
+              ${data.items.map(i => `<tr>
+                <td class="text-sm text-muted">${i.created_at ? i.created_at.slice(0, 19) : '-'}</td>
+                <td><span class="badge badge-${this.auditActionColor(i.action)}">${this.translateAction(i.action)}</span></td>
+                <td>${i.resource_type || '-'}</td>
+                <td><code class="text-sm">${this.escapeHtml(i.resource_id || '-')}</code></td>
+                <td>${i.token_id || '-'}</td>
+                <td><button class="btn btn-sm" onclick="KnowledgePage.showAuditDetail(${i.id})">${I18n.t('common.view')}</button></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+          <div style="padding:12px 20px;display:flex;gap:8px;justify-content:center">
+            ${data.page > 1 ? `<button class="btn btn-sm" onclick="KnowledgePage.loadAuditLog(${data.page - 1})">${I18n.t('common.prevPage')}</button>` : ''}
+            ${data.page < Math.ceil(data.total / data.per_page) ? `<button class="btn btn-sm" onclick="KnowledgePage.loadAuditLog(${data.page + 1})">${I18n.t('common.nextPage')}</button>` : ''}
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      el.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><p>${I18n.t('common.loadFailed')}：${e.message}</p></div>`;
+    }
+  },
+
+  auditActionColor(action) {
+    return {
+      knowledge_capture: 'info',
+      knowledge_extract: 'success',
+      knowledge_access: 'default',
+      config_change: 'warning',
+      data_delete: 'danger',
+      raw_cleanup: 'default',
+      retention_cleanup: 'default',
+    }[action] || 'default';
+  },
+
+  translateAction(action) {
+    return {
+      knowledge_capture: I18n.t("knowledge.actionCapture"),
+      knowledge_extract: I18n.t("knowledge.extract"),
+      knowledge_access: I18n.t("knowledge.actionAccess"),
+      config_change: I18n.t("knowledge.actionConfigChange"),
+      data_delete: I18n.t("knowledge.actionDataDelete"),
+      raw_cleanup: I18n.t("knowledge.actionRawCleanup"),
+      retention_cleanup: I18n.t("knowledge.actionRetentionCleanup"),
+    }[action] || action;
+  },
+
+  async showAuditDetail(id) {
+    try {
+      const res = await fetch(`/api/knowledge/audit_log/${id}`);
+      if (res.status === 404) { alert(I18n.t("knowledge.auditLogNotFound")); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const item = await res.json();
+      const el = document.getElementById('knowledge-tab-content');
+      let detailStr = '-';
+      if (item.detail) {
+        detailStr = typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail, null, 2);
+      }
+      el.innerHTML = `
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">${I18n.t('knowledge.auditDetail')}${item.id}</span>
+            <button class="btn btn-sm" onclick="KnowledgePage.loadAuditLog(1)">${I18n.t('common.backToList')}</button>
+          </div>
+          <div style="padding:20px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+              <p><b>${I18n.t('knowledge.timeLabel')}</b> ${item.created_at ? item.created_at.slice(0, 19) : '-'}</p>
+              <p><b>${I18n.t('knowledge.actionLabel')}</b> <span class="badge badge-${this.auditActionColor(item.action)}">${this.translateAction(item.action)}</span></p>
+              <p><b>${I18n.t('knowledge.resourceTypeLabel')}</b> ${item.resource_type || '-'}</p>
+              <p><b>${I18n.t('knowledge.resourceIdLabel')}</b> <code>${this.escapeHtml(item.resource_id || '-')}</code></p>
+              <p><b>${I18n.t('knowledge.tokenIdLabel')}</b> ${item.token_id || '-'}</p>
+              <p><b>${I18n.t('knowledge.clientIpLabel')}</b> ${item.client_ip || '-'}</p>
+            </div>
+            <hr>
+            <p><b>${I18n.t('knowledge.detailLabel')}</b></p>
+            <pre style="max-height:400px;overflow:auto;white-space:pre-wrap;background:var(--bg-secondary);padding:12px;border-radius:6px;font-size:12px">${this.escapeHtml(detailStr)}</pre>
+          </div>
+        </div>
+      `;
+    } catch (e) { alert(I18n.t('common.loadFailed') + '：' + e.message); }
+  },
+
+
+  // ============================================================
+  // 搜索质量指标
+  // ============================================================
+  async loadQuality() {
+    const container = document.getElementById('knowledge-tab-content');
+    container.innerHTML = '<div class="loading">' + I18n.t('common.loading') + '</div>';
+
+    try {
+      const res = await fetch('/api/knowledge/search-quality');
+      const data = await res.json();
+
+      let html = '<div style="padding:20px">';
+
+      // 概览卡片
+      html += '<div class="stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px">';
+      html += '<div class="stat-card"><div class="stat-value">' + data.total_items + '</div><div class="stat-label">' + I18n.t('knowledge.totalCount') + '</div></div>';
+      html += '<div class="stat-card"><div class="stat-value">' + data.verified_items + '</div><div class="stat-label">' + I18n.t('knowledge.verification') + '</div></div>';
+      html += '<div class="stat-card"><div class="stat-value">' + data.verification_rate + '%</div><div class="stat-label">' + I18n.t('knowledge.mrr') + '</div></div>';
+      html += '</div>';
+
+      // 按领域质量表格
+      html += '<h3 style="margin:20px 0 12px">' + I18n.t('knowledge.qualityByDomain') + '</h3>';
+      html += '<table class="data-table"><thead><tr>';
+      html += '<th>' + I18n.t('knowledge.code') + '</th>';
+      html += '<th>' + I18n.t('knowledge.totalCount') + '</th>';
+      html += '<th>' + I18n.t('knowledge.verification') + '</th>';
+      html += '<th>' + I18n.t('knowledge.verified') + '</th>';
+      html += '<th>' + I18n.t('knowledge.confidence') + '</th>';
+      html += '<th>' + I18n.t('knowledge.mrr') + '</th>';
+      html += '</tr></thead><tbody>';
+
+      if (data.by_domain && data.by_domain.length > 0) {
+        data.by_domain.forEach(function(d) {
+          html += '<tr>';
+          html += '<td><code>' + d.domain_code + '</code></td>';
+          html += '<td>' + d.total + '</td>';
+          html += '<td>' + (d.verified || 0) + '</td>';
+          html += '<td>' + d.verified_rate + '%</td>';
+          html += '<td>' + d.avg_confidence + '</td>';
+          html += '<td>' + (d.verified / d.total).toFixed(3) + '</td>';
+          html += '</tr>';
+        });
+      } else {
+        html += '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">' + I18n.t('common.noData') + '</td></tr>';
+      }
+      html += '</tbody></table>';
+
+      // 置信度分布
+      if (data.confidence_distribution) {
+        html += '<h3 style="margin:24px 0 12px">' + I18n.t('knowledge.confidenceDist') + '</h3>';
+        html += '<div style="max-width:400px"><canvas id="quality-confidence-chart" height="200"></canvas></div>';
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+
+      // 渲染置信度分布图
+      if (data.confidence_distribution) {
+        setTimeout(function() {
+          const ctx = document.getElementById('quality-confidence-chart');
+          if (!ctx) return;
+          const dist = data.confidence_distribution;
+          new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+              labels: ['high', 'medium', 'low'],
+              datasets: [{
+                data: [(dist.high || 0), (dist.medium || 0), (dist.low || 0)],
+                backgroundColor: ['#10b981', '#f59e0b', '#ef4444']
+              }]
+            },
+            options: {
+              responsive: true,
+              plugins: {
+                legend: { position: 'bottom' }
+              }
+            }
+          });
+        }, 100);
+      }
+    } catch (e) {
+      container.innerHTML = '<div class="error-message">' + I18n.t('common.loadFailed') + ': ' + (e.message || '') + '</div>';
+    }
+  },
+
+    escapeHtml(s) {
     if (!s) return '';
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   },

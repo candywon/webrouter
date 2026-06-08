@@ -1,8 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """计费 & 统计 API — 数据源改为 wr_request_logs"""
 from flask import Blueprint, jsonify, request
 from models.wr_models import RequestLog
 from extensions import db
-from sqlalchemy import func, case
+from sqlalchemy import func, case, text
 
 billing_bp = Blueprint('billing', __name__)
 
@@ -360,6 +363,75 @@ def by_token():
     })
 
 
+@billing_bp.route('/top-tokens')
+def top_tokens():
+    """Top Token usage for dashboard."""
+    hours = request.args.get('hours', 24, type=int)
+    top = request.args.get('top', 10, type=int)
+    top = max(1, min(top, 100))
+
+    since_filter = RequestLog.created_at >= func.datetime('now', f'-{hours} hours')
+    total_requests = db.session.query(func.count(RequestLog.id)).filter(since_filter).scalar() or 0
+
+    stats = db.session.query(
+        RequestLog.token_id,
+        RequestLog.token_name,
+        func.count(RequestLog.id).label('request_count'),
+        func.sum(case((VALID_COND, 1), else_=0)).label('valid_count'),
+        func.coalesce(func.sum(RequestLog.input_tokens), 0).label('input_tokens'),
+        func.coalesce(func.sum(RequestLog.output_tokens), 0).label('output_tokens'),
+        func.coalesce(func.sum(RequestLog.cost_cents), 0).label('cost_cents'),
+    ).filter(
+        since_filter,
+    ).group_by(
+        RequestLog.token_id, RequestLog.token_name,
+    ).order_by(
+        func.count(RequestLog.id).desc(),
+    ).limit(top).all()
+
+    token_ids = [r.token_id for r in stats]
+    model_map = {token_id: [] for token_id in token_ids}
+    if token_ids:
+        model_rows = db.session.query(
+            RequestLog.token_id,
+            RequestLog.model_name,
+            func.count(RequestLog.id).label('count'),
+            func.coalesce(func.sum(RequestLog.cost_cents), 0).label('cost_cents'),
+        ).filter(
+            since_filter,
+            RequestLog.token_id.in_(token_ids),
+        ).group_by(
+            RequestLog.token_id, RequestLog.model_name,
+        ).order_by(
+            RequestLog.token_id, func.count(RequestLog.id).desc(),
+        ).all()
+
+        for row in model_rows:
+            model_map.setdefault(row.token_id, []).append({
+                'model_name': row.model_name or 'unknown',
+                'count': row.count,
+                'cost_cents': row.cost_cents or 0,
+            })
+
+    return jsonify({
+        'hours': hours,
+        'top': top,
+        'total_requests': total_requests,
+        'tokens': [{
+            'token_id': r.token_id,
+            'token_name': r.token_name or f'Token#{r.token_id}',
+            'request_count': r.request_count,
+            'valid_count': r.valid_count or 0,
+            'input_tokens': r.input_tokens or 0,
+            'output_tokens': r.output_tokens or 0,
+            'cost_cents': r.cost_cents or 0,
+            'cost_yuan': round((r.cost_cents or 0) / 100, 2),
+            'pct_of_total': round((r.request_count / total_requests * 100), 1) if total_requests else 0,
+            'model_distribution': model_map.get(r.token_id, []),
+        } for r in stats],
+    })
+
+
 @billing_bp.route('/by-provider-model')
 def by_provider_model():
     """按 Provider+Model 交叉统计 — 调度策略分析"""
@@ -444,4 +516,123 @@ def error_types():
             'error_type': r.error_type or 'unclassified',
             'count': r.count,
         } for r in provider_errors],
+    })
+
+
+# ══════════════════════════════════════════
+#  三、按组织架构统计
+# ══════════════════════════════════════════
+
+def _get_descendant_org_ids(root_id):
+    """递归查询指定组织及其所有子组织 ID（SQLite WITH RECURSIVE）"""
+    if not root_id:
+        return []
+    sql = text("""
+        WITH RECURSIVE org_tree AS (
+            SELECT id FROM wr_orgs WHERE id = :root_id
+            UNION ALL
+            SELECT o.id FROM wr_orgs o
+            JOIN org_tree ot ON o.parent_id = ot.id
+        )
+        SELECT id FROM org_tree
+    """)
+    result = db.session.execute(sql, {'root_id': root_id})
+    return [row[0] for row in result]
+
+
+
+@billing_bp.route('/by-org')
+def by_org():
+    """按组织架构聚合用量统计 — 支持组织节点、组织类型和递归子组织汇总"""
+    from datetime import datetime, timedelta
+
+    hours = request.args.get('hours', 24, type=int)
+    org_filter = request.args.get('org_id', 0, type=int)
+    org_type = request.args.get('org_type', '', type=str)
+    group_by = request.args.get('group_by', 'org', type=str)  # org / type
+    since = (datetime.utcnow() - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
+
+    where_parts = ['r.created_at >= :since']
+    params = {'since': since}
+
+    if org_filter:
+        org_ids = _get_descendant_org_ids(org_filter)
+        if not org_ids:
+            return jsonify({'hours': hours, 'org_id': org_filter, 'org_type': org_type or None, 'group_by': group_by, 'data': []})
+        where_parts.append('t.org_id IN (' + ','.join(str(oid) for oid in org_ids) + ')')
+
+    if org_type:
+        where_parts.append('o.org_type = :org_type')
+        params['org_type'] = org_type
+
+    where_sql = ' AND '.join(where_parts)
+
+    if group_by == 'type':
+        select_sql = """
+            COALESCE(o.org_type, 'unassigned') AS org_type,
+            CASE COALESCE(o.org_type, 'unassigned')
+                WHEN 'company' THEN 'Company'
+                WHEN 'department' THEN 'Department'
+                WHEN 'project' THEN 'Project Group'
+                WHEN 'group' THEN 'Group'
+                ELSE 'Unassigned'
+            END AS org_name,
+            COUNT(DISTINCT t.org_id) AS org_count
+        """
+        group_sql = "GROUP BY COALESCE(o.org_type, 'unassigned')"
+    else:
+        select_sql = """
+            COALESCE(t.org_id, 0) AS org_id,
+            COALESCE(o.name, 'Unassigned') AS org_name,
+            COALESCE(o.org_type, 'unassigned') AS org_type,
+            1 AS org_count
+        """
+        group_sql = 'GROUP BY t.org_id'
+
+    sql_str = f"""
+        SELECT
+            {select_sql},
+            COUNT(r.id) AS request_count,
+            SUM(CASE WHEN r.status_code < 400 AND (r.is_retry IS NULL OR r.is_retry = 0)
+                     AND COALESCE(r.error_message, '') = '' THEN 1 ELSE 0 END) AS valid_count,
+            COALESCE(SUM(r.input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(r.output_tokens), 0) AS output_tokens,
+            COALESCE(SUM(r.cost_cents), 0) AS cost_cents,
+            AVG(r.latency_ms) AS avg_latency,
+            SUM(CASE WHEN r.status_code >= 400 THEN 1 ELSE 0 END) AS error_count
+        FROM wr_request_logs r
+        LEFT JOIN wr_tokens t ON r.token_id = t.id
+        LEFT JOIN wr_orgs o ON t.org_id = o.id
+        WHERE {where_sql}
+        {group_sql}
+        ORDER BY cost_cents DESC
+    """
+
+    rows = db.session.execute(text(sql_str), params).fetchall()
+
+    result = []
+    for r in rows:
+        item = {
+            'org_name': r.org_name,
+            'org_type': r.org_type,
+            'org_count': r.org_count,
+            'request_count': r.request_count,
+            'valid_count': r.valid_count or 0,
+            'input_tokens': r.input_tokens,
+            'output_tokens': r.output_tokens,
+            'cost_cents': r.cost_cents,
+            'cost_yuan': round((r.cost_cents or 0) / 100, 2),
+            'avg_latency_ms': round(r.avg_latency or 0, 1),
+            'error_count': r.error_count or 0,
+        }
+        if group_by != 'type':
+            item['org_id'] = r.org_id
+        result.append(item)
+
+    return jsonify({
+        'hours': hours,
+        'org_id': org_filter or None,
+        'org_type': org_type or None,
+        'group_by': group_by,
+        'data': result,
     })

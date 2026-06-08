@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -17,7 +20,7 @@ func buildRAGContext(body []byte, token *Token) (string, error) {
 		return "", nil
 	}
 
-	// 2. 语义检索
+	// 2. 检索（混合检索 or 纯向量）
 	topK := token.RAGTopK
 	if topK <= 0 {
 		topK = 3
@@ -27,14 +30,40 @@ func buildRAGContext(body []byte, token *Token) (string, error) {
 		minRelevance = 0.7
 	}
 
-	results, err := SearchVectors(query, topK*2, minRelevance*0.8, token.KnowledgeDepartment, "")
+	alpha := token.RAGHybridAlpha
+	var results []SearchResult
+	var err error
+
+	if alpha > 0 {
+		results, err = HybridSearchVectors(query, topK*2, minRelevance*0.8, alpha, token.KnowledgeDepartment, "")
+	} else {
+		results, err = SearchVectors(query, topK*2, minRelevance*0.8, token.KnowledgeDepartment, "")
+	}
 	if err != nil {
 		return "", fmt.Errorf("search vectors: %w", err)
+	}
+
+	// 部门搜索无结果时，回退到全局搜索
+	if len(results) == 0 && token.KnowledgeDepartment != "" {
+		LogInfo("[RAG] department '%s' returned no results, retrying without department filter", token.KnowledgeDepartment)
+		if alpha > 0 {
+			results, err = HybridSearchVectors(query, topK*2, minRelevance*0.8, alpha, "", "")
+		} else {
+			results, err = SearchVectors(query, topK*2, minRelevance*0.8, "", "")
+		}
+		if err != nil {
+			return "", fmt.Errorf("search vectors (fallback): %w", err)
+		}
 	}
 
 	if len(results) == 0 {
 		RecordRAGMiss()
 		return "", nil
+	}
+
+	// 2.5 重排序
+	if token.RAGReranker != "" && token.RAGReranker != "none" {
+		results = ReRankResults(query, results, token.RAGReranker)
 	}
 
 	// 记录反馈

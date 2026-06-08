@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 预警评估：基于健康检测 + 额度预测触发告警
@@ -23,8 +26,8 @@ var alertEngine = &AlertEngine{
 type AlertEvent struct {
 	ProviderID   int    `json:"provider_id"`
 	ProviderName string `json:"provider_name"`
-	Type         string `json:"type"`    // quota_critical/quota_warning/health_dead/health_degraded/error_spike
-	Level        string `json:"level"`   // red/orange/yellow/green
+	Type         string `json:"type"`  // quota_critical/quota_warning/health_dead/health_degraded/error_spike
+	Level        string `json:"level"` // red/orange/yellow/green
 	Message      string `json:"message"`
 	Timestamp    string `json:"timestamp"`
 }

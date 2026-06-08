@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """Provider Channel 渠道管理 API"""
 import json
 from flask import Blueprint, jsonify, request
@@ -5,6 +8,7 @@ from models.channel import ProviderChannel
 from models.provider import Provider
 from models.wr_models import ProviderExt
 from extensions import db
+from i18n.messages import get_message
 
 channel_bp = Blueprint('channel', __name__)
 
@@ -14,7 +18,7 @@ def list_channels(provider_id):
     """列出某 Provider 下的所有渠道"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     channels = ProviderChannel.query.filter_by(provider_id=provider_id).order_by(
         ProviderChannel.priority.desc(), ProviderChannel.id
@@ -36,7 +40,7 @@ def list_channels(provider_id):
     default_channel = {
         'id': 0,
         'provider_id': provider_id,
-        'name': '(Provider默认)',
+        'name': '(Provider default)',
         'base_url': provider.base_url,
         'api_key_masked': provider.api_key_masked or '***',
         'models': provider.models_list,
@@ -60,11 +64,11 @@ def create_channel(provider_id):
     """为 Provider 新增渠道"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     data = request.get_json()
     if not data or not data.get('name'):
-        return jsonify({'error': '渠道名称不能为空'}), 400
+        return jsonify({'error': get_message('channel_name_required', request)}), 400
 
     ch = ProviderChannel(
         provider_id=provider_id,
@@ -83,7 +87,7 @@ def create_channel(provider_id):
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': '渠道创建成功', 'channel': ch.to_dict(include_secrets=True)}), 201
+    return jsonify({'message': get_message('channel_created', request), 'channel': ch.to_dict(include_secrets=True)}), 201
 
 
 @channel_bp.route('/<int:provider_id>/channels/<int:channel_id>', methods=['PUT'])
@@ -95,7 +99,7 @@ def update_channel(provider_id, channel_id):
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     for field in ['name', 'base_url', 'api_key', 'notes']:
         if field in data:
@@ -117,7 +121,7 @@ def update_channel(provider_id, channel_id):
     db.session.commit()
 
     _notify_proxy_reload()
-    return jsonify({'message': '渠道更新成功', 'channel': ch.to_dict()})
+    return jsonify({'message': get_message('channel_updated', request), 'channel': ch.to_dict()})
 
 
 @channel_bp.route('/<int:provider_id>/channels/<int:channel_id>', methods=['DELETE'])
@@ -139,11 +143,11 @@ def batch_create_channels(provider_id):
     """批量创建渠道（一次性添加多个 Key）"""
     provider = Provider.query.get(provider_id)
     if not provider:
-        return jsonify({'error': 'Provider not found'}), 404
+        return jsonify({'error': get_message('provider_not_found', request)}), 404
 
     data = request.get_json()
     if not data or 'channels' not in data:
-        return jsonify({'error': '需要 channels 数组'}), 400
+        return jsonify({'error': get_message('field_required_channels_array', request)}), 400
 
     created = []
     for item in data['channels']:
@@ -169,7 +173,7 @@ def batch_create_channels(provider_id):
     _notify_proxy_reload()
 
     return jsonify({
-        'message': f'批量创建完成: {len(created)} 个渠道',
+        'message': get_message('channel_batch_created', request).format(len=len(created)),
         'created': len(created),
         'channels': [ch.to_dict(include_secrets=True) for ch in created],
     }), 201

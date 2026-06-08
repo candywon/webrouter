@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Provider 数据源管理页面 JS
  */
@@ -35,7 +38,7 @@ class ProvidersPage {
         } catch (e) {
             console.error('Failed to load providers:', e);
             document.getElementById('page-content').innerHTML =
-                '<div class="error-msg">加载失败，请刷新重试</div>';
+                '<div class="error-msg">' + I18n.t('common.loadFailedRetry') + '</div>';
         }
     }
 
@@ -47,30 +50,19 @@ class ProvidersPage {
         const container = document.getElementById('page-content');
         if (!container) return;
 
-        const statusIcon = {
-            'healthy': '🟢',
-            'warning': '🟡',
-            'dead': '🔴',
-            'disabled': '⏸',
-            'rate_limited': '🟡',
-            'auth_failed': '🔴',
-            'timeout': '🟡',
-            'unchecked': '⚪',
-            'unhealthy': '🟠',
-            'unknown': '⚪',
-        };
+        const dotFor = (status) => `<span class="status-dot dot-${status || 'unknown'}"></span>`;
 
         const typeLabel = {
-            'direct': '直连官方',
-            'aggregate': '聚合平台',
+            'direct': I18n.t("providers.direct"),
+            'aggregate': I18n.t("providers.aggregate"),
             'litellm': 'LiteLLM',
-            'custom': '自定义',
+            'custom': I18n.t("common.custom"),
         };
 
         let html = `
             <div class="page-header">
-                <h2>🔌 数据源管理</h2>
-                <button class="btn-primary" onclick="providersPage.showAddForm()">+ 添加数据源</button>
+                <h2>🔌 ${I18n.t('providers.title')}</h2>
+                <button class="btn-primary" onclick="providersPage.showAddForm()">+ ${I18n.t('providers.addProvider')}</button>
             </div>
             <div class="provider-list">
         `;
@@ -78,16 +70,16 @@ class ProvidersPage {
         if (this.providers.length === 0) {
             html += `
                 <div class="empty-state">
-                    <p>还没有注册任何数据源</p>
-                    <p class="hint">点击"添加数据源"开始管理你的 API 资源</p>
+                    <p>${I18n.t('providers.noProviders')}</p>
+                    <p class="hint">${I18n.t('providers.addProviderHint')}</p>
                 </div>
             `;
         } else {
             for (const p of this.providers) {
-                const icon = statusIcon[p.status] || '⚪';
+                const icon = dotFor(p.status);
                 const type = typeLabel[p.type] || p.type;
                 const latency = p.last_latency_ms != null ? `${p.last_latency_ms}ms` : '-';
-                const checked = p.last_check_at ? this.formatTime(p.last_check_at) : '未检测';
+                const checked = p.last_check_at ? this.formatTime(p.last_check_at) : I18n.t("providers.unchecked");
 
                 html += `
                 <div class="provider-card ${p.status === 'dead' ? 'provider-dead' : ''}" data-id="${p.id}">
@@ -100,15 +92,15 @@ class ProvidersPage {
                     <div class="provider-meta">
                         <span class="provider-url">${this.escHtml(p.base_url)}</span>
                         <span class="provider-latency">${latency}</span>
-                        <span class="provider-checked">检测于 ${checked}</span>
+                        <span class="provider-checked">${I18n.t('providers.checkedAt')}${checked}</span>
                     </div>
                     ${p.api_key_masked ? `<div class="provider-key">Key: ${this.escHtml(p.api_key_masked)}</div>` : ''}
-                    ${p.last_error ? `<div class="provider-error">错误: ${this.escHtml(p.last_error)}</div>` : ''}
+                    ${p.last_error ? `<div class="provider-error">${I18n.t('providers.error')}${this.escHtml(p.last_error)}</div>` : ''}
                     <div class="provider-actions">
-                        <button class="btn-sm" onclick="providersPage.checkOne(${p.id})">🔍 检测</button>
-                        <button class="btn-sm" onclick="Router.navigate('/providers/${p.id}/channels')">📡 渠道</button>
-                        <button class="btn-sm" onclick="providersPage.editProvider(${p.id})">✏️ 编辑</button>
-                        <button class="btn-sm btn-danger" onclick="providersPage.deleteProvider(${p.id})">🗑️ 删除</button>
+                        <button class="btn-sm" onclick="providersPage.checkOne(${p.id})">🔍 ${I18n.t('common.check')}</button>
+                        <button class="btn-sm" onclick="Router.navigate('/providers/${p.id}/channels')">📡 ${I18n.t('nav.channels')}</button>
+                        <button class="btn-sm" onclick="providersPage.editProvider(${p.id})">✏️ ${I18n.t('common.edit')}</button>
+                        <button class="btn-sm btn-danger" onclick="providersPage.deleteProvider(${p.id})">🗑️ ${I18n.t('common.delete')}</button>
                     </div>
                 </div>
                 `;
@@ -118,35 +110,35 @@ class ProvidersPage {
         html += `
             </div>
             <div class="provider-actions-bar">
-                <button class="btn-secondary" onclick="providersPage.checkAll()">🔍 全量检测</button>
+                <button class="btn-secondary" onclick="providersPage.checkAll()">🔍 ${I18n.t('providers.checkAllBtn')}</button>
             </div>
 
             <!-- 添加/编辑表单（隐藏） -->
             <div id="provider-form-modal" class="modal" style="display:none">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3 id="form-title">添加数据源</h3>
+                        <h3 id="form-title">${I18n.t('providers.addProvider')}</h3>
                         <button class="modal-close" onclick="providersPage.hideForm()">&times;</button>
                     </div>
                     <div class="modal-body">
                         <form id="provider-form">
                             <div class="form-group">
-                                <label>类型</label>
+                                <label>${I18n.t('common.type')}</label>
                                 <select id="pf-type" onchange="providersPage.onTypeChange()">
-                                    <option value="direct">🔌 直连官方</option>
-                                    <option value="aggregate">🔀 聚合平台</option>
-                                    <option value="litellm">🦙 LiteLLM 代理</option>
-                                    <option value="custom">⚙️ 自定义网关</option>
+                                    <option value="direct">🔌 ${I18n.t('providers.direct')}</option>
+                                    <option value="aggregate">🔀 ${I18n.t('providers.aggregate')}</option>
+                                    <option value="litellm">🦙 ${I18n.t('providers.litellmProxy')}</option>
+                                    <option value="custom">⚙️ ${I18n.t('providers.customGateway')}</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>名称 *</label>
-                                <input type="text" id="pf-name" required placeholder="如: OpenAI 官方">
+                                <label>${I18n.t('common.nameRequired')}</label>
+                                <input type="text" id="pf-name" required placeholder="${I18n.t('providers.namePlaceholder')}">
                             </div>
                             <div class="form-group">
                                 <label>Base URL *</label>
-                                <input type="text" id="pf-base-url" required placeholder="如: https://api.openai.com">
-                                <button type="button" class="btn-sm" onclick="providersPage.autoDetect()" style="margin-top:4px">🔍 自动检测类型</button>
+                                <input type="text" id="pf-base-url" required placeholder="e.g. https://api.openai.com">
+                                <button type="button" class="btn-sm" onclick="providersPage.autoDetect()" style="margin-top:4px">🔍 ${I18n.t('providers.autoDetect')}</button>
                             </div>
                             <div class="form-group" id="pf-api-key-group">
                                 <label>API Key</label>
@@ -157,21 +149,28 @@ class ProvidersPage {
                                 <input type="password" id="pf-master-key" placeholder="LiteLLM Master Key">
                             </div>
                             <div class="form-group" id="pf-health-endpoint-group" style="display:none">
-                                <label>健康检测端点</label>
-                                <input type="text" id="pf-health-endpoint" placeholder="如: /health">
+                                <label>${I18n.t('providers.healthEndpoint')}</label>
+                                <input type="text" id="pf-health-endpoint" placeholder="${I18n.t('common.placeholderExampleHealth')}">
                             </div>
                             <div class="form-group">
-                                <label>可用模型（逗号分隔，留空=全部）</label>
-                                <input type="text" id="pf-models" placeholder="如: gpt-4o, claude-3-5-sonnet">
-                                <span class="hint">留空表示不限制，支持该 Provider 的所有模型</span>
+                                <label>${I18n.t('providers.modelsHint')}</label>
+                                <input type="text" id="pf-models" placeholder="${I18n.t('common.placeholderExampleModels')}">
+                                <span class="hint">${I18n.t('providers.modelsUnlimitedHint')}</span>
                             </div>
                             <div class="form-group">
-                                <label>备注</label>
-                                <textarea id="pf-notes" rows="2" placeholder="可选"></textarea>
+                                <label>${I18n.t('common.notes')}</label>
+                                <textarea id="pf-notes" rows="2" placeholder="${I18n.t('common.placeholderOptional')}"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                                    <input type="checkbox" id="pf-fallback-enabled" checked>
+                                    <span>${I18n.t('providers.fallbackEnabled')}</span>
+                                </label>
+                                <span class="hint">${I18n.t('providers.fallbackHint')}</span>
                             </div>
                             <div class="form-actions">
-                                <button type="submit" class="btn-primary">保存</button>
-                                <button type="button" class="btn-secondary" onclick="providersPage.hideForm()">取消</button>
+                                <button type="submit" class="btn-primary">${I18n.t('common.save')}</button>
+                                <button type="button" class="btn-secondary" onclick="providersPage.hideForm()">${I18n.t('common.cancel')}</button>
                             </div>
                         </form>
                     </div>
@@ -192,10 +191,11 @@ class ProvidersPage {
 
     showAddForm() {
         this.editingId = null;
-        document.getElementById('form-title').textContent = '添加数据源';
+        document.getElementById('form-title').textContent = I18n.t("providers.addFormTitle");
         document.getElementById('provider-form').reset();
         document.getElementById('pf-type').value = 'direct';
         document.getElementById('pf-models').value = '';
+        document.getElementById('pf-fallback-enabled').checked = true;
         this.onTypeChange();
         document.getElementById('provider-form-modal').style.display = 'flex';
 
@@ -211,13 +211,14 @@ class ProvidersPage {
         if (!p) return;
 
         this.editingId = id;
-        document.getElementById('form-title').textContent = '编辑数据源';
+        document.getElementById('form-title').textContent = I18n.t("providers.editFormTitle");
         document.getElementById('pf-type').value = p.type;
         document.getElementById('pf-name').value = p.name;
         document.getElementById('pf-base-url').value = p.base_url;
         document.getElementById('pf-notes').value = p.notes || '';
         const models = (p.models && Array.isArray(p.models)) ? p.models.join(', ') : (p.models || '');
         document.getElementById('pf-models').value = models;
+        document.getElementById('pf-fallback-enabled').checked = p.fallback_enabled !== false;
         this.onTypeChange();
         document.getElementById('provider-form-modal').style.display = 'flex';
 
@@ -242,6 +243,7 @@ class ProvidersPage {
             name: document.getElementById('pf-name').value.trim(),
             base_url: document.getElementById('pf-base-url').value.trim(),
             notes: document.getElementById('pf-notes').value.trim(),
+            fallback_enabled: document.getElementById('pf-fallback-enabled').checked,
         };
 
         if (models.length > 0) data.models = models;
@@ -250,7 +252,7 @@ class ProvidersPage {
         if (keyVal) {
             data.api_key = keyVal;
         } else if (!this.editingId) {
-            showToast('API Key 不能为空');
+            showToast(I18n.t("providers.apiKeyRequired"));
             return;
         }
         // 编辑时 key 留空表示不修改
@@ -271,7 +273,7 @@ class ProvidersPage {
             this.hideForm();
             await this.loadProviders();
         } catch (e) {
-            alert('保存失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -281,37 +283,37 @@ class ProvidersPage {
             alert(`${result.name}: ${result.status} (${result.latency_ms || 0}ms)`);
             await this.loadProviders();
         } catch (e) {
-            alert('检测失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("common.checkFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     async checkAll() {
         try {
             const data = await API.post('/providers/check_all');
-            alert(`检测完成: ${data.total}个数据源`);
+            alert(I18n.t('providers.checkAllDone', {total: data.total}));
             await this.loadProviders();
         } catch (e) {
-            alert('全量检测失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("providers.checkAllFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     async deleteProvider(id) {
         const p = this.providers.find(x => x.id === id);
         if (!p) return;
-        if (!confirm(`确定删除数据源 "${p.name}" 吗？`)) return;
+        if (!confirm(I18n.t('providers.confirmDelete', {name: p.name}))) return;
 
         try {
             await API.del(`/providers/${id}`);
             await this.loadProviders();
         } catch (e) {
-            alert('删除失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("common.deleteFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     async autoDetect() {
         const baseUrl = document.getElementById('pf-base-url').value.trim();
         if (!baseUrl) {
-            alert('请先输入 Base URL');
+            alert(I18n.t("providers.enterBaseUrl"));
             return;
         }
 
@@ -320,7 +322,7 @@ class ProvidersPage {
             if (data.detected_type) {
                 document.getElementById('pf-type').value = data.detected_type;
                 this.onTypeChange();
-                alert(`检测到类型: ${data.type_config?.label || data.detected_type}`);
+                alert(I18n.t('providers.detectedType') + (data.type_config?.label || data.detected_type));
             }
         } catch (e) {
             console.warn('Auto detect failed:', e);

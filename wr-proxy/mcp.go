@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -38,6 +41,8 @@ type MCPCapabilities struct {
 	Tools *struct {
 		ListChanged bool `json:"listChanged"`
 	} `json:"tools,omitempty"`
+	Resources *struct{} `json:"resources,omitempty"`
+	Prompts   *struct{} `json:"prompts,omitempty"`
 }
 
 // MCPInitParams initialize 请求参数
@@ -49,8 +54,8 @@ type MCPInitParams struct {
 
 // MCPInitResult initialize 响应
 type MCPInitResult struct {
-	ProtocolVersion string          `json:"protocolVersion"`
-	Capabilities    MCPCapabilities `json:"capabilities"`
+	ProtocolVersion string            `json:"protocolVersion"`
+	Capabilities    MCPCapabilities   `json:"capabilities"`
 	ServerInfo      map[string]string `json:"serverInfo"`
 }
 
@@ -60,11 +65,11 @@ const (
 	MCPServerVersion   = "1.0.0"
 
 	// JSON-RPC 错误码
-	ErrParse     = -32700
-	ErrInvalid   = -32600
-	ErrMethod    = -32601
-	ErrParams    = -32602
-	ErrInternal  = -32603
+	ErrParse    = -32700
+	ErrInvalid  = -32600
+	ErrMethod   = -32601
+	ErrParams   = -32602
+	ErrInternal = -32603
 )
 
 // handleMCP MCP 协议入口
@@ -91,6 +96,14 @@ func handleMCP(w http.ResponseWriter, r *http.Request) {
 		handleMCPToolsList(w, req.ID)
 	case "tools/call":
 		handleMCPCall(w, req.ID, req.Params)
+	case "resources/list":
+		handleMCPResourcesList(w, req.ID)
+	case "resources/read":
+		handleMCPResourceRead(w, req.ID, req.Params)
+	case "prompts/list":
+		handleMCPPromptsList(w, req.ID)
+	case "prompts/get":
+		handleMCPPromptsGet(w, req.ID, req.Params)
 	default:
 		writeMCPError(w, http.StatusOK, req.ID, ErrMethod, "Method not found: "+req.Method)
 	}
@@ -108,6 +121,8 @@ func handleMCPInitialize(w http.ResponseWriter, id *int64, params json.RawMessag
 			Tools: &struct {
 				ListChanged bool `json:"listChanged"`
 			}{ListChanged: true},
+			Resources: &struct{}{},
+			Prompts:   &struct{}{},
 		},
 		ServerInfo: map[string]string{
 			"name":    MCPServerName,
@@ -151,6 +166,8 @@ func handleMCPCall(w http.ResponseWriter, id *int64, params json.RawMessage) {
 		writeMCPError(w, http.StatusOK, id, ErrInternal, err.Error())
 		return
 	}
+
+	LogAudit("mcp_tool_call", "mcp", callParams.Name, 0, nil, "")
 
 	writeMCPResponse(w, id, map[string]interface{}{
 		"content": []map[string]interface{}{

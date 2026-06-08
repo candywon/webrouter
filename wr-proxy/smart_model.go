@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 智能模型选择：根据请求复杂度自动匹配最优模型
@@ -17,9 +20,11 @@ import (
 type ModelTier string
 
 const (
-	TierEconomy  ModelTier = "economy"  // 便宜快速
-	TierStandard ModelTier = "standard" // 中等性价比
-	TierPremium  ModelTier = "premium"  // 最强推理
+	TierEconomy  ModelTier = "economy"  // 便宜快速（闲聊、翻译、短问答）
+	TierStandard ModelTier = "standard" // 日常通用（写作、总结、格式转换）
+	TierEnhanced ModelTier = "enhanced" // 增强（代码生成、多步推理、文档撰写）
+	TierPremium  ModelTier = "premium"  // 高端（复杂架构、数学证明、长文分析）
+	TierFlagship ModelTier = "flagship" // 旗舰（科研、竞赛、多模态深度推理）
 )
 
 // ModelGrade 模型分级定义
@@ -37,7 +42,18 @@ type ModelGrade struct {
 var modelGrades []ModelGrade
 
 // RefreshModelGrades 从 DB 重新加载模型分级（热刷新，由 /admin/reload_model_grades 触发）
+// 同时自动为未分级的可用模型推断 tier 并写入 DB
 func RefreshModelGrades() error {
+	// 1. 自动补全：扫描所有可用模型，未分级的按规则推断 tier
+	autoGraded, err := autoGradeMissingModels()
+	if err != nil {
+		LogWarn("RefreshModelGrades: auto-grade failed: %v", err)
+		// 不阻断，继续加载已有数据
+	} else if autoGraded > 0 {
+		LogInfo("RefreshModelGrades: auto-graded %d new models", autoGraded)
+	}
+
+	// 2. 加载全部分级数据
 	grades, err := LoadModelGrades()
 	if err != nil {
 		return err
@@ -59,7 +75,9 @@ type ComplexityLevel int
 const (
 	ComplexitySimple   ComplexityLevel = 0 // 简单
 	ComplexityModerate ComplexityLevel = 1 // 中等
-	ComplexityComplex  ComplexityLevel = 2 // 复杂
+	ComplexityHigh     ComplexityLevel = 2 // 较高
+	ComplexityComplex  ComplexityLevel = 3 // 复杂
+	ComplexityExtreme  ComplexityLevel = 4 // 极端复杂
 )
 
 // ComplexityScore 复杂度评分结果
@@ -77,8 +95,10 @@ type ComplexityScore struct {
 
 // ComplexityConfig 六维度复杂度评估配置（从 DB 加载）
 type ComplexityConfig struct {
-	SimpleMax  float64
+	SimpleMax   float64
 	ModerateMax float64
+	HighMax     float64
+	ExtremeMax  float64
 
 	InputLengthEnabled bool
 	InputLengthLevels  []struct {
@@ -100,11 +120,11 @@ type ComplexityConfig struct {
 	ToolsScore            float64
 	FunctionsScore        float64
 
-	ReasoningEnabled bool
-	ReasoningScore   float64
+	ReasoningEnabled  bool
+	ReasoningScore    float64
 	ReasoningKeywords []string
 
-	SystemPromptEnabled  bool
+	SystemPromptEnabled   bool
 	SystemPromptThreshold int
 	SystemPromptScore     float64
 }
@@ -130,8 +150,10 @@ func LoadComplexityConfig() {
 
 	var cfg struct {
 		TierThresholds struct {
-			SimpleMax  float64 `json:"simple_max"`
+			SimpleMax   float64 `json:"simple_max"`
 			ModerateMax float64 `json:"moderate_max"`
+			HighMax     float64 `json:"high_max"`
+			ExtremeMax  float64 `json:"extreme_max"`
 		} `json:"tier_thresholds"`
 		InputLength struct {
 			Enabled bool `json:"enabled"`
@@ -163,9 +185,9 @@ func LoadComplexityConfig() {
 			Keywords []string `json:"keywords"`
 		} `json:"reasoning_keywords"`
 		SystemPrompt struct {
-			Enabled    bool    `json:"enabled"`
-			MaxChars   float64 `json:"threshold_chars"`
-			Score      float64 `json:"score"`
+			Enabled  bool    `json:"enabled"`
+			MaxChars float64 `json:"threshold_chars"`
+			Score    float64 `json:"score"`
 		} `json:"system_prompt"`
 	}
 
@@ -178,6 +200,8 @@ func LoadComplexityConfig() {
 	complexityConfig = ComplexityConfig{
 		SimpleMax:   cfg.TierThresholds.SimpleMax,
 		ModerateMax: cfg.TierThresholds.ModerateMax,
+		HighMax:     cfg.TierThresholds.HighMax,
+		ExtremeMax:  cfg.TierThresholds.ExtremeMax,
 	}
 
 	if cfg.InputLength.Enabled && len(cfg.InputLength.Levels) > 0 {
@@ -238,30 +262,32 @@ func ReloadComplexityConfig() {
 // setDefaultComplexityConfig 设置内置默认值（DB 无配置时的兜底）
 func setDefaultComplexityConfig() {
 	complexityConfig = ComplexityConfig{
-		SimpleMax:   0.20,
-		ModerateMax: 0.45,
+		SimpleMax:          0.15,
+		ModerateMax:        0.30,
+		HighMax:            0.50,
+		ExtremeMax:         0.70,
 		InputLengthEnabled: true,
 		InputLengthLevels: []struct {
 			MaxChars int
 			Score    float64
 		}{
-			{200, 0.05}, {800, 0.12}, {2000, 0.20}, {0, 0.30},
+			{200, 0.03}, {800, 0.08}, {2000, 0.14}, {5000, 0.22}, {0, 0.30},
 		},
 		MultiTurnEnabled: true,
 		MultiTurnLevels: []struct {
 			MaxMsgs int
 			Score   float64
 		}{
-			{2, 0.0}, {5, 0.08}, {10, 0.15}, {0, 0.20},
+			{2, 0.0}, {5, 0.05}, {10, 0.10}, {20, 0.16}, {0, 0.22},
 		},
-		CodeDetectionEnabled: true,
-		CodeDetectionScore:   0.15,
-		CodeKeywords:         []string{"```", "def ", "function ", "class ", "import ", "return "},
+		CodeDetectionEnabled:  true,
+		CodeDetectionScore:    0.14,
+		CodeKeywords:          []string{"```", "def ", "function ", "class ", "import ", "return "},
 		ToolsDetectionEnabled: true,
-		ToolsScore:            0.20,
-		FunctionsScore:        0.15,
-		ReasoningEnabled:     true,
-		ReasoningScore:       0.12,
+		ToolsScore:            0.16,
+		FunctionsScore:        0.12,
+		ReasoningEnabled:      true,
+		ReasoningScore:        0.14,
 		ReasoningKeywords: []string{
 			"分析", "推理", "证明", "计算", "推导",
 			"explain", "analyze", "reason", "prove", "calculate",
@@ -271,7 +297,7 @@ func setDefaultComplexityConfig() {
 		},
 		SystemPromptEnabled:   true,
 		SystemPromptThreshold: 500,
-		SystemPromptScore:     0.08,
+		SystemPromptScore:     0.06,
 	}
 }
 
@@ -407,8 +433,12 @@ func EvalComplexity(body []byte) ComplexityScore {
 		score.Level = ComplexitySimple
 	case total < cfg.ModerateMax:
 		score.Level = ComplexityModerate
-	default:
+	case total < cfg.HighMax:
+		score.Level = ComplexityHigh
+	case total < cfg.ExtremeMax:
 		score.Level = ComplexityComplex
+	default:
+		score.Level = ComplexityExtreme
 	}
 
 	return score
@@ -418,16 +448,17 @@ func EvalComplexity(body []byte) ComplexityScore {
 
 // SmartSelectResult 智能选择结果
 type SmartSelectResult struct {
-	OriginalModel  string
-	ResolvedModel  string
-	Downgraded     bool
-	Complexity     ComplexityScore
-	TargetTier     ModelTier
-	Reason         string
+	OriginalModel     string
+	ResolvedModel     string
+	Downgraded        bool
+	Complexity        ComplexityScore
+	TargetTier        ModelTier
+	Reason            string
+	PreferredProvider *Provider // cost_optimal 策略预选的 Provider
 }
 
 // SmartModelSelect 智能模型选择入口
-func SmartModelSelect(requestedModel string, body []byte, token *Token) SmartSelectResult {
+func SmartModelSelect(requestedModel string, body []byte, token *Token, sessionID string) SmartSelectResult {
 	result := SmartSelectResult{
 		OriginalModel: requestedModel,
 		ResolvedModel: requestedModel,
@@ -435,29 +466,74 @@ func SmartModelSelect(requestedModel string, body []byte, token *Token) SmartSel
 
 	// 评估复杂度
 	complexity := EvalComplexity(body)
+
+	// Session 上下文感知：已累积大量 context 时提升复杂度
+	if token != nil {
+		if ctxTokens := estimateSessionContextTokens(sessionID, token.ID); ctxTokens > 0 {
+			if ctxTokens > 16000 {
+				complexity.Score += 0.15
+				complexity.Reasons = append(complexity.Reasons, "large_session_context")
+			} else if ctxTokens > 8000 {
+				complexity.Score += 0.08
+				complexity.Reasons = append(complexity.Reasons, "medium_session_context")
+			}
+			// 重新判定 level
+			cfg := &complexityConfig
+			switch {
+			case complexity.Score < cfg.SimpleMax:
+				complexity.Level = ComplexitySimple
+			case complexity.Score < cfg.ModerateMax:
+				complexity.Level = ComplexityModerate
+			case complexity.Score < cfg.HighMax:
+				complexity.Level = ComplexityHigh
+			case complexity.Score < cfg.ExtremeMax:
+				complexity.Level = ComplexityComplex
+			default:
+				complexity.Level = ComplexityExtreme
+			}
+		}
+	}
 	result.Complexity = complexity
 
 	// ── 模式1: auto/smart 别名 ──
 	if requestedModel == "auto" || requestedModel == "smart" {
 		tier := complexityToTier(complexity.Level)
+
+		// 配额感知：配额紧张时自动降级 tier
+		tier = adjustTierForQuota(tier, token)
 		result.TargetTier = tier
+
+		// cost_optimal 策略：同时选模型 + Provider
+		if router.Strategy() == "cost_optimal" {
+			model, prov := selectCostOptimal(tier, token, body)
+			if model != "" {
+				result.ResolvedModel = model
+				result.Reason = "cost_optimal"
+				if prov != nil {
+					result.PreferredProvider = prov
+				}
+				if model != requestedModel {
+					result.Downgraded = true
+				}
+				return result
+			}
+		}
+
 		model := selectModelByTier(tier, token)
 		result.ResolvedModel = model
 		result.Reason = "auto_mode"
 		if model != requestedModel {
 			result.Downgraded = true
 		}
-		LogInfo("SmartSelect: auto → %s (tier=%s, score=%.2f, reasons=%v)",
-			model, tier, complexity.Score, complexity.Reasons)
 		return result
 	}
 
 	// ── 模式2: 自动降级（Token 开关控制）──
 	if token != nil && token.SmartDowngrade {
 		requestedTier := findModelTier(requestedModel)
-		if requestedTier == TierPremium || requestedTier == TierEconomy {
-			// 只对 premium 模型做降级，economy 不升级
-			// 但如果请求的就是 economy，也不需要升级（尊重用户选择更便宜的）
+		if requestedTier != TierEconomy {
+			// 只对 enhanced/premium/flagship 做降级，economy 不升级
+			// 尊重用户主动选择更便宜模型的决定
 			optimalTier := complexityToTier(complexity.Level)
 
 			// 只有当最优 tier 低于请求 tier 时才降级
@@ -468,9 +544,6 @@ func SmartModelSelect(requestedModel string, body []byte, token *Token) SmartSel
 					result.TargetTier = optimalTier
 					result.Downgraded = true
 					result.Reason = "smart_downgrade"
-					LogInfo("SmartSelect: %s → %s (tier=%s→%s, score=%.2f, reasons=%v)",
-						requestedModel, downgradedModel, requestedTier, optimalTier,
-						complexity.Score, complexity.Reasons)
 					return result
 				}
 			}
@@ -488,8 +561,12 @@ func complexityToTier(level ComplexityLevel) ModelTier {
 		return TierEconomy
 	case ComplexityModerate:
 		return TierStandard
-	default:
+	case ComplexityHigh:
+		return TierEnhanced
+	case ComplexityComplex:
 		return TierPremium
+	default:
+		return TierFlagship
 	}
 }
 
@@ -504,7 +581,7 @@ func findModelTier(model string) ModelTier {
 }
 
 func tierLessThan(a, b ModelTier) bool {
-	order := map[ModelTier]int{TierEconomy: 0, TierStandard: 1, TierPremium: 2}
+	order := map[ModelTier]int{TierEconomy: 0, TierStandard: 1, TierEnhanced: 2, TierPremium: 3, TierFlagship: 4}
 	return order[a] < order[b]
 }
 
@@ -514,7 +591,10 @@ func selectModelByTier(tier ModelTier, token *Token) string {
 	availableModels := getAvailableModels(token)
 
 	// 从该 tier 中找成本最低的可用模型
+	// 从该 tier 中找成本最低的可用模型
+	// 优先用 pricing 表实时单价，无定价数据时 fallback 到静态 CostIdx
 	var best *ModelGrade
+	var bestCost float64 = -1
 	for i := range modelGrades {
 		g := &modelGrades[i]
 		if g.Tier != tier {
@@ -523,16 +603,24 @@ func selectModelByTier(tier ModelTier, token *Token) string {
 		if !modelInAvailable(g.Model, availableModels) {
 			continue
 		}
-		if best == nil || g.CostIdx < best.CostIdx {
+		cost := modelRealCost(g)
+		if best == nil || cost < bestCost {
 			best = g
+			bestCost = cost
 		}
 	}
 	if best != nil {
 		return best.Model
 	}
 
-	// 该 tier 没有可用模型，往上一级找
+	// 该 tier 没有可用模型，往下一级找（降级优先保可用性）
+	if tier == TierFlagship {
+		return selectModelByTier(TierPremium, token)
+	}
 	if tier == TierPremium {
+		return selectModelByTier(TierEnhanced, token)
+	}
+	if tier == TierEnhanced {
 		return selectModelByTier(TierStandard, token)
 	}
 	if tier == TierStandard {
@@ -622,4 +710,294 @@ func replaceModelInBody(body []byte, oldModel, newModel string) []byte {
 		return body
 	}
 	return newBody
+}
+
+// modelRealCost 计算模型的真实成本：优先用 pricing 表实时单价，否则用静态 CostIdx
+func modelRealCost(g *ModelGrade) float64 {
+	if p, ok := GetModelPricing(g.Model); ok {
+		// 用 (input_price + output_price) / 2 作为综合成本指标
+		// output 通常比 input 贵，这里加权：input 40% + output 60%
+		return p.Input*0.4 + p.Output*0.6
+	}
+	// fallback 到静态 CostIdx
+	return g.CostIdx
+}
+
+// selectCostOptimal 选择成本最优的模型+Provider 组合
+// 综合考虑：模型 tier × 实时单价 × Provider CostMultiplier × 预估 token 数
+func selectCostOptimal(tier ModelTier, token *Token, body []byte) (string, *Provider) {
+	availableModels := getAvailableModels(token)
+	providers := router.GetProviders()
+
+	// 预估 token 数（基于字数粗估）
+	estInputTokens := estimateInputTokens(body)
+
+	var bestModel string
+	var bestProvider *Provider
+	var bestEstCost float64 = -1
+
+	// 遍历 tier 内所有可用模型
+	for i := range modelGrades {
+		g := &modelGrades[i]
+		if g.Tier != tier {
+			continue
+		}
+		if !modelInAvailable(g.Model, availableModels) {
+			continue
+		}
+
+		// 查模型单价
+		var inputPrice, outputPrice float64
+		if p, ok := GetModelPricing(g.Model); ok {
+			inputPrice = p.Input
+			outputPrice = p.Output
+		} else {
+			// 无定价：按 CostIdx 估算（CostIdx=1 → ~0.01 分/千token）
+			inputPrice = g.CostIdx * 0.01
+			outputPrice = g.CostIdx * 0.03
+		}
+
+		// 查该模型可用的最便宜 Provider
+		for _, prov := range providers {
+			if !prov.Enabled || !prov.ProxyEnabled {
+				continue
+			}
+			if !prov.IsAvailable(g.Model) {
+				continue
+			}
+			if token != nil && !token.CanUseProvider(prov.ID) {
+				continue
+			}
+			if !modelInProviderModels(g.Model, prov.Models) {
+				continue
+			}
+
+			// 预估成本 = input_tokens/1000 * input_price * multiplier + output_tokens/1000 * output_price * multiplier
+			multiplier := prov.CostMultiplier
+			if multiplier <= 0 {
+				multiplier = 1.0
+			}
+			estOutputTokens := estInputTokens / 2 // 粗估 output 为 input 的一半
+			estCost := float64(estInputTokens)/1000.0*inputPrice*multiplier +
+				float64(estOutputTokens)/1000.0*outputPrice*multiplier
+
+			if bestEstCost < 0 || estCost < bestEstCost {
+				bestModel = g.Model
+				bestProvider = prov
+				bestEstCost = estCost
+			}
+		}
+	}
+
+	return bestModel, bestProvider
+}
+
+// estimateInputTokens 基于请求体估算 input token 数
+func estimateInputTokens(body []byte) int {
+	// 粗估：英文字符/4, 中文字符/2
+	charCount := utf8.RuneCount(body)
+	// 假设混合内容，取中间值 ~3 字符/token
+	return charCount / 3
+}
+
+// modelInProviderModels 检查模型是否在 Provider 的模型列表中
+func modelInProviderModels(model, modelsJSON string) bool {
+	for _, m := range parseModelsList(modelsJSON) {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+
+// adjustTierForQuota 根据配额使用率动态调整 tier（配额紧张时自动降级）
+func adjustTierForQuota(tier ModelTier, token *Token) ModelTier {
+	if token == nil || token.QuotaTotal <= 0 {
+		return tier
+	}
+	ratio := float64(token.QuotaUsed) / float64(token.QuotaTotal)
+	switch {
+	case ratio > 0.95:
+		// 配额 >95% 用完 → 最多给 economy
+		return TierEconomy
+	case ratio > 0.85:
+		// 配额 >85% → 最多给 standard
+		if tierOrder(tier) > tierOrder(TierStandard) {
+			return TierStandard
+		}
+	case ratio > 0.70:
+		// 配额 >70% → 最多给 enhanced
+		if tierOrder(tier) > tierOrder(TierEnhanced) {
+			return TierEnhanced
+		}
+	}
+	return tier
+}
+
+// tierOrder 返回 tier 的数值排序
+func tierOrder(tier ModelTier) int {
+	switch tier {
+	case TierEconomy:
+		return 0
+	case TierStandard:
+		return 1
+	case TierEnhanced:
+		return 2
+	case TierPremium:
+		return 3
+	case TierFlagship:
+		return 4
+	default:
+		return 1
+	}
+}
+
+// estimateSessionContextTokens 估算会话已累积的 context token 数
+// 使用 wr_session_messages 表统计该 session 的历史消息字符数，粗估为 token 数
+func estimateSessionContextTokens(sessionID string, tokenID int) int {
+	if sessionID == "" || tokenID <= 0 {
+		return 0
+	}
+	var totalChars int
+	err := db.QueryRow(`
+		SELECT COALESCE(SUM(LENGTH(content)), 0)
+		FROM wr_session_messages
+		WHERE session_id = ? AND token_id = ?`,
+		sessionID, tokenID).Scan(&totalChars)
+	if err != nil {
+		return 0
+	}
+	return totalChars / 3 // 粗估：~3 字符/token
+}
+
+// ── 自动分级推断 ──
+
+// autoGradeMissingModels 扫描所有可用模型，对未分级的模型按名称规则推断 tier 并写入 DB
+func autoGradeMissingModels() (int, error) {
+	// 1. 收集所有可用模型
+	providers := router.GetProviders()
+	modelSet := make(map[string]bool)
+	for _, p := range providers {
+		if !p.Enabled || !p.ProxyEnabled {
+			continue
+		}
+		for _, m := range parseModelsList(p.Models) {
+			modelSet[m] = true
+		}
+	}
+
+	// 2. 已有分级的模型
+	graded := make(map[string]bool)
+	for _, g := range modelGrades {
+		graded[g.Model] = true
+	}
+
+	// 3. 对未分级模型推断 tier
+	count := 0
+	for model := range modelSet {
+		if graded[model] {
+			continue
+		}
+		tier, costIdx, vendor := inferTier(model)
+		if err := insertModelGrade(model, tier, costIdx, vendor); err != nil {
+			LogWarn("autoGrade: failed to insert %s: %v", model, err)
+			continue
+		}
+		LogInfo("autoGrade: %s → tier=%s, cost_idx=%.1f, vendor=%s", model, tier, costIdx, vendor)
+		count++
+	}
+	return count, nil
+}
+
+// inferTier 根据模型名称推断 tier、成本指数、厂商
+func inferTier(model string) (ModelTier, float64, string) {
+	m := strings.ToLower(model)
+
+	// 厂商推断
+	vendor := "other"
+	switch {
+	case strings.Contains(m, "gpt") || strings.Contains(m, "o1") || strings.Contains(m, "o3") || strings.Contains(m, "dall"):
+		vendor = "openai"
+	case strings.Contains(m, "claude"):
+		vendor = "anthropic"
+	case strings.Contains(m, "gemini"):
+		vendor = "google"
+	case strings.Contains(m, "qwen") || strings.Contains(m, "通义"):
+		vendor = "qwen"
+	case strings.Contains(m, "deepseek"):
+		vendor = "deepseek"
+	case strings.Contains(m, "doubao"):
+		vendor = "bytedance"
+	case strings.Contains(m, "yi-"):
+		vendor = "01ai"
+	case strings.Contains(m, "glm") || strings.Contains(m, "chatglm"):
+		vendor = "zhipu"
+	}
+
+	// Tier 推断 — 按优先级从高到低匹配
+	// flagship: 顶级推理/多模态
+	switch {
+	case strings.Contains(m, "o3") && !strings.Contains(m, "mini"):
+		return TierFlagship, 30.0, vendor
+	case strings.Contains(m, "opus") && (strings.Contains(m, "extended") || strings.Contains(m, "ultra")):
+		return TierFlagship, 25.0, vendor
+	}
+
+	// premium: 高端推理
+	switch {
+	case strings.Contains(m, "opus"):
+		return TierPremium, 18.0, vendor
+	case strings.Contains(m, "o1") && !strings.Contains(m, "mini"):
+		return TierPremium, 15.0, vendor
+	case strings.Contains(m, "o3-mini") || strings.Contains(m, "o1-mini"):
+		return TierPremium, 8.0, vendor
+	case strings.Contains(m, "max") && !strings.Contains(m, "mini"):
+		return TierPremium, 12.0, vendor
+	case strings.Contains(m, "gpt-4") && !strings.Contains(m, "mini") && !strings.Contains(m, "turbo") && !strings.Contains(m, "4o"):
+		return TierPremium, 10.0, vendor
+	case strings.Contains(m, "ultra"):
+		return TierPremium, 14.0, vendor
+	}
+
+	// enhanced: 增强能力
+	switch {
+	case strings.Contains(m, "sonnet"):
+		return TierEnhanced, 8.0, vendor
+	case strings.Contains(m, "reasoner") || strings.Contains(m, "reasoning"):
+		return TierEnhanced, 4.0, vendor
+	case strings.Contains(m, "thinking") || strings.Contains(m, "think"):
+		return TierEnhanced, 5.0, vendor
+	case strings.Contains(m, "pro") && !strings.Contains(m, "mini"):
+		return TierEnhanced, 6.0, vendor
+	case strings.Contains(m, "gemini-2.5") && !strings.Contains(m, "flash"):
+		return TierEnhanced, 7.0, vendor
+	case strings.Contains(m, "deepseek-r1") || strings.Contains(m, "deepseek-reasoner"):
+		return TierEnhanced, 4.0, vendor
+	}
+
+	// economy: 便宜快速
+	switch {
+	case strings.Contains(m, "mini"):
+		return TierEconomy, 1.5, vendor
+	case strings.Contains(m, "flash") && !strings.Contains(m, "thinking"):
+		return TierEconomy, 1.0, vendor
+	case strings.Contains(m, "turbo") && !strings.Contains(m, "gpt-4"):
+		return TierEconomy, 1.0, vendor
+	case strings.Contains(m, "lite") || strings.Contains(m, "light"):
+		return TierEconomy, 1.0, vendor
+	case strings.Contains(m, "micro"):
+		return TierEconomy, 0.5, vendor
+	}
+
+	// standard: 默认（plus, chat, 无特殊后缀）
+	return TierStandard, 3.0, vendor
+}
+
+// insertModelGrade 向 DB 插入一条模型分级（若已存在则跳过）
+func insertModelGrade(model string, tier ModelTier, costIdx float64, vendor string) error {
+	_, err := db.Exec(`
+		INSERT OR IGNORE INTO wr_model_grades (model, tier, cost_index, vendor, description, enabled, sort_order)
+		VALUES (?, ?, ?, ?, 'auto-graded', 1, 0)
+	`, model, string(tier), costIdx, vendor)
+	return err
 }

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* 团队管理页面逻辑 — 组织架构 + 成员 */
 const TeamPage = {
   orgTree: [],
@@ -58,21 +61,21 @@ const TeamPage = {
       el.innerHTML = `
         <div class="empty-state">
           <div class="icon">🏢</div>
-          <p>暂无组织架构</p>
-          <p class="hint">点击"创建组织"开始搭建团队结构</p>
+          <p>${I18n.t('team.noOrg')}</p>
+          <p class="hint">${I18n.t('team.createOrgHint')}</p>
         </div>`;
       return;
     }
 
     el.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <strong style="font-size:15px;">组织架构</strong>
-      <button class="btn-icon" onclick="TeamPage.showOrgForm()" title="添加组织">+</button>
+      <strong style="font-size:15px;">${I18n.t('team.orgStructure')}</strong>
+      <button class="btn-icon" onclick="TeamPage.showOrgForm()" title="${I18n.t('team.addOrg')}">+</button>
     </div>
     <ul class="org-tree">${this.renderTreeNodes(this.orgTree)}</ul>`;
   },
 
   renderTreeNodes(nodes, depth = 0) {
-    const typeIcons = { company: '🏢', department: '📁', group: '👥' };
+    const typeIcons = { company: '🏢', department: '📁', project: '📌', group: '👥' };
     let html = '';
     for (const node of nodes) {
       const isActive = node.id === this.selectedOrgId;
@@ -86,18 +89,18 @@ const TeamPage = {
             <span class="org-node-icon">${typeIcons[node.org_type] || '📁'}</span>
             <span class="org-node-label">${this.esc(node.name)}</span>
           </span>
-          <span class="org-node-count">${node.member_count || 0} 人</span>
+          <span class="org-node-count">${node.member_count || 0} ${I18n.t('team.people')}</span>
           <span class="org-node-actions">
-            <button class="org-node-action" onclick="event.stopPropagation(); TeamPage.editOrg(${node.id})" title="编辑">✏️</button>
-            <button class="org-node-action" onclick="event.stopPropagation(); TeamPage.addChildOrg(${node.id})" title="添加子组织">➕</button>
-            <button class="org-node-action" onclick="event.stopPropagation(); TeamPage.deleteOrg(${node.id})" title="删除">🗑️</button>
+            <button class="org-node-action" onclick="event.stopPropagation(); TeamPage.editOrg(${node.id})" title="${I18n.t('common.edit')}">✏️</button>
+            <button class="org-node-action" onclick="event.stopPropagation(); TeamPage.addChildOrg(${node.id})" title="${I18n.t('team.addChildOrg')}">➕</button>
+            <button class="org-node-action" onclick="event.stopPropagation(); TeamPage.deleteOrg(${node.id})" title="${I18n.t('common.delete')}">🗑️</button>
           </span>
         </div>`;
 
       if (quotaPct !== null) {
         const color = quotaPct >= 90 ? '#ef4444' : quotaPct >= 60 ? '#f59e0b' : '#22c55e';
         html += `<div class="org-quota-bar">
-          额度: ${this.formatYuan(node.quota_used || 0)} / ${this.formatYuan(node.quota_total)} (${quotaPct}%)
+          ${I18n.t('team.quotaLabel')}${this.formatYuan(node.quota_used || 0)} / ${this.formatYuan(node.quota_total)} (${quotaPct}%)
           <div class="org-quota-track"><div class="org-quota-fill" style="width:${quotaPct}%;background:${color};"></div></div>
         </div>`;
       }
@@ -146,13 +149,13 @@ const TeamPage = {
       const orgName = org ? org.name : '';
       el.innerHTML = `
         <div class="member-header">
-          <strong>成员列表 — ${this.esc(orgName)}</strong>
+          <strong>${I18n.t('team.memberList')}${this.esc(orgName)}</strong>
           <div style="display:flex;gap:8px;">
-            <button class="btn-primary btn-sm" onclick="TeamPage.showMemberForm()">+ 添加成员</button>
-            <button class="btn-secondary btn-sm" onclick="TeamPage.showBatchImport('org')">📥 批量导入</button>
+            <button class="btn-primary btn-sm" onclick="TeamPage.showMemberForm()">${I18n.t('team.addMember')}</button>
+            <button class="btn-secondary btn-sm" onclick="TeamPage.showBatchImport('org')">${I18n.t('team.batchImport')}</button>
           </div>
         </div>
-        <div class="empty-state"><p>该组织暂无成员</p></div>`;
+        <div class="empty-state"><p>${I18n.t('team.noMembers')}</p></div>`;
       return;
     }
 
@@ -161,14 +164,14 @@ const TeamPage = {
 
     let html = `
       <div class="member-header">
-        <strong>成员列表 — ${this.esc(orgName)} (${this.members.length} 人)</strong>
+        <strong>${I18n.t('team.memberList')}${this.esc(orgName)} (${this.members.length} ${I18n.t('team.people')})</strong>
         <div style="display:flex;gap:8px;">
-          <button class="btn-primary btn-sm" onclick="TeamPage.showMemberForm()">+ 添加成员</button>
-          <button class="btn-secondary btn-sm" onclick="TeamPage.showBatchImport()">📥 批量导入</button>
+          <button class="btn-primary btn-sm" onclick="TeamPage.showMemberForm()">${I18n.t('team.addMember')}</button>
+          <button class="btn-secondary btn-sm" onclick="TeamPage.showBatchImport()">${I18n.t('team.batchImport')}</button>
         </div>
       </div>
       <table>
-        <thead><tr><th>名称</th><th>API Key</th><th>邮箱</th><th>额度</th><th>已用</th><th>RPM</th><th>到期</th><th>操作</th></tr></thead>
+        <thead><tr><th>${I18n.t('common.name')}</th><th>${I18n.t('common.apiKey')}</th><th>${I18n.t('team.email')}</th><th>${I18n.t('team.quota')}</th><th>${I18n.t('team.used')}</th><th>${I18n.t('team.rpm')}</th><th>${I18n.t('team.expiry')}</th><th>${I18n.t('common.actions')}</th></tr></thead>
         <tbody>`;
 
     for (const m of this.members) {
@@ -176,21 +179,21 @@ const TeamPage = {
       const used = m.quota_used || 0;
       const remaining = total > 0 ? Math.max(0, total - used) : -1;
       const statusBadge = m.enabled
-        ? '<span class="badge badge-healthy">启用</span>'
-        : '<span class="badge badge-dead">禁用</span>';
+        ? `<span class="badge badge-healthy">${I18n.t('common.enabled')}</span>`
+        : `<span class="badge badge-dead">${I18n.t('common.disabled')}</span>`;
 
       html += `<tr>
         <td><strong>${this.esc(m.name)}</strong> ${statusBadge}</td>
         <td><code class="api-key" style="font-size:12px;">${this.esc(m.key_prefix || '-')}</code></td>
         <td style="font-size:12px;">${this.esc(m.member_email || '-')}</td>
-        <td>${total > 0 ? this.formatYuan(total) : '<span style="color:var(--text-muted)">不限</span>'}</td>
+        <td>${total > 0 ? this.formatYuan(total) : `<span style="color:var(--text-muted)">${I18n.t('common.unlimited')}</span>`}</td>
         <td>${remaining > 0 ? this.formatYuan(remaining) : (remaining === 0 ? '¥0.00' : '<span style="color:var(--text-muted)">—</span>')}</td>
-        <td>${m.rate_limit_rpm > 0 ? m.rate_limit_rpm : '<span style="color:var(--text-muted)">不限</span>'}</td>
-        <td style="font-size:12px;">${m.expires_at ? this.formatDate(m.expires_at) : '<span style="color:var(--text-muted)">永久</span>'}</td>
+        <td>${m.rate_limit_rpm > 0 ? m.rate_limit_rpm : `<span style="color:var(--text-muted)">${I18n.t('common.unlimited')}</span>`}</td>
+        <td style="font-size:12px;">${m.expires_at ? this.formatDate(m.expires_at) : `<span style="color:var(--text-muted)">${I18n.t('team.permanent')}</span>`}</td>
         <td>
-          <button class="btn-sm" onclick="TeamPage.editMember(${m.id})" title="编辑">✏️</button>
-          <button class="btn-sm" onclick="TeamPage.showMoveDialog(${m.id})" title="转移组织">📦</button>
-          <button class="btn-sm btn-danger" onclick="TeamPage.removeMember(${m.id})" title="移除">🗑️</button>
+          <button class="btn-sm" onclick="TeamPage.editMember(${m.id})" title="${I18n.t('common.edit')}">✏️</button>
+          <button class="btn-sm" onclick="TeamPage.showMoveDialog(${m.id})" title="${I18n.t('team.transferOrg')}">📦</button>
+          <button class="btn-sm btn-danger" onclick="TeamPage.removeMember(${m.id})" title="${I18n.t('team.remove')}">🗑️</button>
         </td>
       </tr>`;
     }
@@ -203,7 +206,7 @@ const TeamPage = {
 
   showOrgForm(org) {
     this.editingOrgId = org ? org.id : null;
-    document.getElementById('org-form-title').textContent = org ? '编辑组织' : '创建组织';
+    document.getElementById('org-form-title').textContent = org ? I18n.t("team.editOrg") : I18n.t("team.createOrg");
     document.getElementById('of-name').value = org ? org.name : '';
     document.getElementById('of-type').value = org ? org.org_type : 'department';
     document.getElementById('of-quota').value = org ? (org.quota_total > 0 ? org.quota_total / 100 : 0) : 0;
@@ -211,7 +214,7 @@ const TeamPage = {
 
     // 填充父组织下拉
     const sel = document.getElementById('of-parent');
-    sel.innerHTML = '<option value="">— 顶级组织 —</option>';
+    sel.innerHTML = `<option value="">${I18n.t('team.topLevelOrg')}</option>`;
     for (const o of this.orgsFlat) {
       if (org && o.id === org.id) continue; // 不能选自己
       const indent = o.parent_id ? '&nbsp;&nbsp;└ ' : '';
@@ -229,7 +232,7 @@ const TeamPage = {
 
   async submitOrgForm() {
     const name = document.getElementById('of-name').value.trim();
-    if (!name) { showToast('名称不能为空'); return; }
+    if (!name) { showToast(I18n.t("common.nameRequiredError")); return; }
 
     const parentId = document.getElementById('of-parent').value;
     const quotaYuan = parseFloat(document.getElementById('of-quota').value) || 0;
@@ -245,16 +248,16 @@ const TeamPage = {
     try {
       if (this.editingOrgId) {
         await API.put(`/team/orgs/${this.editingOrgId}`, data);
-        showToast('组织已更新');
+        showToast(I18n.t("team.orgUpdated"));
       } else {
         await API.post('/team/orgs', data);
-        showToast('组织已创建');
+        showToast(I18n.t("team.orgCreated"));
       }
       this.hideOrgForm();
       await this.load();
       if (this.selectedOrgId) this.loadMembers(this.selectedOrgId);
     } catch (e) {
-      showToast('保存失败: ' + (e.message || '未知错误'));
+      showToast(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
     }
   },
 
@@ -276,14 +279,14 @@ const TeamPage = {
   },
 
   async deleteOrg(id) {
-    if (!confirm('确定删除此组织吗？\n需确保该组织下无成员且无子组织。')) return;
+    if (!confirm(I18n.t('team.confirmDeleteOrg'))) return;
     try {
       await API.del(`/team/orgs/${id}`);
-      showToast('组织已删除');
+      showToast(I18n.t("team.orgDeleted"));
       if (this.selectedOrgId === id) this.selectedOrgId = null;
       await this.load();
     } catch (e) {
-      showToast('删除失败: ' + (e.message || '未知错误'));
+      showToast(I18n.t("common.deleteFailed") + (e.message || I18n.t("common.unknownError")));
     }
   },
 
@@ -303,7 +306,7 @@ const TeamPage = {
 
   showMemberForm(member) {
     this.editingMemberId = member ? member.id : null;
-    document.getElementById('team-form-title').textContent = member ? '编辑成员' : '添加成员';
+    document.getElementById('team-form-title').textContent = member ? I18n.t("team.editMember") : I18n.t('team.addMember');
     document.getElementById('tf-name').value = member ? member.name : '';
     document.getElementById('tf-quota').value = member ? (member.quota_total > 0 ? member.quota_total / 100 : 0) : 0;
     document.getElementById('tf-rpm').value = member ? (member.rate_limit_rpm || 0) : 0;
@@ -318,7 +321,7 @@ const TeamPage = {
 
     // 填充组织下拉 — 编辑模式选中成员所属组织，新建模式默认当前选中组织
     const sel = document.getElementById('tf-org');
-    sel.innerHTML = '<option value="">— 未分配 —</option>';
+    sel.innerHTML = `<option value="">${I18n.t('common.unassigned')}</option>`;
     for (const o of this.orgsFlat) {
       const indent = o.parent_id ? '└ ' : '';
       const isOrgSelected = member
@@ -338,6 +341,11 @@ const TeamPage = {
       notifyGroup.style.display = 'block';
       document.getElementById('tf-email-notify').checked = !this.editingMemberId;
     }
+    // Session Memory Recall 默认启用
+    const recallCb = document.getElementById('tf-session-recall-enabled');
+    if (recallCb) {
+      recallCb.checked = member ? !!member.session_recall_enabled : true;
+    }
     document.getElementById('team-modal').style.display = 'flex';
     document.getElementById('team-form').onsubmit = (e) => { e.preventDefault(); this.submitMemberForm(); };
   },
@@ -349,7 +357,7 @@ const TeamPage = {
 
   async submitMemberForm() {
     const name = document.getElementById('tf-name').value.trim();
-    if (!name) { showToast('名称不能为空'); return; }
+    if (!name) { showToast(I18n.t("common.nameRequiredError")); return; }
 
     const quotaYuan = parseFloat(document.getElementById('tf-quota').value) || 0;
     const orgId = document.getElementById('tf-org').value;
@@ -361,6 +369,7 @@ const TeamPage = {
       quota_total: Math.round(quotaYuan * 100),
       rate_limit_rpm: parseInt(document.getElementById('tf-rpm').value) || 0,
       enabled: document.getElementById('tf-enabled').checked,
+      session_recall_enabled: document.getElementById('tf-session-recall-enabled')?.checked ?? true,
     };
 
     const models = this.getSelectedModels();
@@ -381,8 +390,8 @@ const TeamPage = {
     try {
       if (this.editingMemberId) {
         await API.put(`/team/members/${this.editingMemberId}`, data);
-        let msg = '成员信息已更新';
-        if (data.send_email && data.member_email) msg += '，通知邮件已发送';
+        let msg = I18n.t("team.memberUpdated");
+        if (data.send_email && data.member_email) msg += I18n.t("team.notificationSent");
         showToast(msg);
       } else {
         const result = await API.post('/team/members', data);
@@ -390,15 +399,15 @@ const TeamPage = {
           document.getElementById('tf-key').value = result.key;
           document.getElementById('tf-key-section').style.display = 'block';
         }
-        let msg = '成员已创建，请保存 API Key';
-        if (result.email_sent) msg += '，邀请邮件已发送';
+        let msg = I18n.t("team.memberCreated");
+        if (result.email_sent) msg += I18n.t("team.invitationSent");
         showToast(msg);
       }
       this.hideMemberForm();
       await this.load();
       if (this.selectedOrgId) this.loadMembers(this.selectedOrgId);
     } catch (e) {
-      showToast('保存失败: ' + (e.message || '未知错误'));
+      showToast(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
     }
   },
 
@@ -409,14 +418,14 @@ const TeamPage = {
   },
 
   async removeMember(id) {
-    if (!confirm('确定移除此成员？\n该成员的 API Key 将立即失效。')) return;
+    if (!confirm(I18n.t('team.confirmRemoveMember'))) return;
     try {
       await API.del(`/team/members/${id}`);
-      showToast('成员已移除');
+      showToast(I18n.t("team.memberRemoved"));
       if (this.selectedOrgId) this.loadMembers(this.selectedOrgId);
       this.loadTree();
     } catch (e) {
-      showToast('移除失败');
+      showToast(I18n.t("team.removeFailed"));
     }
   },
 
@@ -426,7 +435,7 @@ const TeamPage = {
     const m = this.members.find(x => x.id === memberId);
     if (!m) return;
 
-    let optionsHtml = '<option value="">— 未分配 —</option>';
+    let optionsHtml = `<option value="">${I18n.t('common.unassigned')}</option>`;
     for (const o of this.orgsFlat) {
       const indent = o.parent_id ? '└ ' : '';
       optionsHtml += `<option value="${o.id}">${indent}${this.esc(o.name)}</option>`;
@@ -436,17 +445,17 @@ const TeamPage = {
       <div id="move-member-modal" class="modal" style="display:flex">
         <div class="modal-content" style="max-width:420px;">
           <div class="modal-header">
-            <h3>转移成员 — ${this.esc(m.name)}</h3>
+            <h3>${I18n.t('team.transferMember')}${this.esc(m.name)}</h3>
             <button class="modal-close" onclick="document.getElementById('move-member-modal').remove()">&times;</button>
           </div>
           <div class="modal-body">
             <div class="form-group">
-              <label>目标组织</label>
+              <label>${I18n.t('team.targetOrg')}</label>
               <select id="move-org-select">${optionsHtml}</select>
             </div>
             <div class="form-actions">
-              <button class="btn-primary" onclick="TeamPage.moveMember(${memberId})">确认转移</button>
-              <button class="btn-secondary" onclick="document.getElementById('move-member-modal').remove()">取消</button>
+              <button class="btn-primary" onclick="TeamPage.moveMember(${memberId})">${I18n.t('team.confirmTransfer')}</button>
+              <button class="btn-secondary" onclick="document.getElementById('move-member-modal').remove()">${I18n.t('common.cancel')}</button>
             </div>
           </div>
         </div>
@@ -461,12 +470,12 @@ const TeamPage = {
     const orgId = document.getElementById('move-org-select').value;
     try {
       await API.put(`/team/members/${memberId}/move`, { org_id: orgId ? parseInt(orgId) : null });
-      showToast('成员已转移');
+      showToast(I18n.t("team.memberTransferred"));
       document.getElementById('move-member-modal').remove();
       if (this.selectedOrgId) this.loadMembers(this.selectedOrgId);
       this.loadTree();
     } catch (e) {
-      showToast('转移失败: ' + (e.message || '未知错误'));
+      showToast(I18n.t("team.transferFailed") + (e.message || I18n.t("common.unknownError")));
     }
   },
 
@@ -481,7 +490,7 @@ const TeamPage = {
     const container = document.getElementById('tf-models-select');
     if (!container) return;
     const isAll = selected.length === 0;
-    const displayText = isAll ? '全部模型' : selected.join(', ');
+    const displayText = isAll ? I18n.t("common.allModels") : selected.join(', ');
 
     let optionsHtml = '';
     for (const model of this.allModels) {
@@ -497,7 +506,7 @@ const TeamPage = {
       <div class="ms-dropdown">
         <label class="ms-item ms-all">
           <input type="checkbox" id="ms-models-all" ${isAll ? 'checked' : ''}>
-          <span>全部</span>
+          <span>${I18n.t('common.all')}</span>
         </label>
         <div class="ms-options">${optionsHtml}</div>
       </div>
@@ -529,7 +538,7 @@ const TeamPage = {
     const container = document.getElementById('tf-provider-select');
     if (!container) return;
     const isAll = selected.length === 0;
-    const displayText = isAll ? '全部数据源' : selected.map(id => {
+    const displayText = isAll ? I18n.t("common.allProviders") : selected.map(id => {
       const p = this.providers.find(x => x.id === id);
       return p ? p.name : `#${id}`;
     }).join(', ');
@@ -541,7 +550,7 @@ const TeamPage = {
     }
 
     if (this.providers.length === 0) {
-      optionsHtml = '<div style="padding:8px;color:var(--text-muted);font-size:12px">暂无数据源，请先添加</div>';
+      optionsHtml = `<div style="padding:8px;color:var(--text-muted);font-size:12px">${I18n.t('tokens.noProvidersFirst')}</div>`;
     }
 
     container.innerHTML = `
@@ -552,7 +561,7 @@ const TeamPage = {
       <div class="ms-dropdown">
         <label class="ms-item ms-all">
           <input type="checkbox" id="ms-providers-all" ${isAll ? 'checked' : ''}>
-          <span>全部</span>
+          <span>${I18n.t('common.all')}</span>
         </label>
         <div class="ms-options">${optionsHtml}</div>
       </div>
@@ -587,7 +596,7 @@ const TeamPage = {
     const checked = Array.from(cbs).filter(cb => cb.checked).map(cb => cb.value);
     const isAll = container.querySelector('#ms-models-all')?.checked || checked.length === 0;
     const label = container.querySelector('.ms-label');
-    if (label) label.textContent = isAll ? '全部模型' : checked.join(', ');
+    if (label) label.textContent = isAll ? I18n.t("common.allModels") : checked.join(', ');
   },
 
   _updateProviderDisplay(container) {
@@ -596,7 +605,7 @@ const TeamPage = {
     const isAll = container.querySelector('#ms-providers-all')?.checked || checkedIds.length === 0;
     const label = container.querySelector('.ms-label');
     if (label) {
-      label.textContent = isAll ? '全部数据源' : checkedIds.map(id => {
+      label.textContent = isAll ? I18n.t("common.allProviders") : checkedIds.map(id => {
         const p = this.providers.find(x => x.id === id);
         return p ? p.name : `#${id}`;
       }).join(', ');
@@ -633,7 +642,7 @@ const TeamPage = {
     try {
       const d = new Date(dateStr);
       const now = new Date();
-      if (d < now) return `<span class="badge badge-dead">${d.toLocaleDateString('zh-CN')} 已过期</span>`;
+      if (d < now) return `<span class="badge badge-dead">${I18n.t('team.expiredDate', {date: d.toLocaleDateString('zh-CN')})}</span>`;
       return d.toLocaleDateString('zh-CN');
     } catch {
       return dateStr;
@@ -654,21 +663,21 @@ const TeamPage = {
   showBatchImport(mode) {
     // mode: 'global' (顶部入口) 或 'org' (列表内入口)
     if (mode === 'org' && !this.selectedOrgId) {
-      showToast('请先选择左侧的组织');
+      showToast(I18n.t("team.selectOrgFirst"));
       return;
     }
 
     const isGlobal = mode === 'global';
-    const title = isGlobal ? '📥 批量导入成员（全局）' : '📥 批量导入成员';
+    const title = isGlobal ? I18n.t("team.batchImportGlobal") : I18n.t("team.batchImportTitle");
     const subtitle = isGlobal
-      ? '支持跨多个部门导入，系统自动匹配/创建部门。'
-      : `成员将添加到当前选中的组织"${this.orgsFlat.find(o => o.id === this.selectedOrgId)?.name || ''}"。`;
+      ? I18n.t("team.batchImportGlobalHint")
+      : I18n.t('team.willAddToOrg', {org: this.orgsFlat.find(o => o.id === this.selectedOrgId)?.name || ''});
     const placeholder = isGlobal
-      ? '研发部 张三 zhangsan@example.com\n研发部 李四 lisi@example.com\n市场部 王五 wangwu@example.com'
-      : '张三 zhangsan@example.com\n李四 lisi@example.com\n王五 wangwu@example.com';
+      ? I18n.t('team.orgExample')
+      : I18n.t('team.noOrgExample');
     const hint = isGlobal
-      ? '每行格式：<code>部门 姓名 email</code>，以 <code>#</code> 开头的行会被忽略。部门名称自动匹配现有组织，不存在时自动创建。'
-      : '每行格式：<code>姓名 email</code>，以 <code>#</code> 开头的行会被忽略。所有成员归入当前选中的组织。';
+      ? I18n.t("team.orgFormatHint")
+      : I18n.t("team.noOrgFormatHint");
 
     const modalHtml = `
       <div id="batch-import-modal" class="modal" style="display:flex">
@@ -680,31 +689,34 @@ const TeamPage = {
           <div class="modal-body">
             <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px;">${subtitle}</p>
             <div class="form-group">
-              <label>导入数据</label>
+              <label>${I18n.t('team.importData')}</label>
               <textarea id="bi-text" rows="10" placeholder="${placeholder}"
 style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:13px;font-family:monospace;resize:vertical;"></textarea>
               <span class="hint">${hint}</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <div class="form-group">
-                <label>总额度（元，0=不限）</label>
+                <label>${I18n.t('team.quotaTotalHint')}</label>
                 <input type="number" id="bi-quota" value="0" min="0" step="0.01">
               </div>
               <div class="form-group">
-                <label>RPM 限速（0=不限）</label>
+                <label>${I18n.t('team.rpmHint')}</label>
                 <input type="number" id="bi-rpm" value="0" min="0">
               </div>
             </div>
             <div class="form-group">
-              <label><input type="checkbox" id="bi-email-notify"> 发送邮件通知（含 API Key 和网关地址）</label>
+              <label><input type="checkbox" id="bi-email-notify"> ${I18n.t('team.emailNotifyHint')}</label>
+            </div>
+            <div class="form-group">
+              <label><input type="checkbox" id="bi-session-recall" checked> ${I18n.t('tokens.sessionRecall')}</label>
             </div>
             <div id="bi-preview" style="display:none;">
-              <h4 style="margin:8px 0 4px;font-size:14px;">预览（<span id="bi-count">0</span> 条）：</h4>
+              <h4 style="margin:8px 0 4px;font-size:14px;">${I18n.t('team.preview')} (<span id="bi-count">0</span> ${I18n.t('team.previewCountSuffix')}):</h4>
               <div id="bi-preview-list" style="max-height:150px;overflow-y:auto;font-size:12px;color:var(--text-muted);"></div>
             </div>
             <div class="form-actions">
-              <button class="btn-primary" onclick="TeamPage.submitBatchImport('${mode}')">🚀 确认导入</button>
-              <button class="btn-secondary" onclick="TeamPage.hideBatchImport()">取消</button>
+              <button class="btn-primary" onclick="TeamPage.submitBatchImport('${mode}')">${I18n.t('team.confirmImport')}</button>
+              <button class="btn-secondary" onclick="TeamPage.hideBatchImport()">${I18n.t('common.cancel')}</button>
             </div>
           </div>
         </div>
@@ -751,7 +763,7 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
       }
     }).join('');
     if (lines.length > 20) {
-      listEl.innerHTML += `<div style="padding:4px;color:var(--text-muted);">... 还有 ${lines.length - 20} 条</div>`;
+      listEl.innerHTML += `<div style="padding:4px;color:var(--text-muted);">${I18n.t('team.moreItems', {count: lines.length - 20})}</div>`;
     }
   },
 
@@ -759,7 +771,7 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
     const isGlobal = mode === 'global';
     const text = document.getElementById('bi-text').value.trim();
     if (!text) {
-      showToast('请输入导入数据');
+      showToast(I18n.t("team.enterImportData"));
       return;
     }
 
@@ -776,7 +788,7 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
         if (!trimmed || trimmed.startsWith('#')) continue;
         const parts = trimmed.split(/\s+/);
         if (parts.length < 3) {
-          console.warn(`跳过无效行: ${trimmed}（需要3列：部门 姓名 email）`);
+          console.warn(I18n.t('team.skipInvalidRow', {row: trimmed}));
           continue;
         }
         const [dept, name, email] = parts;
@@ -786,12 +798,13 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
           member_email: email,
           quota_total: Math.round(quotaYuan * 100),
           rate_limit_rpm: rpm,
+          session_recall_enabled: document.getElementById('bi-session-recall')?.checked ?? true,
         });
       }
     } else {
       // 模式：姓名 email（归入当前选中组织）
       if (!this.selectedOrgId) {
-        showToast('请先选择左侧的组织');
+        showToast(I18n.t("team.selectOrgFirst"));
         return;
       }
       for (const line of text.split('\n')) {
@@ -805,12 +818,13 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
           org_id: this.selectedOrgId,
           quota_total: Math.round(quotaYuan * 100),
           rate_limit_rpm: rpm,
+          session_recall_enabled: document.getElementById('bi-session-recall')?.checked ?? true,
         });
       }
     }
 
     if (members.length === 0) {
-      showToast('未解析到有效的成员数据');
+      showToast(I18n.t("team.noValidData"));
       return;
     }
 
@@ -834,12 +848,12 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
       }
 
       const r = result.results;
-      let msg = `批量导入完成: 成功 ${r.success.length} 个`;
+      let msg = `${I18n.t('team.batchImportDone')}${r.success.length} ${I18n.t('team.countUnit')}`;
       if (r.errors.length > 0) {
-        msg += `, 失败 ${r.errors.length} 个`;
-        console.warn('导入失败:', r.errors);
+        msg += I18n.t('team.batchImportFailed', {failed: r.errors.length});
+        console.warn(I18n.t('team.importFailed') + ':', r.errors);
       }
-      if (r.emails_sent > 0) msg += `, 邮件已发送 ${r.emails_sent} 封`;
+      if (r.emails_sent > 0) msg += `${I18n.t('team.emailsSent')}${r.emails_sent} ${I18n.t('team.emailUnit')}`;
 
       // 显示结果
       if (r.success.length > 0) {
@@ -850,18 +864,18 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
           <div id="batch-result-modal" class="modal" style="display:flex">
             <div class="modal-content" style="max-width:700px;">
               <div class="modal-header">
-                <h3>导入结果</h3>
+                <h3>${I18n.t('team.importResult')}</h3>
                 <button class="modal-close" onclick="document.getElementById('batch-result-modal').remove()">&times;</button>
               </div>
               <div class="modal-body">
                 <p style="margin-bottom:12px;">${this.esc(msg)}</p>
                 <table>
-                  <thead><tr><th>名称</th><th>API Key（请妥善保存）</th><th>邮件</th></tr></thead>
+                  <thead><tr><th>${I18n.t('common.name')}</th><th>${I18n.t('team.apiKeySave')}</th><th>${I18n.t('team.email')}</th></tr></thead>
                   <tbody>${keysHtml}</tbody>
                 </table>
-                ${r.errors.length > 0 ? `<p style="margin-top:12px;color:var(--danger);font-size:12px;">失败项: ${r.errors.map(e => `${e.name || ''}: ${e.reason}`).join('; ')}</p>` : ''}
+                ${r.errors.length > 0 ? `<p style="margin-top:12px;color:var(--danger);font-size:12px;">${I18n.t('team.failedItems')}${r.errors.map(e => `${e.name || ''}: ${e.reason}`).join('; ')}</p>` : ''}
                 <div class="form-actions" style="margin-top:16px;">
-                  <button class="btn-primary" onclick="document.getElementById('batch-result-modal').remove()">完成</button>
+                  <button class="btn-primary" onclick="document.getElementById('batch-result-modal').remove()">${I18n.t('common.done')}</button>
                 </div>
               </div>
             </div>
@@ -875,7 +889,7 @@ style="width:100%;padding:10px;background:var(--bg-card);border:1px solid var(--
       await this.load();
       if (this.selectedOrgId) this.loadMembers(this.selectedOrgId);
     } catch (e) {
-      showToast('批量导入失败: ' + (e.message || '未知错误'), 'error');
+      showToast(I18n.t("team.batchImportError") + (e.message || I18n.t("common.unknownError")), 'error');
     }
   },
 };

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 成本估算：从 DB 加载定价表 + 内存缓存 + 热刷新
@@ -14,13 +17,13 @@ type ModelPricing struct {
 
 // PricingCache 定价缓存
 type PricingCache struct {
-	mu      sync.RWMutex
-	table   map[string]ModelPricing
+	mu       sync.RWMutex
+	table    map[string]ModelPricing
 	default_ ModelPricing // 未知模型默认价格
 }
 
 var pricingCache = &PricingCache{
-	table:   make(map[string]ModelPricing),
+	table:    make(map[string]ModelPricing),
 	default_: ModelPricing{Input: 0.015, Output: 0.06}, // gpt-4o-mini 级别
 }
 

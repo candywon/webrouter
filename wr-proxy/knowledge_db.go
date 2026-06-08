@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // InitKnowledgeTables 知识库相关表迁移（在 InitDB 的 migrate() 之后调用）
@@ -115,6 +119,21 @@ func InitKnowledgeTables() error {
 		`CREATE INDEX IF NOT EXISTS idx_kanalyses_status ON wr_knowledge_analyses(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_kanalyses_created ON wr_knowledge_analyses(created_at)`,
 
+		// 审计日志表（数据安全法第27条要求）
+		`CREATE TABLE IF NOT EXISTS wr_audit_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			action TEXT NOT NULL,           -- knowledge_capture/knowledge_extract/knowledge_access/config_change/data_delete
+			resource_type TEXT DEFAULT '',  -- raw/item/domain/token/config
+			resource_id TEXT DEFAULT '',    -- 关联资源ID
+			token_id INTEGER DEFAULT 0,     -- 操作相关Token
+			detail TEXT DEFAULT '',         -- JSON或简要描述
+			client_ip TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_action ON wr_audit_log(action)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_created ON wr_audit_log(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_resource ON wr_audit_log(resource_type, resource_id)`,
+
 		// 向量嵌入表（二期C Embedding使用）
 		`CREATE TABLE IF NOT EXISTS wr_knowledge_vectors (
 			item_id INTEGER PRIMARY KEY,
@@ -143,6 +162,9 @@ func InitKnowledgeTables() error {
 		`ALTER TABLE wr_tokens ADD COLUMN rag_min_relevance REAL DEFAULT 0.7`,
 		`ALTER TABLE wr_tokens ADD COLUMN rag_top_k INTEGER DEFAULT 3`,
 		`ALTER TABLE wr_tokens ADD COLUMN system_prompt_knowledge TEXT DEFAULT ''`,
+		`ALTER TABLE wr_tokens ADD COLUMN rag_hybrid_alpha REAL DEFAULT 0.3`,
+		`ALTER TABLE wr_tokens ADD COLUMN rag_reranker TEXT DEFAULT 'none'`,
+		`ALTER TABLE wr_knowledge_vectors ADD COLUMN vector_version INTEGER DEFAULT 0`,
 	}
 	for _, m := range alterMigrations {
 		if _, err := db.Exec(m); err != nil {
@@ -211,14 +233,18 @@ func seedInitialDomainRisk() error {
 	return nil
 }
 
-// saveKnowledgeRaw 将知识条目写入 raw 表
+// rawTextMaxLen raw 表文本截断长度（数据安全好实践，减少泄露影响面）
+const rawTextMaxLen = 5000
+
+// saveKnowledgeRaw 将知识条目写入 raw 表（文本截断后存储）
 func saveKnowledgeRaw(entry KnowledgeEntry) error {
 	_, err := db.Exec(`
 		INSERT INTO wr_knowledge_raw
 		(request_id, token_id, token_name, model_name, prompt, response, turn_count, client_ip, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
 		entry.RequestID, entry.TokenID, entry.TokenName, entry.Model,
-		entry.Prompt, entry.Response, entry.TurnCount, entry.ClientIP,
+		truncate(entry.Prompt, rawTextMaxLen), truncate(entry.Response, rawTextMaxLen),
+		entry.TurnCount, entry.ClientIP,
 		entry.Timestamp,
 	)
 	return err
@@ -239,6 +265,51 @@ func cleanupKnowledgeRaw(days int) error {
 		LogInfo("knowledge cleanup: deleted %d raw entries older than %d days", n, days)
 	}
 	return nil
+}
+
+// cleanupExpiredKnowledge 清理超过 retention_until 的过期知识条目
+func cleanupExpiredKnowledge() (int, error) {
+	// 删除过期知识条目
+	result, err := db.Exec(`
+		DELETE FROM wr_knowledge_items
+		WHERE retention_until IS NOT NULL AND retention_until < datetime('now')`)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := result.RowsAffected()
+	if n > 0 {
+		LogInfo("retention cleanup: deleted %d expired knowledge items", n)
+	}
+
+	// 同时清理对应的向量数据
+	vResult, _ := db.Exec(`
+		DELETE FROM wr_knowledge_vectors
+		WHERE item_id NOT IN (SELECT id FROM wr_knowledge_items)`)
+	vn, _ := vResult.RowsAffected()
+	if vn > 0 {
+		LogInfo("retention cleanup: deleted %d orphan vectors", vn)
+	}
+
+	return int(n), nil
+}
+
+// cleanupOldAuditLogs 清理超过保留期限的审计日志（默认 90 天）
+func cleanupOldAuditLogs(retentionDays int) int {
+	if retentionDays <= 0 {
+		retentionDays = 90
+	}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays).UTC().Format("2006-01-02 15:04:05")
+	result, err := db.Exec(
+		"DELETE FROM wr_audit_log WHERE created_at < ?", cutoff)
+	if err != nil {
+		LogWarn("audit log cleanup failed: %v", err)
+		return 0
+	}
+	n, _ := result.RowsAffected()
+	if n > 0 {
+		LogInfo("audit log cleanup: deleted %d old entries (retention=%dd)", n, retentionDays)
+	}
+	return int(n)
 }
 
 // LoadKnowledgeDomains 加载所有业务域

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 隐私/企业敏感信息脱敏引擎
@@ -25,9 +28,9 @@ import (
 // --- 脱敏级别 ---
 
 const (
-	DesensitizeOff     = "off"      // 关闭
+	DesensitizeOff      = "off"      // 关闭
 	DesensitizeStandard = "standard" // 标准模式：内置规则（手机号、身份证、邮箱、银行卡、IP）
-	DesensitizeStrict  = "strict"   // 严格模式：内置规则 + 自定义规则
+	DesensitizeStrict   = "strict"   // 严格模式：内置规则 + 自定义规则
 )
 
 // --- 脱敏规则类型 ---
@@ -171,11 +174,11 @@ func GetActiveRules(level string) []*DesensitizeRule {
 
 // DesensitizeResult 脱敏结果
 type DesensitizeResult struct {
-	Body        []byte          // 脱敏后的请求体
-	Mapping     *ReplacementMap // 标记→原始值 映射
-	Modified    bool            // 是否有替换
-	Redacted    []string        // 被脱敏的内容摘要
-	Skipped     bool            // 是否跳过脱敏（关闭或无规则）
+	Body     []byte          // 脱敏后的请求体
+	Mapping  *ReplacementMap // 标记→原始值 映射
+	Modified bool            // 是否有替换
+	Redacted []string        // 被脱敏的内容摘要
+	Skipped  bool            // 是否跳过脱敏（关闭或无规则）
 }
 
 // DesensitizeRequest 对请求体进行脱敏处理

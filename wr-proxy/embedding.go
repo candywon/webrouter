@@ -1,11 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strconv"
 	"sync"
@@ -51,6 +51,7 @@ var (
 // InitEmbedding 启动 embedding 异步 worker
 func InitEmbedding() {
 	initEmbeddingConfig()
+	initEmbeddingProviders()
 	if !embeddingCfg.enabled {
 		LogInfo("Embedding: DISABLED (set WR_EMBEDDING_ENABLED=1 to enable)")
 		return
@@ -59,7 +60,12 @@ func InitEmbedding() {
 	embeddingOnce.Do(func() {
 		embeddingCh = make(chan embeddingTask, 256)
 		go embeddingWorker()
-		LogInfo("Embedding: ENABLED (model=%s, dim=%d)", embeddingCfg.model, embeddingCfg.dimension)
+		provider := GetEmbeddingProvider(envStrDefault("WR_EMBEDDING_PROVIDER", "dashscope"))
+		if provider != nil {
+			LogInfo("Embedding: ENABLED (provider=%s, model=%s, dim=%d)", provider.Name(), provider.Model(), provider.Dimension())
+		} else {
+			LogInfo("Embedding: ENABLED (model=%s, dim=%d)", embeddingCfg.model, embeddingCfg.dimension)
+		}
 	})
 }
 
@@ -75,101 +81,41 @@ func QueueEmbedding(itemID int, text string) {
 	}
 }
 
-// embeddingWorker 消费队列，调用 DashScope API 生成向量
+// embeddingWorker 消费队列，调用 Embedding Provider 生成向量
 func embeddingWorker() {
+	providerName := envStrDefault("WR_EMBEDDING_PROVIDER", "dashscope")
+
 	for task := range embeddingCh {
-		vector, err := callDashScopeEmbedding(task.text)
+		provider := GetEmbeddingProvider(providerName)
+		if provider == nil {
+			LogWarn("[embedding] provider %s not registered", providerName)
+			continue
+		}
+		vector, err := provider.Embed(task.text)
 		if err != nil {
 			LogWarn("[embedding] failed for item %d: %v", task.itemID, err)
 			continue
 		}
 		if err := saveKnowledgeVector(task.itemID, vector); err != nil {
 			LogWarn("[embedding] save vector failed for item %d: %v", task.itemID, err)
-		} else {
-			LogInfo("[embedding] item %d: vector saved (%d dims)", task.itemID, len(vector))
 		}
 	}
 }
 
-// callDashScopeEmbedding 调用 DashScope OpenAI兼容接口生成 embedding
+// callDashScopeEmbedding 保留向后兼容的包装函数
 func callDashScopeEmbedding(text string) ([]float64, error) {
-	if embeddingCfg.apiKey == "" {
-		return nil, fmt.Errorf("embedding API key not configured")
+	provider := GetEmbeddingProvider("dashscope")
+	if provider == nil {
+		return nil, fmt.Errorf("DashScope embedding provider not initialized")
 	}
-
-	// 截断过长的文本
-	if len(text) > 6000 {
-		text = text[:6000] + "..."
-	}
-
-	payload := map[string]interface{}{
-		"model":      embeddingCfg.model,
-		"input":      []string{text},
-		"dimensions": embeddingCfg.dimension,
-	}
-	bodyBytes, _ := json.Marshal(payload)
-
-	req, err := http.NewRequest("POST", embeddingCfg.baseURL+"/v1/embeddings", bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+embeddingCfg.apiKey)
-
-	client := &http.Client{Timeout: time.Duration(embeddingCfg.timeoutSec) * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("call DashScope: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("DashScope status %d: %s", resp.StatusCode, truncate(string(respBody), 200))
-	}
-
-	var dashResp struct {
-		Data []struct {
-			Embedding []float64 `json:"embedding"`
-			Index     int       `json:"index"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(respBody, &dashResp); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	if len(dashResp.Data) == 0 || len(dashResp.Data[0].Embedding) == 0 {
-		return nil, fmt.Errorf("empty embedding response")
-	}
-
-	return dashResp.Data[0].Embedding, nil
-}
-
-// saveKnowledgeVector 保存向量到数据库
-func saveKnowledgeVector(itemID int, vector []float64) error {
-	vecJSON, err := json.Marshal(vector)
-	if err != nil {
-		return fmt.Errorf("marshal vector: %w", err)
-	}
-
-	_, err = db.Exec(`
-		INSERT OR REPLACE INTO wr_knowledge_vectors
-		(item_id, vector, model, dimension, created_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		itemID, string(vecJSON), embeddingCfg.model, embeddingCfg.dimension,
-		time.Now().UTC().Format("2006-01-02 15:04:05"),
-	)
-	return err
+	return provider.Embed(text)
 }
 
 // EmbeddingBackfill 为缺少 embedding 的知识条目批量生成向量
 func EmbeddingBackfill(limit int) (int, error) {
-	if !embeddingCfg.enabled {
-		return 0, fmt.Errorf("embedding not enabled")
+	provider := GetEmbeddingProvider(envStrDefault("WR_EMBEDDING_PROVIDER", "dashscope"))
+	if provider == nil {
+		return 0, fmt.Errorf("no embedding provider available")
 	}
 	if limit <= 0 || limit > 50 {
 		limit = 20
@@ -210,7 +156,7 @@ func EmbeddingBackfill(limit int) (int, error) {
 
 	processed := 0
 	for _, it := range items {
-		vector, err := callDashScopeEmbedding(it.summary)
+		vector, err := provider.Embed(it.summary)
 		if err != nil {
 			LogWarn("[backfill] embedding failed for item %d: %v", it.id, err)
 			continue
@@ -220,10 +166,26 @@ func EmbeddingBackfill(limit int) (int, error) {
 			continue
 		}
 		processed++
-		LogInfo("[backfill] item %d → vector saved", it.id)
 	}
 
 	return processed, nil
+}
+
+// saveKnowledgeVector 保存向量到数据库
+func saveKnowledgeVector(itemID int, vector []float64) error {
+	vecJSON, err := json.Marshal(vector)
+	if err != nil {
+		return fmt.Errorf("marshal vector: %w", err)
+	}
+
+	_, err = db.Exec(`
+		INSERT OR REPLACE INTO wr_knowledge_vectors
+		(item_id, vector, model, dimension, created_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		itemID, string(vecJSON), embeddingCfg.model, embeddingCfg.dimension,
+		time.Now().UTC().Format("2006-01-02 15:04:05"),
+	)
+	return err
 }
 
 // envStrDefault 从环境变量读取字符串，带默认值

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """团队管理 API — 组织架构 + 成员（Token）管理"""
 import json, asyncio, smtplib
 from email.mime.text import MIMEText
@@ -5,6 +8,7 @@ from flask import Blueprint, jsonify, request
 from models.wr_models import Org, WRToken, SystemSetting
 from extensions import db
 from sqlalchemy import func
+from i18n.messages import get_message
 
 team_bp = Blueprint('team', __name__)
 
@@ -38,64 +42,64 @@ def _send_member_email(token):
         return False
 
     gateway_url = SystemSetting.get('gateway_url', 'http://localhost:5051')
-    member_name = token.name or '成员'
+    member_name = token.name or 'Member'
     api_key = token.key
     to_email = token.member_email
 
-    # 解析模型列表
+    # Parse model list
     models = _parse_models_str(token.models)
     if not models:
         providers = _parse_models_str(token.provider_ids)
         if providers:
-            models = [f'数据源 #{p}' for p in providers]
+            models = [f'Provider #{p}' for p in providers]
 
-    models_text = '\n'.join(f'  - {m}' for m in models) if models else '  全部可用模型'
+    models_text = '\n'.join(f'  - {m}' for m in models) if models else '  All available models'
 
-    quota_text = '不限'
+    quota_text = 'Unlimited'
     if token.quota_total > 0:
         quota_text = f'¥{token.quota_total / 100:.2f}'
 
-    rpm_text = '不限'
+    rpm_text = 'Unlimited'
     if token.rate_limit_rpm > 0:
-        rpm_text = f'{token.rate_limit_rpm} 次/分钟'
+        rpm_text = f'{token.rate_limit_rpm} req/min'
 
-    subject = f'WebRouter API 网关访问凭证 — {member_name}'
-    body = f"""你好，{member_name}：
+    subject = f'WebRouter API Gateway Access Credentials — {member_name}'
+    body = f"""Hello, {member_name}:
 
-你已被添加为 WebRouter API 网关成员，以下是访问凭证：
+You have been added as a member of the WebRouter API gateway. Your access credentials are below:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   API Key:    {api_key}
-  网关地址:   {gateway_url}
-  额度配额:   {quota_text}
-  速率限制:   {rpm_text}
-  允许模型:
+  Gateway:    {gateway_url}
+  Quota:      {quota_text}
+  Rate limit: {rpm_text}
+  Allowed models:
 {models_text}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-使用方法：
-  将 API Key 添加到请求 Header：
+Usage:
+  Add the API Key to the request header:
     Authorization: Bearer {api_key}
 
-  示例：请求指定模型
+  Example: request a specific model
     curl {gateway_url}/v1/chat/completions \\
       -H "Authorization: Bearer {api_key}" \\
       -H "Content-Type: application/json" \\
-      -d '{{"model":"gpt-4o","messages":[{{"role":"user","content":"你好"}}]}}'
+      -d '{{"model":"gpt-4o","messages":[{{"role":"user","content":"Hello"}}]}}'
 
-  ✨ 智能模型选择（推荐）
-    将 model 设置为 "auto" 或 "smart"，网关会根据请求复杂度自动选择最合适的模型：
-    - 简单请求 → 经济型模型（快速省钱）
-    - 中等复杂度 → 标准模型
-    - 复杂推理 → 高级模型
+  ✨ Smart model selection (recommended)
+    Set model to "auto" or "smart" and the gateway will pick the best model based on request complexity:
+    - Simple requests → economy models (fast, cheap)
+    - Medium complexity → standard models
+    - Complex reasoning → advanced models
     curl {gateway_url}/v1/chat/completions \\
       -H "Authorization: Bearer {api_key}" \\
       -H "Content-Type: application/json" \\
-      -d '{{"model":"auto","messages":[{{"role":"user","content":"帮我分析这段代码的问题"}}]}}'
+      -d '{{"model":"auto","messages":[{{"role":"user","content":"Help me analyze this code"}}]}}'
 
-  或通过网关地址访问 API 接口。
+  Or access API endpoints through the gateway URL.
 
-如有疑问，请联系管理员。
+If you have any questions, please contact your administrator.
 """
 
     msg = MIMEText(body, 'plain', 'utf-8')
@@ -118,7 +122,7 @@ def _send_member_email(token):
         server.quit()
         return True
     except Exception as e:
-        print(f"邮件发送失败: {e}")
+        print(f"Email send failed: {e}")
         return False
 
 
@@ -165,18 +169,18 @@ def create_org():
     """创建组织"""
     data = request.get_json()
     if not data or not data.get('name'):
-        return jsonify({'error': '组织名称不能为空'}), 400
+        return jsonify({'error': get_message('org_name_required', request)}), 400
 
     name = data['name'].strip()
     org_type = data.get('org_type', 'department')
     if org_type not in ('company', 'department', 'group'):
-        return jsonify({'error': 'org_type 必须为 company/department/group'}), 400
+        return jsonify({'error': get_message('invalid_org_type', request)}), 400
 
     parent_id = data.get('parent_id')
     if parent_id:
         parent = Org.query.get(parent_id)
         if not parent:
-            return jsonify({'error': '父组织不存在'}), 404
+            return jsonify({'error': get_message('parent_org_not_found', request)}), 404
 
     quota_total = int(data.get('quota_total', 0))
     quota_period = data.get('quota_period', 'monthly')
@@ -191,7 +195,7 @@ def create_org():
     db.session.add(org)
     db.session.commit()
 
-    return jsonify({'message': '组织已创建', 'org': org.to_dict()}), 201
+    return jsonify({'message': get_message('org_created', request), 'org': org.to_dict()}), 201
 
 
 @team_bp.route('/orgs/<int:org_id>', methods=['PUT'])
@@ -199,26 +203,26 @@ def update_org(org_id):
     """更新组织"""
     org = Org.query.get(org_id)
     if not org:
-        return jsonify({'error': '组织不存在'}), 404
+        return jsonify({'error': get_message('org_not_found', request)}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'name' in data:
         org.name = data['name'].strip()
     if 'org_type' in data:
         if data['org_type'] not in ('company', 'department', 'group'):
-            return jsonify({'error': 'org_type 无效'}), 400
+            return jsonify({'error': get_message('invalid_org_type_value', request)}), 400
         org.org_type = data['org_type']
     if 'parent_id' in data:
         new_parent = data['parent_id']
         if new_parent and new_parent == org_id:
-            return jsonify({'error': '不能将自己设为父级'}), 400
+            return jsonify({'error': get_message('cannot_set_self_as_parent', request)}), 400
         if new_parent:
             parent = Org.query.get(new_parent)
             if not parent:
-                return jsonify({'error': '父组织不存在'}), 400
+                return jsonify({'error': get_message('parent_org_not_found', request)}), 400
         org.parent_id = new_parent if new_parent else None
     if 'quota_total' in data:
         org.quota_total = int(data['quota_total'])
@@ -228,7 +232,7 @@ def update_org(org_id):
         org.enabled = bool(data['enabled'])
 
     db.session.commit()
-    return jsonify({'message': '组织已更新', 'org': org.to_dict()})
+    return jsonify({'message': get_message('org_updated', request), 'org': org.to_dict()})
 
 
 @team_bp.route('/orgs/<int:org_id>', methods=['DELETE'])
@@ -236,16 +240,16 @@ def delete_org(org_id):
     """删除组织（需无成员且无子组织）"""
     org = Org.query.get(org_id)
     if not org:
-        return jsonify({'error': '组织不存在'}), 404
+        return jsonify({'error': get_message('org_not_found', request)}), 404
 
     if WRToken.query.filter_by(org_id=org_id).count() > 0:
-        return jsonify({'error': '该组织下还有成员，请先移除成员'}), 400
+        return jsonify({'error': get_message('org_has_members', request)}), 400
     if Org.query.filter_by(parent_id=org_id).count() > 0:
-        return jsonify({'error': '该组织下还有子组织，请先删除子组织'}), 400
+        return jsonify({'error': get_message('org_has_children', request)}), 400
 
     db.session.delete(org)
     db.session.commit()
-    return jsonify({'message': '组织已删除'})
+    return jsonify({'message': get_message('org_deleted', request)})
 
 
 @team_bp.route('/orgs/<int:org_id>/members')
@@ -308,13 +312,13 @@ def invite_member():
     """创建新成员（即创建新 WR Token，关联 org_id）"""
     data = request.get_json()
     if not data or not data.get('name'):
-        return jsonify({'error': '名称不能为空'}), 400
+        return jsonify({'error': get_message('name_required', request)}), 400
 
     org_id = data.get('org_id')
     if org_id:
         org = Org.query.get(org_id)
         if not org:
-            return jsonify({'error': '组织不存在'}), 404
+            return jsonify({'error': get_message('org_not_found', request)}), 404
 
     token = WRToken(
         name=data['name'].strip(),
@@ -325,6 +329,7 @@ def invite_member():
         rate_limit_rpm=int(data.get('rate_limit_rpm', 0)),
         smart_downgrade=data.get('smart_downgrade', False),
         desensitize_enabled=data.get('desensitize_enabled', False),
+        session_recall_enabled=data.get('session_recall_enabled', True),
         enabled=data.get('enabled', True),
     )
 
@@ -344,7 +349,7 @@ def invite_member():
         try:
             token.expires_at = parse_dt(data['expires_at'])
         except (ValueError, TypeError):
-            return jsonify({'error': 'expires_at 格式无效'}), 400
+            return jsonify({'error': get_message('invalid_expires_at', request)}), 400
 
     db.session.add(token)
     db.session.commit()
@@ -356,7 +361,7 @@ def invite_member():
         email_sent = _send_member_email(token)
 
     return jsonify({
-        'message': '成员已创建',
+        'message': get_message('member_created', request),
         'id': token.id,
         'key': token.key,
         'email_sent': email_sent,
@@ -368,11 +373,11 @@ def update_member(member_id):
     """更新成员配置"""
     token = WRToken.query.get(member_id)
     if not token:
-        return jsonify({'error': '成员不存在'}), 404
+        return jsonify({'error': get_message('member_not_found', request)}), 404
 
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     if 'name' in data:
         token.name = data['name'].strip()
@@ -381,7 +386,7 @@ def update_member(member_id):
         if new_org:
             org = Org.query.get(new_org)
             if not org:
-                return jsonify({'error': '组织不存在'}), 404
+                return jsonify({'error': get_message('org_not_found', request)}), 404
         token.org_id = int(new_org) if new_org else None
     if 'member_email' in data:
         token.member_email = data['member_email'].strip()
@@ -402,6 +407,8 @@ def update_member(member_id):
         token.smart_downgrade = bool(data['smart_downgrade'])
     if 'desensitize_enabled' in data:
         token.desensitize_enabled = bool(data['desensitize_enabled'])
+    if 'session_recall_enabled' in data:
+        token.session_recall_enabled = bool(data['session_recall_enabled'])
     if 'enabled' in data:
         token.enabled = bool(data['enabled'])
     if 'expires_at' in data:
@@ -410,7 +417,7 @@ def update_member(member_id):
             try:
                 token.expires_at = parse_dt(data['expires_at'])
             except (ValueError, TypeError):
-                return jsonify({'error': 'expires_at 格式无效'}), 400
+                return jsonify({'error': get_message('invalid_expires_at', request)}), 400
         else:
             token.expires_at = None
 
@@ -422,7 +429,7 @@ def update_member(member_id):
     if send_email and token.member_email:
         email_sent = _send_member_email(token)
 
-    return jsonify({'message': '成员已更新', 'member': token.to_dict(), 'email_sent': email_sent})
+    return jsonify({'message': get_message('member_updated', request), 'member': token.to_dict(), 'email_sent': email_sent})
 
 
 @team_bp.route('/members/<int:member_id>', methods=['DELETE'])
@@ -440,21 +447,21 @@ def move_member(member_id):
     """转移成员到其他组织"""
     token = WRToken.query.get(member_id)
     if not token:
-        return jsonify({'error': '成员不存在'}), 404
+        return jsonify({'error': get_message('member_not_found', request)}), 404
 
     data = request.get_json()
     if not data or 'org_id' not in data:
-        return jsonify({'error': '需要 org_id'}), 400
+        return jsonify({'error': get_message('org_id_required', request)}), 400
 
     new_org_id = data['org_id']
     if new_org_id:
         org = Org.query.get(new_org_id)
         if not org:
-            return jsonify({'error': '目标组织不存在'}), 404
+            return jsonify({'error': get_message('target_org_not_found', request)}), 404
     token.org_id = int(new_org_id) if new_org_id else None
 
     db.session.commit()
-    return jsonify({'message': '成员已转移', 'member': token.to_dict()})
+    return jsonify({'message': get_message('member_transferred', request), 'member': token.to_dict()})
 
 
 @team_bp.route('/members/<int:member_id>/usage')
@@ -492,12 +499,13 @@ def batch_import_members():
     """批量导入成员 — 支持逐条创建和批量文本导入"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     results = {'success': [], 'errors': [], 'emails_sent': 0}
     send_email = data.get('send_email', False)
     default_quota = int(data.get('quota_total', 0))
     default_rpm = int(data.get('rate_limit_rpm', 0))
+    default_session_recall = data.get('session_recall_enabled', True)
 
     # 支持两种模式：
     # 1. members: [{name, org_id, member_email, ...}, ...]
@@ -513,7 +521,7 @@ def batch_import_members():
                 continue
             parts = line.split()
             if len(parts) < 3:
-                results['errors'].append({'line': line, 'reason': '格式不正确，需要: 部门 姓名 email'})
+                results['errors'].append({'line': line, 'reason': get_message('invalid_format_dept_name_email', request)})
                 continue
             dept_name, name, email = parts[0], parts[1], parts[2]
             org_id = org_id_map.get(dept_name)
@@ -537,19 +545,19 @@ def batch_import_members():
     elif 'members' in data and isinstance(data['members'], list):
         members_to_create = data['members']
     else:
-        return jsonify({'error': '需要提供 members 数组或 text 文本'}), 400
+        return jsonify({'error': get_message('members_array_or_text_required', request)}), 400
 
     for item in members_to_create:
         try:
             if not item.get('name'):
-                results['errors'].append({'name': item.get('name', ''), 'reason': '名称不能为空'})
+                results['errors'].append({'name': item.get('name', ''), 'reason': get_message('name_required', request)})
                 continue
 
             org_id = item.get('org_id')
             if org_id:
                 org = Org.query.get(org_id)
                 if not org:
-                    results['errors'].append({'name': item['name'], 'reason': f'组织 ID {org_id} 不存在'})
+                    results['errors'].append({'name': item['name'], 'reason': get_message('org_id_not_found', request).format(org_id=org_id)})
                     continue
 
             token = WRToken(
@@ -561,6 +569,7 @@ def batch_import_members():
                 rate_limit_rpm=int(item.get('rate_limit_rpm', default_rpm)),
                 smart_downgrade=item.get('smart_downgrade', False),
                 desensitize_enabled=item.get('desensitize_enabled', False),
+                session_recall_enabled=item.get('session_recall_enabled', default_session_recall),
                 enabled=item.get('enabled', True),
             )
 
@@ -597,9 +606,9 @@ def batch_import_members():
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'数据库提交失败: {str(e)}'}), 500
+        return jsonify({'error': get_message('db_commit_failed', request).format(e=str(e))}), 500
 
     return jsonify({
-        'message': f'批量导入完成: 成功 {len(results["success"])} 个, 失败 {len(results["errors"])} 个',
+        'message': get_message('batch_import_done', request).format(success=len(results["success"]), failed=len(results["errors"])),
         'results': results,
     }), 201

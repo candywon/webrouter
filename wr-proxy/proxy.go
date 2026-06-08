@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 代理转发核心：流式 SSE 透传 + 非流式转发
@@ -5,6 +8,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
+	"compress/zlib"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,6 +52,7 @@ type ProxyResult struct {
 	UpstreamError UpstreamErrorDetail // 上游语义错误详情（HTTP 200 但 body 含错误时填充）
 	StreamAborted bool                // 流式响应中途被错误中断
 	Truncated     bool                // 响应被截断（finish_reason=length 或 JSON 不完整）
+	StreamContent string              // 流式响应累积内容（用于知识捕获）
 }
 
 // Forward 转发请求到上游 Provider
@@ -88,10 +94,18 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 		upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
 	}
 
-	// 设置超时
+	// 设置超时：流式请求需要更长的超时（reasoning 模型生成慢）
 	timeout := time.Duration(provider.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
-		timeout = cfg.DefaultTimeout
+		if isStream {
+			timeout = cfg.StreamTimeout
+		} else {
+			timeout = cfg.DefaultTimeout
+		}
+	}
+	// 流式请求至少使用 StreamTimeout
+	if isStream && timeout < cfg.StreamTimeout {
+		timeout = cfg.StreamTimeout
 	}
 	ps.client.Timeout = timeout
 
@@ -120,8 +134,10 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 
 	// 对错误响应（>= 400）进行语义分析，识别额度用完/限流/超时等
 	if resp.StatusCode >= 400 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096)) // 只读前4KB分析错误
+		rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096)) // 只读前4KB分析错误
 		resp.Body.Close()
+		// 若上游声明了 Content-Encoding，先解压以便后续语义分析与展示
+		body := decodeResponseBody(rawBody, resp.Header.Get("Content-Encoding"))
 		if readErr == nil && len(body) > 0 {
 			result.UpstreamError = DetectUpstreamError(resp.StatusCode, body)
 			if result.UpstreamError.Type != UpstreamErrNone {
@@ -134,20 +150,29 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 						result.UpstreamError.Type, result.UpstreamError.Message)
 				}
 			}
+			// 兜底：即使语义识别失败，也保留 body 摘要供错误展示
+			if result.Error == "" {
+				snippet := strings.TrimSpace(string(body))
+				if len(snippet) > 500 {
+					snippet = snippet[:500] + "…"
+				}
+				result.Error = fmt.Sprintf("upstream HTTP %d: %s", resp.StatusCode, snippet)
+			}
 		}
-		// 重新构造 body reader 供后续使用（已关闭，上层需处理）
+		// 重新构造 body reader 供后续使用（保留原始压缩字节，避免破坏 Content-Encoding 语义）
 		// 注意：body 已被读取并关闭，上层不应再读取 resp.Body
 		// 对于错误响应，上层（handlers.go）不会尝试写入响应体给客户端
-		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.Body = io.NopCloser(bytes.NewReader(rawBody))
 		return resp, result
 	}
 
 	// 对 200 响应也做轻量检测（某些 API 200 但返回错误 JSON）
 	// 仅对非流式做此检测，流式在 StreamResponse 中逐 chunk 检测
 	if !isStream && resp.StatusCode == 200 {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		if readErr == nil && len(body) > 0 {
-			errDetail := DetectUpstreamError(200, body)
+		// 先读取完整响应体，避免截断
+		fullBody, readErr := io.ReadAll(io.LimitReader(resp.Body, cfg.MaxBodySize))
+		if readErr == nil && len(fullBody) > 0 {
+			errDetail := DetectUpstreamError(200, fullBody)
 			if errDetail.Type != UpstreamErrNone {
 				// 200 但含语义错误，这是最坑的情况
 				result.UpstreamError = errDetail
@@ -157,14 +182,14 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 					model, provider.Name, errDetail.Type, errDetail.Code)
 				// 还原 body 供上层使用
 				resp.Body.Close()
-				resp.Body = io.NopCloser(bytes.NewReader(body))
+				resp.Body = io.NopCloser(bytes.NewReader(fullBody))
 				return resp, result
 			}
 		}
-		// 还原 body
-		if len(body) > 0 {
+		// 还原完整 body
+		if len(fullBody) > 0 {
 			resp.Body.Close()
-			resp.Body = io.NopCloser(bytes.NewReader(body))
+			resp.Body = io.NopCloser(bytes.NewReader(fullBody))
 		}
 	}
 
@@ -263,8 +288,9 @@ func (ps *ProxyService) ForwardBinary(provider *Provider, endpoint string,
 		return resp, result
 	}
 
-	// 200 响应：检查是否含 JSON 错误（少数 API 200 但返回错误 JSON）
-	if resp.StatusCode == 200 && !isMultipart {
+	// 200 响应：仅对 JSON Content-Type 做语义错误检测
+	// 二进制响应（audio/image）不能预读，否则会截断 body
+	if resp.StatusCode == 200 && !isMultipart && !isBinaryContentType(resp.Header.Get("Content-Type")) {
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		if readErr == nil && len(body) > 0 {
 			errDetail := DetectUpstreamError(200, body)
@@ -279,7 +305,7 @@ func (ps *ProxyService) ForwardBinary(provider *Provider, endpoint string,
 				return resp, result
 			}
 		}
-		// 还原 body
+		// 还原 body（仅 JSON 响应）
 		if len(body) > 0 {
 			resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(body))
@@ -320,7 +346,9 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	defer resp.Body.Close()
 
 	var lastChunk strings.Builder
-	var lastFinishReason string // 跟踪最后一个 finish_reason
+	var lastFinishReason string          // 跟踪最后一个 finish_reason
+	var streamContentBuf strings.Builder // 累积流式内容（用于知识捕获，上限 10KB）
+	const maxStreamCapture = 10 * 1024
 	for {
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -355,6 +383,13 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 				lastChunk.Reset()
 				lastChunk.WriteString(data)
 
+				// 累积流式内容（用于知识捕获）
+				if streamContentBuf.Len() < maxStreamCapture {
+					if delta := extractStreamDeltaContent(data); delta != "" {
+						streamContentBuf.WriteString(delta)
+					}
+				}
+
 				// 提取 finish_reason（流式）
 				if fr := extractFinishReason(data); fr != "" {
 					lastFinishReason = fr
@@ -379,6 +414,9 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 	}
 
 	result.LatencyMs = int(time.Since(start).Milliseconds())
+
+	// 保存流式内容（用于知识捕获）
+	result.StreamContent = streamContentBuf.String()
 
 	// 从最后一个 chunk 提取 usage
 	usage := parseStreamUsage(lastChunk.String())
@@ -559,4 +597,56 @@ func isStreamRequest(body []byte) bool {
 	}
 	stream, ok := req["stream"].(bool)
 	return ok && stream
+}
+
+// decodeResponseBody 根据 Content-Encoding 解压响应体（仅 gzip/deflate）。
+// 解压失败时返回原始字节，保证错误展示链路不会因解压异常而中断。
+func decodeResponseBody(body []byte, encoding string) []byte {
+	if len(body) == 0 {
+		return body
+	}
+
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "gzip":
+		zr, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return body
+		}
+		defer zr.Close()
+		out, err := io.ReadAll(io.LimitReader(zr, 64*1024))
+		if err != nil {
+			return body
+		}
+		return out
+	case "deflate":
+		zr, err := zlib.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return body
+		}
+		defer zr.Close()
+		out, err := io.ReadAll(io.LimitReader(zr, 64*1024))
+		if err != nil {
+			return body
+		}
+		return out
+	}
+	return body
+}
+
+// extractStreamDeltaContent 从 SSE data chunk 中提取 delta content
+func extractStreamDeltaContent(data string) string {
+	var chunk struct {
+		Choices []struct {
+			Delta struct {
+				Content string `json:"content"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+		return ""
+	}
+	if len(chunk.Choices) > 0 {
+		return chunk.Choices[0].Delta.Content
+	}
+	return ""
 }

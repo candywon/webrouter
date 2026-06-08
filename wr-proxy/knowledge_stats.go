@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -19,6 +22,11 @@ func startKnowledgeCleanup() {
 	for range ticker.C {
 		if err := cleanupKnowledgeRaw(30); err != nil {
 			LogWarn("[knowledge] cleanup failed: %v", err)
+		} else {
+			LogConfigChange("raw_cleanup_30d", 0, map[string]string{
+				"event":          "scheduled_raw_cleanup",
+				"retention_days": "30",
+			})
 		}
 	}
 }
@@ -49,6 +57,9 @@ func startKnowledgeExtractScheduler() {
 	defer ticker.Stop()
 
 	for range ticker.C {
+		if !IsKnowledgeEnabled() {
+			continue
+		}
 		processed, err := ExtractRawToKnowledge()
 		if err != nil {
 			LogWarn("[knowledge] extract scheduler failed: %v", err)
@@ -70,11 +81,44 @@ func startEmbeddingBackfillScheduler() {
 	defer ticker.Stop()
 
 	for range ticker.C {
+		if !IsKnowledgeEnabled() {
+			continue
+		}
 		processed, err := EmbeddingBackfill(10)
 		if err != nil {
 			LogWarn("[embedding] backfill scheduler failed: %v", err)
 		} else if processed > 0 {
 			LogInfo("[embedding] backfill scheduler: processed %d entries", processed)
+		}
+	}
+}
+
+// startRetentionCleanup 定期清理过期的知识条目（retention_until enforcement）
+func startRetentionCleanup() {
+	// 首次启动后 15 分钟执行第一次
+	time.Sleep(15 * time.Minute)
+
+	ticker := time.NewTicker(6 * time.Hour) // 每6小时检查一次
+	defer ticker.Stop()
+
+	for range ticker.C {
+		n, err := cleanupExpiredKnowledge()
+		if err != nil {
+			LogWarn("[retention] cleanup failed: %v", err)
+		} else if n > 0 {
+			LogInfo("[retention] cleaned %d expired knowledge items", n)
+			LogConfigChange("retention_cleanup", 0, map[string]interface{}{
+				"event":   "retention_cleanup",
+				"deleted": n,
+			})
+		}
+		// 同时清理审计日志
+		an := cleanupOldAuditLogs(90)
+		if an > 0 {
+			LogConfigChange("audit_log_cleanup", 0, map[string]interface{}{
+				"event":   "audit_log_cleanup",
+				"deleted": an,
+			})
 		}
 	}
 }
@@ -99,10 +143,10 @@ func handleKnowledgeStats(w http.ResponseWriter, r *http.Request) {
 	row2.Scan(&itemCount)
 
 	writeJSON(w, 200, map[string]interface{}{
-		"captured": stats,
+		"captured":           stats,
 		"pending_processing": pendingCount,
 		"total_items":        itemCount,
-		"capture_enabled":    knowledgeEnabled,
+		"capture_enabled":    IsKnowledgeEnabled(),
 	})
 }
 
@@ -114,13 +158,13 @@ func handleKnowledgePromptPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		TokenID                 int    `json:"token_id"`
-		KnowledgeCaptureEnabled bool   `json:"knowledge_capture_enabled"`
-		KnowledgeDepartment     string `json:"knowledge_department"`
-		RAGEnabled              bool   `json:"rag_enabled"`
+		TokenID                 int     `json:"token_id"`
+		KnowledgeCaptureEnabled bool    `json:"knowledge_capture_enabled"`
+		KnowledgeDepartment     string  `json:"knowledge_department"`
+		RAGEnabled              bool    `json:"rag_enabled"`
 		RAGMinRelevance         float64 `json:"rag_min_relevance"`
-		RAGTopK                 int    `json:"rag_top_k"`
-		SystemPromptKnowledge   string `json:"system_prompt_knowledge"`
+		RAGTopK                 int     `json:"rag_top_k"`
+		SystemPromptKnowledge   string  `json:"system_prompt_knowledge"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "Invalid request body"})
@@ -173,8 +217,8 @@ func handleKnowledgeAnalyze(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		writeJSON(w, 500, map[string]interface{}{
-			"error":   err.Error(),
-			"status":  "failed",
+			"error":  err.Error(),
+			"status": "failed",
 		})
 		return
 	}
@@ -220,6 +264,14 @@ func handleKnowledgeExtract(w http.ResponseWriter, r *http.Request) {
 		"duration_ms": duration,
 		"message":     fmt.Sprintf("成功提取 %d 条知识", processed),
 	})
+
+	// 审计日志：手动触发知识提取
+	if processed > 0 {
+		LogConfigChange("knowledge_extract", 0, map[string]interface{}{
+			"processed":   processed,
+			"duration_ms": duration,
+		})
+	}
 }
 
 // handleEmbeddingBackfill 手动触发 embedding 批量生成
@@ -332,20 +384,20 @@ func handleKnowledgeExport(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type exportItem struct {
-		ID          int     `json:"id"`
-		Type        string  `json:"type"`
-		Title       string  `json:"title"`
-		Summary     string  `json:"summary"`
-		DomainCode  string  `json:"domain_code"`
-		Department  string  `json:"department"`
-		SourceQuote string  `json:"source_quote"`
-		DataPoints  string  `json:"data_points"`
-		Confidence  float64 `json:"confidence"`
-		Verification string `json:"verification"`
-		Sensitivity string  `json:"sensitivity"`
-		TokenName   string  `json:"token_name"`
-		ModelName   string  `json:"model_name"`
-		CreatedAt   string  `json:"created_at"`
+		ID           int     `json:"id"`
+		Type         string  `json:"type"`
+		Title        string  `json:"title"`
+		Summary      string  `json:"summary"`
+		DomainCode   string  `json:"domain_code"`
+		Department   string  `json:"department"`
+		SourceQuote  string  `json:"source_quote"`
+		DataPoints   string  `json:"data_points"`
+		Confidence   float64 `json:"confidence"`
+		Verification string  `json:"verification"`
+		Sensitivity  string  `json:"sensitivity"`
+		TokenName    string  `json:"token_name"`
+		ModelName    string  `json:"model_name"`
+		CreatedAt    string  `json:"created_at"`
 	}
 
 	var items []exportItem
@@ -360,11 +412,11 @@ func handleKnowledgeExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]interface{}{
-		"total": len(items),
-		"domain": domain,
+		"total":      len(items),
+		"domain":     domain,
 		"department": department,
-		"type": itemType,
-		"items": items,
+		"type":       itemType,
+		"items":      items,
 	})
 }
 

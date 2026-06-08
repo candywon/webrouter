@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -92,11 +95,11 @@ func TestExtractRetryAfter(t *testing.T) {
 
 func TestDetectUpstreamError(t *testing.T) {
 	tests := []struct {
-		name           string
-		statusCode     int
-		body           string
-		wantType       string
-		wantCode       string
+		name       string
+		statusCode int
+		body       string
+		wantType   string
+		wantCode   string
 	}{
 		// DashScope: 额度用完 (AccountQuotaExceeded)
 		{
@@ -214,11 +217,11 @@ func TestDetectUpstreamError(t *testing.T) {
 
 func TestExtractErrorMessage(t *testing.T) {
 	tests := []struct {
-		name      string
-		body      string
-		wantMsg   string
-		wantCode  string
-		wantType  string
+		name     string
+		body     string
+		wantMsg  string
+		wantCode string
+		wantType string
 	}{
 		{
 			name:     "DashScope 格式 (顶层 code+message)",
@@ -270,9 +273,9 @@ func TestExtractErrorMessage(t *testing.T) {
 
 func TestShouldRetrySameProvider(t *testing.T) {
 	tests := []struct {
-		name     string
-		errType  string
-		want     bool
+		name    string
+		errType string
+		want    bool
 	}{
 		{"timeout 可重试", "timeout", true},
 		{"rate_limited 短时限流可重试", "rate_limited", true},
@@ -295,29 +298,29 @@ func TestShouldRetrySameProvider(t *testing.T) {
 
 func TestIncreaseMaxTokens(t *testing.T) {
 	tests := []struct {
-		name     string
-		body     string
-		wantMax  float64
+		name    string
+		body    string
+		wantMax float64
 	}{
 		{
-			name:     "无 max_tokens 字段 → 设为 16384",
-			body:     `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`,
-			wantMax:  16384,
+			name:    "无 max_tokens 字段 → 设为 16384",
+			body:    `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`,
+			wantMax: 16384,
 		},
 		{
-			name:     "有 max_tokens=1024 → 翻倍到 2048",
-			body:     `{"model":"gpt-4","max_tokens":1024,"messages":[{"role":"user","content":"hello"}]}`,
-			wantMax:  2048,
+			name:    "有 max_tokens=1024 → 翻倍到 2048",
+			body:    `{"model":"gpt-4","max_tokens":1024,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMax: 2048,
 		},
 		{
-			name:     "max_tokens=20000 → 翻倍超限 → 上限 32768",
-			body:     `{"model":"gpt-4","max_tokens":20000,"messages":[{"role":"user","content":"hello"}]}`,
-			wantMax:  32768,
+			name:    "max_tokens=20000 → 翻倍超限 → 上限 32768",
+			body:    `{"model":"gpt-4","max_tokens":20000,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMax: 32768,
 		},
 		{
-			name:     "max_tokens=16384 → 翻倍到 32768",
-			body:     `{"model":"gpt-4","max_tokens":16384,"messages":[{"role":"user","content":"hello"}]}`,
-			wantMax:  32768,
+			name:    "max_tokens=16384 → 翻倍到 32768",
+			body:    `{"model":"gpt-4","max_tokens":16384,"messages":[{"role":"user","content":"hello"}]}`,
+			wantMax: 32768,
 		},
 	}
 

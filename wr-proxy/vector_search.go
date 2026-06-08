@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -35,8 +38,8 @@ type SearchResult struct {
 }
 
 var vectorCache = &struct {
-	mu    sync.RWMutex
-	items []VectorCacheItem
+	mu     sync.RWMutex
+	items  []VectorCacheItem
 	loaded time.Time
 }{}
 
@@ -99,6 +102,8 @@ func vectorCacheRefresher() {
 	// 启动后先加载一次
 	if err := LoadVectorCacheFull(); err != nil {
 		LogWarn("[vector_cache] initial load failed: %v", err)
+	} else {
+		rebuildBM25Index()
 	}
 
 	ticker := time.NewTicker(5 * time.Minute)
@@ -107,6 +112,8 @@ func vectorCacheRefresher() {
 	for range ticker.C {
 		if err := LoadVectorCacheFull(); err != nil {
 			LogWarn("[vector_cache] refresh failed: %v", err)
+		} else {
+			rebuildBM25Index()
 		}
 	}
 }
@@ -193,7 +200,92 @@ func dotProduct(a, b []float64) float64 {
 	return dot
 }
 
-// roundTo 保留指定位数小数
+// rebuildBM25Index 从当前向量缓存重建 BM25 索引
+func rebuildBM25Index() {
+	vectorCache.mu.RLock()
+	items := make([]VectorCacheItem, len(vectorCache.items))
+	copy(items, vectorCache.items)
+	vectorCache.mu.RUnlock()
+
+	if len(items) == 0 {
+		return
+	}
+	globalBM25.Build(items)
+	LogInfo("[bm25] index rebuilt with %d documents", len(items))
+}
+
+// HybridSearchVectors 混合检索：BM25 + 向量余弦相似度
+// alpha 控制 BM25 权重（0 = 纯向量, 1 = 纯 BM25）
+func HybridSearchVectors(query string, topK int, minRelevance float64, alpha float64, domainFilter, typeFilter string) ([]SearchResult, error) {
+	// 1. 向量化 query
+	queryVec, err := callDashScopeEmbedding(query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+	queryVec = normalizeVec(queryVec)
+
+	// 2. 获取 BM25 分数（多取一些用于归一化）
+	bm25Results := globalBM25.Search(query, topK*3)
+	bm25ScoreMap := make(map[int]float64, len(bm25Results))
+	maxBM25 := 0.0
+	for _, br := range bm25Results {
+		bm25ScoreMap[br.DocID] = br.Score
+		if br.Score > maxBM25 {
+			maxBM25 = br.Score
+		}
+	}
+
+	// 3. 读取向量缓存快照
+	vectorCache.mu.RLock()
+	items := vectorCache.items
+	vectorCache.mu.RUnlock()
+
+	if len(items) == 0 {
+		return []SearchResult{}, nil
+	}
+
+	// 4. 混合分数计算
+	var results []SearchResult
+	for _, item := range items {
+		if domainFilter != "" && item.DomainCode != domainFilter {
+			continue
+		}
+		if typeFilter != "" && item.Type != typeFilter {
+			continue
+		}
+
+		cosineSim := dotProduct(queryVec, item.Vector)
+
+		normalizedBM25 := 0.0
+		if maxBM25 > 0 {
+			if s, ok := bm25ScoreMap[item.ItemID]; ok {
+				normalizedBM25 = s / maxBM25
+			}
+		}
+
+		hybridScore := alpha*normalizedBM25 + (1-alpha)*cosineSim
+		if hybridScore >= minRelevance {
+			results = append(results, SearchResult{
+				ItemID:     item.ItemID,
+				Title:      item.Title,
+				Summary:    item.Summary,
+				DomainCode: item.DomainCode,
+				Type:       item.Type,
+				Similarity: roundTo(hybridScore, 4),
+			})
+		}
+	}
+
+	// 5. 排序取 top-k
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Similarity > results[j].Similarity
+	})
+	if len(results) > topK {
+		results = results[:topK]
+	}
+
+	return results, nil
+}
 func roundTo(x float64, n int) float64 {
 	p := math.Pow10(n)
 	return math.Round(x*p) / p

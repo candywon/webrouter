@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * Token 令牌管理页面 JS
  */
@@ -40,7 +43,7 @@ class TokensPage {
         } catch (e) {
             console.error('Failed to load tokens:', e);
             document.getElementById('tokens-page-content').innerHTML =
-                '<div class="error-msg">加载失败，请刷新重试</div>';
+                '<div class="error-msg">' + I18n.t('common.loadFailedRetry') + '</div>';
         }
     }
 
@@ -54,8 +57,8 @@ class TokensPage {
 
         let html = `
             <div class="page-header">
-                <h2>🔑 令牌管理</h2>
-                <button class="btn-primary" onclick="tokensPage.showAddForm()">+ 创建令牌</button>
+                <h2>${I18n.t('tokens.title')}</h2>
+                <button class="btn-primary" onclick="tokensPage.showAddForm()">${I18n.t('tokens.createToken')}</button>
             </div>
             <div class="token-list">
         `;
@@ -63,8 +66,8 @@ class TokensPage {
         if (this.tokens.length === 0) {
             html += `
                 <div class="empty-state">
-                    <p>还没有创建任何令牌</p>
-                    <p class="hint">点击"创建令牌"开始管理 API 访问密钥</p>
+                    <p>${I18n.t('tokens.noTokens')}</p>
+                    <p class="hint">${I18n.t('tokens.createTokenHint')}</p>
                 </div>
             `;
         } else {
@@ -72,14 +75,14 @@ class TokensPage {
                 const statusHtml = this.renderStatus(t);
                 const quotaHtml = this.renderQuotaBar(t);
                 const desensitizeFlag = t.desensitize_enabled
-                    ? '<span class="token-flag flag-desensitize">🛡 脱敏</span>'
+                    ? `<span class="token-flag flag-desensitize">${I18n.t('tokens.desensitizeFlag')}</span>`
                     : '';
                 const smartFlag = t.smart_downgrade
-                    ? '<span class="token-flag flag-smart">⚡ 智能降级</span>'
+                    ? `<span class="token-flag flag-smart">${I18n.t('tokens.smartDowngradeFlag')}</span>`
                     : '';
                 const expiresStr = t.expires_at
-                    ? `<span class="token-expire">${t.is_expired ? '已过期' : '到期: ' + formatDate(t.expires_at)}</span>`
-                    : '<span class="token-expire">永不过期</span>';
+                    ? `<span class="token-expire">${t.is_expired ? I18n.t('common.expired') : I18n.t('tokens.expiresAt') + formatDate(t.expires_at)}</span>`
+                    : `<span class="token-expire">${I18n.t('common.neverExpires')}</span>`;
 
                 html += `
                 <div class="token-card ${!t.enabled ? 'token-disabled' : ''} ${t.is_expired ? 'token-expired' : ''}" data-id="${t.id}">
@@ -88,8 +91,8 @@ class TokensPage {
                         ${statusHtml}
                     </div>
                     <div class="token-meta">
-                        <span class="token-key-prefix" onclick="tokensPage.copyPrefix('${this.escHtml(t.key_prefix)}')" title="点击复制">${this.escHtml(t.key_prefix)}</span>
-                        <span class="token-org">${t.org_name ? '📁 ' + this.escHtml(t.org_name) : '<span style="color:var(--text-muted)">未分配组织</span>'}</span>
+                        <span class="token-key-prefix" onclick="tokensPage.copyTokenInfo(${t.id})" title="${I18n.t('tokens.copyInfoTitle')}">${this.escHtml(t.key_prefix)}</span>
+                        <span class="token-org">${t.org_name ? '📁 ' + this.escHtml(t.org_name) : '<span style="color:var(--text-muted)">' + I18n.t('tokens.unassignedOrg') + '</span>'}</span>
                         ${t.member_email ? `<span class="token-email">${this.escHtml(t.member_email)}</span>` : ''}
                         ${expiresStr}
                     </div>
@@ -97,19 +100,20 @@ class TokensPage {
                         ${desensitizeFlag}
                         ${smartFlag}
                         ${t.rate_limit_rpm > 0 ? `<span class="token-flag flag-ratelimit">⏱ ${t.rate_limit_rpm} RPM</span>` : ''}
-                        ${t.subnet_whitelist && t.subnet_whitelist.length > 0 ? `<span class="token-flag flag-subnet">🌐 白名单</span>` : ''}
+                        ${t.subnet_whitelist && t.subnet_whitelist.length > 0 ? `<span class="token-flag flag-subnet">${I18n.t('tokens.whitelistFlag')}</span>` : ''}
                     </div>
                     ${quotaHtml}
                     <div class="token-models">
                         ${(t.models || []).length > 0
                             ? t.models.map(m => `<span class="model-tag">${this.escHtml(m)}</span>`).join('')
-                            : '<span class="model-tag model-all">全部模型</span>'}
+                            : `<span class="model-tag model-all">${I18n.t('common.allModels')}</span>`}
                     </div>
                     <div class="token-actions">
-                        <button class="btn-sm" onclick="tokensPage.viewDetail(${t.id})">📊 详情</button>
-                        <button class="btn-sm" onclick="tokensPage.editToken(${t.id})">✏️ 编辑</button>
-                        <button class="btn-sm" onclick="tokensPage.showResetQuota(${t.id})">🔄 重置配额</button>
-                        <button class="btn-sm btn-danger" onclick="tokensPage.deleteToken(${t.id})">🗑️ 删除</button>
+                        <button class="btn-sm" onclick="tokensPage.showKey(${t.id})">${I18n.t('tokens.showKey')}</button>
+                        <button class="btn-sm" onclick="tokensPage.viewDetail(${t.id})">${I18n.t('tokens.viewDetail')}</button>
+                        <button class="btn-sm" onclick="tokensPage.editToken(${t.id})">${I18n.t('common.edit')}</button>
+                        <button class="btn-sm" onclick="tokensPage.showResetQuota(${t.id})">${I18n.t('tokens.resetQuota')}</button>
+                        <button class="btn-sm btn-danger" onclick="tokensPage.deleteToken(${t.id})">${I18n.t('common.delete')}</button>
                     </div>
                 </div>
                 `;
@@ -123,74 +127,80 @@ class TokensPage {
             <div id="token-form-modal" class="modal" style="display:none">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3 id="token-form-title">创建令牌</h3>
+                        <h3 id="token-form-title">${I18n.t('tokens.createFormTitle')}</h3>
                         <button class="modal-close" onclick="tokensPage.hideForm()">&times;</button>
                     </div>
                     <div class="modal-body">
                         <form id="token-form">
                             <div class="form-group">
-                                <label>名称 *</label>
-                                <input type="text" id="tf-name" required placeholder="如: 生产环境令牌">
+                                <label>${I18n.t('common.nameRequired')}</label>
+                                <input type="text" id="tf-name" required placeholder="${I18n.t('tokens.namePlaceholder')}">
                             </div>
                             <div class="form-group">
-                                <label>所属组织</label>
+                                <label>${I18n.t('tokens.org')}</label>
                                 <select id="tf-org-id">
-                                    <option value="">— 未分配 —</option>
+                                    <option value="">${I18n.t('common.unassigned')}</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>允许模型</label>
+                                <label>${I18n.t('tokens.allowedModels')}</label>
                                 <div id="tf-models-select" class="multi-select"></div>
                             </div>
                             <div class="form-group">
-                                <label>数据源</label>
+                                <label>${I18n.t('common.provider')}</label>
                                 <div id="tf-provider-select" class="multi-select"></div>
                             </div>
                             <div class="form-group">
-                                <label>总额度 (元，0 表示不限)</label>
+                                <label>${I18n.t('tokens.quotaTotalHint')}</label>
                                 <input type="number" id="tf-quota-total" min="0" step="0.01" value="0" placeholder="0">
                             </div>
                             <div class="form-group">
-                                <label>速率限制 RPM (0 表示不限)</label>
+                                <label>${I18n.t('tokens.rateLimitHint')}</label>
                                 <input type="number" id="tf-rate-limit-rpm" min="0" value="0" placeholder="0">
                             </div>
                             <div class="form-group">
-                                <label>子网白名单 (逗号分隔，留空表示不限)</label>
-                                <input type="text" id="tf-subnet-whitelist" placeholder="如: 10.0.0.0/8,192.168.1.0/24">
+                                <label>${I18n.t('tokens.subnetWhitelistHint')}</label>
+                                <input type="text" id="tf-subnet-whitelist" placeholder="${I18n.t('tokens.subnetPlaceholder')}">
                             </div>
                             <div class="form-group form-row">
                                 <label class="switch-label">
                                     <input type="checkbox" id="tf-smart-downgrade">
-                                    <span>智能降级</span>
+                                    <span>${I18n.t('tokens.smartDowngrade')}</span>
                                 </label>
                             </div>
                             <div class="form-group form-row">
                                 <label class="switch-label">
                                     <input type="checkbox" id="tf-desensitize-enabled" onchange="tokensPage.onDesensitizeToggle()">
-                                    <span>启用脱敏</span>
+                                    <span>${I18n.t('tokens.enableDesensitize')}</span>
                                 </label>
                             </div>
                             <div class="form-group" id="tf-desensitize-level-group" style="display:none">
-                                <label>脱敏级别</label>
+                                <label>${I18n.t('tokens.desensitizeLevel')}</label>
                                 <select id="tf-desensitize-level">
-                                    <option value="off">关闭</option>
-                                    <option value="standard" selected>标准</option>
-                                    <option value="strict">严格</option>
+                                    <option value="off">${I18n.t('common.close')}</option>
+                                    <option value="standard" selected>${I18n.t('common.standard')}</option>
+                                    <option value="strict">${I18n.t('common.strict')}</option>
                                 </select>
                             </div>
                             <div class="form-group form-row">
                                 <label class="switch-label">
+                                    <input type="checkbox" id="tf-session-recall-enabled" checked>
+                                    <span>${I18n.t('tokens.sessionRecall')}</span>
+                                </label>
+                            </div>
+                            <div class="form-group form-row">
+                                <label class="switch-label">
                                     <input type="checkbox" id="tf-enabled" checked>
-                                    <span>启用令牌</span>
+                                    <span>${I18n.t('tokens.enableToken')}</span>
                                 </label>
                             </div>
                             <div class="form-group">
-                                <label>过期时间</label>
+                                <label>${I18n.t('tokens.expiresTime')}</label>
                                 <input type="datetime-local" id="tf-expires-at">
                             </div>
                             <div class="form-actions">
-                                <button type="submit" class="btn-primary">保存</button>
-                                <button type="button" class="btn-secondary" onclick="tokensPage.hideForm()">取消</button>
+                                <button type="submit" class="btn-primary">${I18n.t('common.save')}</button>
+                                <button type="button" class="btn-secondary" onclick="tokensPage.hideForm()">${I18n.t('common.cancel')}</button>
                             </div>
                         </form>
                     </div>
@@ -201,16 +211,16 @@ class TokensPage {
             <div id="token-key-modal" class="modal" style="display:none">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>🔑 令牌已创建</h3>
+                        <h3>${I18n.t('tokens.keyCreated')}</h3>
                         <button class="modal-close" onclick="tokensPage.hideKeyModal()">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="key-warning">
-                            ⚠️ 完整密钥只显示一次，请立即复制保存！关闭后无法再次查看。
+                            ${I18n.t('tokens.keyWarning')}
                         </div>
                         <div class="key-display">
                             <code id="token-full-key"></code>
-                            <button class="btn-sm" onclick="tokensPage.copyFullKey()">📋 复制</button>
+                            <button class="btn-sm" onclick="tokensPage.copyFullKey()">${I18n.t('common.copy')}</button>
                         </div>
                     </div>
                 </div>
@@ -220,17 +230,17 @@ class TokensPage {
             <div id="token-quota-modal" class="modal" style="display:none">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h3>🔄 重置配额</h3>
+                        <h3>${I18n.t('tokens.resetQuotaTitle')}</h3>
                         <button class="modal-close" onclick="tokensPage.hideQuotaModal()">&times;</button>
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
-                            <label>新总额度 (元，0 表示不限)</label>
+                            <label>${I18n.t('tokens.newQuotaHint')}</label>
                             <input type="number" id="tq-new-total" min="0" step="0.01" value="0" placeholder="0">
                         </div>
                         <div class="form-actions">
-                            <button type="button" class="btn-primary" onclick="tokensPage.submitResetQuota()">确认重置</button>
-                            <button type="button" class="btn-secondary" onclick="tokensPage.hideQuotaModal()">取消</button>
+                            <button type="button" class="btn-primary" onclick="tokensPage.submitResetQuota()">${I18n.t('common.confirmReset')}</button>
+                            <button type="button" class="btn-secondary" onclick="tokensPage.hideQuotaModal()">${I18n.t('common.cancel')}</button>
                         </div>
                     </div>
                 </div>
@@ -240,7 +250,7 @@ class TokensPage {
             <div id="token-detail-modal" class="modal" style="display:none">
                 <div class="modal-content modal-wide">
                     <div class="modal-header">
-                        <h3 id="td-title">令牌详情</h3>
+                        <h3 id="td-title">${I18n.t('tokens.detailTitle')}</h3>
                         <button class="modal-close" onclick="tokensPage.hideDetailModal()">&times;</button>
                     </div>
                     <div class="modal-body" id="td-body">
@@ -256,12 +266,12 @@ class TokensPage {
 
     renderStatus(t) {
         if (t.is_expired) {
-            return '<span class="token-status status-expired">⏰ 已过期</span>';
+            return `<span class="token-status status-expired">${I18n.t('tokens.expiredStatus')}</span>`;
         }
         if (!t.enabled) {
-            return '<span class="token-status status-disabled">⏸ 已禁用</span>';
+            return `<span class="token-status status-disabled">${I18n.t('tokens.disabledStatus')}</span>`;
         }
-        return '<span class="token-status status-enabled">● 启用中</span>';
+        return `<span class="token-status status-enabled">${I18n.t('tokens.enabledStatus')}</span>`;
     }
 
     renderQuotaBar(t) {
@@ -269,8 +279,8 @@ class TokensPage {
             return `
                 <div class="token-quota">
                     <div class="quota-info">
-                        <span class="quota-label">额度</span>
-                        <span class="quota-text">已用 ${formatYuan(t.quota_used)} / 不限</span>
+                        <span class="quota-label">${I18n.t('tokens.quota')}</span>
+                        <span class="quota-text">${I18n.t('tokens.usedSlashUnlimited', {used: formatYuan(t.quota_used)})}</span>
                     </div>
                 </div>
             `;
@@ -289,8 +299,8 @@ class TokensPage {
         return `
             <div class="token-quota">
                 <div class="quota-info">
-                    <span class="quota-label">额度</span>
-                    <span class="quota-text">已用 ${formatYuan(t.quota_used)} / ${formatYuan(t.quota_total)} (剩余 ${remaining})</span>
+                    <span class="quota-label">${I18n.t('tokens.quota')}</span>
+                    <span class="quota-text">${I18n.t('tokens.usedSlashTotal', {used: formatYuan(t.quota_used), total: formatYuan(t.quota_total), remaining: remaining})}</span>
                 </div>
                 <div class="quota-bar">
                     <div class="quota-bar-fill" style="width:${pct}%;background:${barColor}"></div>
@@ -306,7 +316,7 @@ class TokensPage {
             const data = await API.get('/team/orgs');
             const orgs = data.orgs || [];
             const sel = document.getElementById('tf-org-id');
-            sel.innerHTML = '<option value="">— 未分配 —</option>';
+            sel.innerHTML = `<option value="">${I18n.t('common.unassigned')}</option>`;
             for (const o of orgs) {
                 const indent = o.parent_id ? '└ ' : '';
                 sel.innerHTML += `<option value="${o.id}" ${selectedOrgId === o.id ? 'selected' : ''}>${indent}${this.escHtml(o.name)}</option>`;
@@ -318,7 +328,7 @@ class TokensPage {
 
     async showAddForm() {
         this.editingId = null;
-        document.getElementById('token-form-title').textContent = '创建令牌';
+        document.getElementById('token-form-title').textContent = I18n.t("tokens.createFormTitle");
         document.getElementById('token-form').reset();
         document.getElementById('tf-enabled').checked = true;
         document.getElementById('tf-desensitize-level-group').style.display = 'none';
@@ -338,7 +348,7 @@ class TokensPage {
         if (!t) return;
 
         this.editingId = id;
-        document.getElementById('token-form-title').textContent = '编辑令牌';
+        document.getElementById('token-form-title').textContent = I18n.t("tokens.editFormTitle");
         document.getElementById('tf-name').value = t.name || '';
         await this.loadOrgsForForm(t.org_id || null);
 
@@ -350,6 +360,7 @@ class TokensPage {
         document.getElementById('tf-smart-downgrade').checked = !!t.smart_downgrade;
         document.getElementById('tf-desensitize-enabled').checked = !!t.desensitize_enabled;
         document.getElementById('tf-desensitize-level').value = t.desensitize_level || 'standard';
+        document.getElementById('tf-session-recall-enabled').checked = !!t.session_recall_enabled;
         document.getElementById('tf-enabled').checked = t.enabled !== false;
         this.onDesensitizeToggle();
 
@@ -418,6 +429,7 @@ class TokensPage {
             smart_downgrade: document.getElementById('tf-smart-downgrade').checked,
             desensitize_enabled: desensitizeEnabled,
             desensitize_level: desensitizeLevel,
+            session_recall_enabled: document.getElementById('tf-session-recall-enabled').checked,
             enabled: document.getElementById('tf-enabled').checked,
             expires_at: document.getElementById('tf-expires-at').value || null,
         };
@@ -426,7 +438,7 @@ class TokensPage {
             if (this.editingId) {
                 await API.put(`/tokens/${this.editingId}`, data);
                 this.hideForm();
-                showToast('令牌已更新');
+                showToast(I18n.t("tokens.updated"));
                 await this.loadTokens();
             } else {
                 const result = await API.post('/tokens/', data);
@@ -436,15 +448,28 @@ class TokensPage {
                 if (result.key) {
                     this.showKeyModal(result.key);
                 } else {
-                    showToast('令牌创建成功');
+                    showToast(I18n.t("tokens.created"));
                 }
             }
         } catch (e) {
-            alert('保存失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     // ======== 显示完整 Key ========
+
+    async showKey(id) {
+        try {
+            const data = await API.get(`/tokens/${id}/key`);
+            if (data.key) {
+                this.showKeyModal(data.key);
+            } else {
+                showToast(I18n.t("tokens.cannotGetKey"));
+            }
+        } catch (e) {
+            showToast(I18n.t("tokens.getKeyFailed") + (e.message || I18n.t("common.unknownError")));
+        }
+    }
 
     showKeyModal(fullKey) {
         document.getElementById('token-full-key').textContent = fullKey;
@@ -458,10 +483,48 @@ class TokensPage {
     copyFullKey() {
         const key = document.getElementById('token-full-key').textContent;
         copyToClipboard(key);
+        showToast(I18n.t("tokens.keyCopied"));
     }
 
     copyPrefix(prefix) {
         copyToClipboard(prefix);
+    }
+
+    copyTokenInfo(id) {
+        const t = this.tokens.find(x => x.id === id);
+        if (!t) return;
+        const quotaTotal = t.quota_total > 0 ? formatYuan(t.quota_total) : I18n.t("common.unlimited");
+        const quotaUsed = formatYuan(t.quota_used || 0);
+        const quotaRemain = t.quota_remaining != null && t.quota_remaining >= 0
+            ? formatYuan(t.quota_remaining)
+            : '-';
+        const models = (t.models && t.models.length > 0) ? t.models.join(', ') : I18n.t("common.allModels");
+        const status = t.enabled ? (t.is_expired ? I18n.t("common.expired") : I18n.t("common.enable")) : I18n.t("common.disabled");
+        const expiresAt = t.expires_at ? formatDate(t.expires_at) : I18n.t("common.neverExpires");
+        const desensitize = t.desensitize_enabled ? I18n.t("tokens.desensitizeOn") + (t.desensitize_level || I18n.t("common.default")) + ')' : I18n.t("common.off");
+        const smartDowngrade = t.smart_downgrade ? I18n.t("common.on") : I18n.t("common.off");
+        const rpm = t.rate_limit_rpm > 0 ? t.rate_limit_rpm + ' RPM' : I18n.t("common.unlimited");
+        const subnet = (t.subnet_whitelist && t.subnet_whitelist.length > 0)
+            ? t.subnet_whitelist.join(', ')
+            : I18n.t("common.unlimited");
+
+        const info = [
+            `${I18n.t('tokens.tokenName')}: ${t.name}`,
+            `${I18n.t('tokens.keyPrefix')}: ${t.key_prefix}`,
+            `${I18n.t('common.status')}: ${status}`,
+            `${I18n.t('tokens.expiresTime')}: ${expiresAt}`,
+            `${I18n.t('tokens.quotaTotal')}: ${quotaTotal}`,
+            `${I18n.t('tokens.quotaUsed')}: ${quotaUsed}`,
+            `${I18n.t('tokens.quotaRemaining')}: ${quotaRemain}`,
+            `${I18n.t('tokens.rateLimit')}: ${rpm}`,
+            `${I18n.t('tokens.ipWhitelist')}: ${subnet}`,
+            `${I18n.t('tokens.availableModels')}: ${models}`,
+            `${I18n.t('tokens.desensitizeRule')}: ${desensitize}`,
+            `${I18n.t('tokens.smartDowngrade')}: ${smartDowngrade}`,
+        ].join('\n');
+
+        copyToClipboard(info);
+        showToast(I18n.t("tokens.infoCopied"));
     }
 
     // ======== 删除 ========
@@ -469,14 +532,14 @@ class TokensPage {
     async deleteToken(id) {
         const t = this.tokens.find(x => x.id === id);
         if (!t) return;
-        if (!confirm(`确定删除令牌 "${t.name}" 吗？此操作不可恢复。`)) return;
+        if (!confirm(I18n.t('tokens.confirmDelete', {name: t.name}))) return;
 
         try {
             await API.del(`/tokens/${id}`);
-            showToast('令牌已删除');
+            showToast(I18n.t("tokens.deleted"));
             await this.loadTokens();
         } catch (e) {
-            alert('删除失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("common.deleteFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -506,10 +569,10 @@ class TokensPage {
                 quota_total: newTotalCents,
             });
             this.hideQuotaModal();
-            showToast('配额已重置');
+            showToast(I18n.t("tokens.quotaReset"));
             await this.loadTokens();
         } catch (e) {
-            alert('重置配额失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("tokens.resetQuotaFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -520,12 +583,12 @@ class TokensPage {
             const t = await API.get(`/tokens/${id}`);
             this.renderDetail(t);
         } catch (e) {
-            alert('加载详情失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("tokens.loadDetailFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
     renderDetail(t) {
-        document.getElementById('td-title').textContent = `令牌详情 - ${this.escHtml(t.name)}`;
+        document.getElementById('td-title').textContent = I18n.t('tokens.detailTitleWith') + this.escHtml(t.name);
 
         const quotaHtml = this.renderQuotaBar(t);
         const statusHtml = this.renderStatus(t);
@@ -535,11 +598,11 @@ class TokensPage {
             const us = t.usage_summary;
             usageHtml = `
                 <div class="detail-section">
-                    <h4>用量摘要</h4>
+                    <h4>${I18n.t('tokens.usageSummary')}</h4>
                     <table class="detail-table">
-                        <tr><td>总请求数</td><td>${formatNumber(us.total_requests || 0)}</td></tr>
-                        <tr><td>总 Token 数</td><td>${formatNumber(us.total_tokens || 0)}</td></tr>
-                        <tr><td>总费用</td><td>${formatYuan(us.total_cost_cents || 0)}</td></tr>
+                        <tr><td>${I18n.t('common.totalRequests')}</td><td>${formatNumber(us.total_requests || 0)}</td></tr>
+                        <tr><td>${I18n.t('tokens.totalTokens')}</td><td>${formatNumber(us.total_tokens || 0)}</td></tr>
+                        <tr><td>${I18n.t('common.totalCost')}</td><td>${formatYuan(us.total_cost_cents || 0)}</td></tr>
                     </table>
                 </div>
             `;
@@ -548,32 +611,33 @@ class TokensPage {
         const body = `
             <div class="detail-section">
                 <table class="detail-table">
-                    <tr><td style="width:140px">名称</td><td>${this.escHtml(t.name)}</td></tr>
-                    <tr><td>Key 前缀</td><td><code>${this.escHtml(t.key_prefix)}</code></td></tr>
-                    <tr><td>所属组织</td><td>${t.org_name ? this.escHtml(t.org_name) : '未分配'}</td></tr>
-                    <tr><td>成员邮箱</td><td>${this.escHtml(t.member_email || '-')}</td></tr>
-                    <tr><td>状态</td><td>${statusHtml}</td></tr>
-                    <tr><td>启用</td><td>${t.enabled ? '✅ 是' : '❌ 否'}</td></tr>
-                    <tr><td>已过期</td><td>${t.is_expired ? '⚠️ 是' : '否'}</td></tr>
-                    <tr><td>过期时间</td><td>${t.expires_at ? formatDate(t.expires_at) : '永不过期'}</td></tr>
-                    <tr><td>允许模型</td><td>${(t.models || []).length > 0 ? t.models.map(m => `<span class="model-tag">${this.escHtml(m)}</span>`).join(' ') : '全部'}</td></tr>
-                    <tr><td>数据源</td><td>${(t.provider_ids || []).length > 0 ? t.provider_ids.join(', ') : '全部'}</td></tr>
-                    <tr><td>速率限制</td><td>${t.rate_limit_rpm > 0 ? t.rate_limit_rpm + ' RPM' : '不限'}</td></tr>
-                    <tr><td>子网白名单</td><td>${(t.subnet_whitelist || []).length > 0 ? t.subnet_whitelist.join(', ') : '不限'}</td></tr>
-                    <tr><td>智能降级</td><td>${t.smart_downgrade ? '✅ 开启' : '关闭'}</td></tr>
-                    <tr><td>脱敏</td><td>${t.desensitize_enabled ? (() => { const labels = {off:'关闭',standard:'标准',strict:'严格'}; return `✅ 开启 (${labels[t.desensitize_level] || '标准'})`; })() : '关闭'}</td></tr>
-                    <tr><td>创建时间</td><td>${formatDate(t.created_at)}</td></tr>
-                    <tr><td>更新时间</td><td>${formatDate(t.updated_at)}</td></tr>
+                    <tr><td style="width:140px">${I18n.t('common.name')}</td><td>${this.escHtml(t.name)}</td></tr>
+                    <tr><td>${I18n.t('tokens.keyPrefix')}</td><td><code>${this.escHtml(t.key_prefix)}</code></td></tr>
+                    <tr><td>${I18n.t('tokens.org')}</td><td>${t.org_name ? this.escHtml(t.org_name) : I18n.t('common.notAssigned')}</td></tr>
+                    <tr><td>${I18n.t('tokens.memberEmail')}</td><td>${this.escHtml(t.member_email || '-')}</td></tr>
+                    <tr><td>${I18n.t('common.status')}</td><td>${statusHtml}</td></tr>
+                    <tr><td>${I18n.t('common.enable')}</td><td>${t.enabled ? I18n.t("common.yes") : I18n.t("common.noEmoji")}</td></tr>
+                    <tr><td>${I18n.t('common.expired')}</td><td>${t.is_expired ? I18n.t("common.warningYes") : I18n.t("common.no")}</td></tr>
+                    <tr><td>${I18n.t('tokens.expiresTime')}</td><td>${t.expires_at ? formatDate(t.expires_at) : I18n.t('common.neverExpires')}</td></tr>
+                    <tr><td>${I18n.t('tokens.allowedModels')}</td><td>${(t.models || []).length > 0 ? t.models.map(m => `<span class="model-tag">${this.escHtml(m)}</span>`).join(' ') : I18n.t('common.all')}</td></tr>
+                    <tr><td>${I18n.t('common.provider')}</td><td>${(t.provider_ids || []).length > 0 ? t.provider_ids.join(', ') : I18n.t('common.all')}</td></tr>
+                    <tr><td>${I18n.t('tokens.rateLimit')}</td><td>${t.rate_limit_rpm > 0 ? t.rate_limit_rpm + ' RPM' : I18n.t('common.unlimited')}</td></tr>
+                    <tr><td>${I18n.t('tokens.subnetWhitelist')}</td><td>${(t.subnet_whitelist || []).length > 0 ? t.subnet_whitelist.join(', ') : I18n.t('common.unlimited')}</td></tr>
+                    <tr><td>${I18n.t('tokens.smartDowngrade')}</td><td>${t.smart_downgrade ? I18n.t("common.enabledYes") : I18n.t("common.off")}</td></tr>
+                    <tr><td>${I18n.t('tokens.desensitize')}</td><td>${t.desensitize_enabled ? (() => { const labels = {off: I18n.t('common.close'), standard: I18n.t('common.standard'), strict: I18n.t('common.strict')}; return I18n.t('tokens.desensitizeEnabledWith', {level: labels[t.desensitize_level] || I18n.t("common.standard")}); })() : I18n.t('common.close')}</td></tr>
+                    <tr><td>${I18n.t('common.createdAt')}</td><td>${formatDate(t.created_at)}</td></tr>
+                    <tr><td>${I18n.t('common.updatedAt')}</td><td>${formatDate(t.updated_at)}</td></tr>
                 </table>
             </div>
             <div class="detail-section">
-                <h4>额度信息</h4>
+                <h4>${I18n.t('tokens.quotaInfo')}</h4>
                 ${quotaHtml}
             </div>
             ${usageHtml}
             <div class="detail-actions">
-                <button class="btn-sm" onclick="tokensPage.loadUsage(${t.id})">📈 用量明细</button>
-                <button class="btn-sm" onclick="tokensPage.loadCost(${t.id})">💰 成本明细</button>
+                <button class="btn-sm" onclick="tokensPage.copyTokenInfo(${t.id})">${I18n.t('tokens.copyInfo')}</button>
+                <button class="btn-sm" onclick="tokensPage.loadUsage(${t.id})">${I18n.t('tokens.usageDetail')}</button>
+                <button class="btn-sm" onclick="tokensPage.loadCost(${t.id})">${I18n.t('tokens.costDetail')}</button>
             </div>
             <div id="td-extra"></div>
         `;
@@ -591,7 +655,7 @@ class TokensPage {
             const data = await API.get(`/tokens/${id}/usage?hours=168`);
             this.renderUsageDetail(data);
         } catch (e) {
-            alert('加载用量明细失败: ' + (e.message || '未知错误'));
+            alert(I18n.t("tokens.loadUsageFailed") + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -599,10 +663,10 @@ class TokensPage {
         const extra = document.getElementById('td-extra');
         if (!extra) return;
 
-        let html = '<div class="detail-section"><h4>近7天用量 (By Model)</h4>';
+        let html = `<div class="detail-section"><h4>${I18n.t('tokens.recent7Days')}</h4>`;
 
         if (data.by_model && Object.keys(data.by_model).length > 0) {
-            html += '<table class="detail-table"><tr><th>模型</th><th>请求数</th><th>Token 数</th></tr>';
+            html += `<table class="detail-table"><tr><th>${I18n.t('common.model')}</th><th>${I18n.t('common.requestsCount')}</th><th>${I18n.t('tokens.tokenCount')}</th></tr>`;
             for (const [model, info] of Object.entries(data.by_model)) {
                 html += `<tr>
                     <td>${this.escHtml(model)}</td>
@@ -612,12 +676,12 @@ class TokensPage {
             }
             html += '</table>';
         } else {
-            html += '<p class="text-muted">暂无用量数据</p>';
+            html += `<p class="text-muted">${I18n.t('common.noUsageData')}</p>`;
         }
 
         if (data.daily && data.daily.length > 0) {
-            html += '<h4 style="margin-top:12px">每日用量</h4>';
-            html += '<table class="detail-table"><tr><th>日期</th><th>请求数</th><th>Token 数</th></tr>';
+            html += `<h4 style="margin-top:12px">${I18n.t('tokens.dailyUsage')}</h4>`;
+            html += `<table class="detail-table"><tr><th>${I18n.t('common.date')}</th><th>${I18n.t('common.requestsCount')}</th><th>${I18n.t('tokens.tokenCount')}</th></tr>`;
             for (const d of data.daily) {
                 html += `<tr>
                     <td>${this.escHtml(d.date || d.day || '-')}</td>
@@ -637,7 +701,7 @@ class TokensPage {
             const data = await API.get(`/tokens/${id}/cost?days=30`);
             this.renderCostDetail(data);
         } catch (e) {
-            alert('加载成本明细失败: ' + (e.message || '未知错误'));
+            alert(I18n.t('common.loadCostFailed') + ': ' + (e.message || I18n.t("common.unknownError")));
         }
     }
 
@@ -645,10 +709,10 @@ class TokensPage {
         const extra = document.getElementById('td-extra');
         if (!extra) return;
 
-        let html = '<div class="detail-section"><h4>近30天成本 (By Model)</h4>';
+        let html = `<div class="detail-section"><h4>${I18n.t('tokens.recent30Days')}</h4>`;
 
         if (data.by_model && Object.keys(data.by_model).length > 0) {
-            html += '<table class="detail-table"><tr><th>模型</th><th>费用</th></tr>';
+            html += `<table class="detail-table"><tr><th>${I18n.t('common.model')}</th><th>${I18n.t('common.costColumn')}</th></tr>`;
             for (const [model, info] of Object.entries(data.by_model)) {
                 const costCents = info.cost_cents || info.cost || 0;
                 html += `<tr>
@@ -658,12 +722,12 @@ class TokensPage {
             }
             html += '</table>';
         } else {
-            html += '<p class="text-muted">暂无成本数据</p>';
+            html += `<p class="text-muted">${I18n.t('tokens.noCostData')}</p>`;
         }
 
         if (data.daily && data.daily.length > 0) {
-            html += '<h4 style="margin-top:12px">每日成本</h4>';
-            html += '<table class="detail-table"><tr><th>日期</th><th>费用</th></tr>';
+            html += `<h4 style="margin-top:12px">${I18n.t('tokens.dailyCost')}</h4>`;
+            html += `<table class="detail-table"><tr><th>${I18n.t('common.date')}</th><th>${I18n.t('common.costColumn')}</th></tr>`;
             for (const d of data.daily) {
                 const costCents = d.cost_cents || d.cost || 0;
                 html += `<tr>
@@ -674,7 +738,7 @@ class TokensPage {
             html += '</table>';
         }
 
-        html += '<p class="text-muted" style="margin-top:12px;font-size:12px;color:var(--text-secondary);">注：此处"成本"为 Token 消耗量的参考值，不代表实际费用，真实成本以厂商计费为准。</p>';
+        html += `<p class="text-muted" style="margin-top:12px;font-size:12px;color:var(--text-secondary);">${I18n.t('tokens.costDisclaimer')}</p>`;
         html += '</div>';
         extra.innerHTML = html;
     }
@@ -695,7 +759,7 @@ class TokensPage {
         const container = document.getElementById('tf-models-select');
         if (!container) return;
         const isAll = selected.length === 0;
-        const displayText = isAll ? '全部模型' : selected.join(', ');
+        const displayText = isAll ? I18n.t("common.allModels") : selected.join(', ');
 
         let optionsHtml = '';
         for (const model of this.allModels) {
@@ -711,7 +775,7 @@ class TokensPage {
             <div class="ms-dropdown">
                 <label class="ms-item ms-all">
                     <input type="checkbox" id="ms-models-all" ${isAll ? 'checked' : ''}>
-                    <span>全部</span>
+                    <span>${I18n.t('common.all')}</span>
                 </label>
                 <div class="ms-options">${optionsHtml}</div>
             </div>
@@ -745,7 +809,7 @@ class TokensPage {
         const container = document.getElementById('tf-provider-select');
         if (!container) return;
         const isAll = selected.length === 0;
-        const displayText = isAll ? '全部数据源' : selected.map(id => {
+        const displayText = isAll ? I18n.t("common.allProviders") : selected.map(id => {
             const p = this.providers.find(x => x.id === id);
             return p ? p.name : `#${id}`;
         }).join(', ');
@@ -757,7 +821,7 @@ class TokensPage {
         }
 
         if (this.providers.length === 0) {
-            optionsHtml = '<div style="padding:8px;color:var(--text-muted);font-size:12px">暂无数据源，请先添加</div>';
+            optionsHtml = `<div style="padding:8px;color:var(--text-muted);font-size:12px">${I18n.t('tokens.noProvidersFirst')}</div>`;
         }
 
         container.innerHTML = `
@@ -768,7 +832,7 @@ class TokensPage {
             <div class="ms-dropdown">
                 <label class="ms-item ms-all">
                     <input type="checkbox" id="ms-providers-all" ${isAll ? 'checked' : ''}>
-                    <span>全部</span>
+                    <span>${I18n.t('common.all')}</span>
                 </label>
                 <div class="ms-options">${optionsHtml}</div>
             </div>
@@ -803,7 +867,7 @@ class TokensPage {
         const checked = Array.from(cbs).filter(cb => cb.checked).map(cb => cb.value);
         const isAll = container.querySelector('#ms-models-all')?.checked || checked.length === 0;
         const label = container.querySelector('.ms-label');
-        if (label) label.textContent = isAll ? '全部模型' : checked.join(', ');
+        if (label) label.textContent = isAll ? I18n.t("common.allModels") : checked.join(', ');
     }
 
     _updateProviderDisplay(container) {
@@ -812,7 +876,7 @@ class TokensPage {
         const isAll = container.querySelector('#ms-providers-all')?.checked || checkedIds.length === 0;
         const label = container.querySelector('.ms-label');
         if (label) {
-            label.textContent = isAll ? '全部数据源' : checkedIds.map(id => {
+            label.textContent = isAll ? I18n.t("common.allProviders") : checkedIds.map(id => {
                 const p = this.providers.find(x => x.id === id);
                 return p ? p.name : `#${id}`;
             }).join(', ');

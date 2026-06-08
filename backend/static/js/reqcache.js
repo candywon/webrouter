@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /**
  * 请求 Hash 缓存管理页面
  */
@@ -20,7 +23,7 @@ const reqCachePage = {
     } catch (e) {
       console.error('Failed to load request cache:', e);
       document.getElementById('reqcache-content').innerHTML =
-        '<div class="empty-state"><div class="icon">❌</div><p>加载失败: ' + esc(e.message) + '</p></div>';
+        '<div class="empty-state"><div class="icon">❌</div><p>'+ I18n.t('common.loadFailedError') + esc(e.message) + '</p></div>';
     }
   },
 
@@ -29,21 +32,21 @@ const reqCachePage = {
     const countEl = document.getElementById('reqcache-count');
     if (!el) return;
 
-    if (countEl) countEl.textContent = this.entries.length + ' 条';
+    if (countEl) countEl.textContent = this.entries.length + I18n.t('common.entriesUnit');
 
     if (!this.entries.length) {
-      el.innerHTML = '<div class="empty-state"><div class="icon">🔄</div><p>暂无缓存条目</p></div>';
+      el.innerHTML = '<div class="empty-state"><div class="icon">🔄</div><p>'+ I18n.t('reqcache.noEntries') + '</p></div>';
       return;
     }
 
     // 按时间排序：最新的在前
     const sorted = [...this.entries].sort((a, b) => b.age_seconds - a.age_seconds);
 
-    let html = '<table><thead><tr><th>Key (Token:Model)</th><th>Body Hash</th><th>状态</th><th>年龄</th><th>时间</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>Key (Token:Model)</th><th>Body Hash</th><th>' + I18n.t('common.status') + '</th><th>' + I18n.t('reqcache.age') + '</th><th>' + I18n.t('common.time') + '</th></tr></thead><tbody>';
     sorted.forEach(entry => {
       const badge = entry.success
-        ? '<span class="badge badge-success">成功</span>'
-        : '<span class="badge badge-danger">失败</span>';
+        ? '<span class="badge badge-success">' + I18n.t('common.success') + '</span>'
+        : '<span class="badge badge-danger">' + I18n.t('common.failed') + '</span>';
       const age = formatAge(entry.age_seconds);
       const time = entry.timestamp ? formatDate(entry.timestamp) : '-';
       html += `<tr>
@@ -59,22 +62,22 @@ const reqCachePage = {
   },
 
   async clearAll() {
-    if (!confirm('确定清空所有请求缓存条目？')) return;
+    if (!confirm(I18n.t("reqcache.confirmClear"))) return;
     try {
       await API.del('/providers/request_cache');
-      showToast('缓存已清空');
+      showToast(I18n.t("reqcache.cleared"));
       this.refresh();
     } catch (e) {
-      showToast('清空失败: ' + e.message);
+      showToast(I18n.t("reqcache.clearFailed") + e.message);
     }
   },
 };
 
 function formatAge(secs) {
   if (secs == null) return '-';
-  if (secs < 60) return secs + '秒前';
+  if (secs < 60) return secs + I18n.t("reqcache.secondsAgo");
   const m = Math.floor(secs / 60);
-  if (m < 60) return m + '分钟前';
+  if (m < 60) return m + I18n.t("reqcache.minutesAgo");
   const h = Math.floor(m / 60);
-  return h + '小时' + (m % 60) + '分钟前';
+  return h + I18n.t("common.hours") + (m % 60) + I18n.t("reqcache.minutesAgo");
 }

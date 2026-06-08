@@ -1,8 +1,12 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -14,7 +18,8 @@ type Config struct {
 	FlaskURL   string // Flask 管理后台地址，用于读取 Provider/Token
 
 	// 代理
-	DefaultTimeout  time.Duration // 请求超时，默认 60s
+	DefaultTimeout  time.Duration // 非流式请求超时，默认 60s
+	StreamTimeout   time.Duration // 流式请求超时（含首字节+完整响应），默认 180s
 	MaxRetryCount   int           // 同 Provider 最大重试，默认 2
 	MaxFailover     int           // 最大降级次数，默认 3
 	IdleConnTimeout time.Duration // 连接池空闲超时，默认 90s
@@ -25,9 +30,9 @@ type Config struct {
 	RoutingStrategy string // smart/priority/round_robin/least_latency/cost_first
 
 	// 额度
-	QuotaWarnThreshold    float64 // 额度预警阈值，默认 0.2 (20%)
+	QuotaWarnThreshold     float64 // 额度预警阈值，默认 0.2 (20%)
 	QuotaCriticalThreshold float64 // 额度紧急阈值，默认 0.05 (5%)
-	PredictionDays        int     // 预测用近N天数据，默认 7
+	PredictionDays         int     // 预测用近N天数据，默认 7
 
 	// 健康检测
 	HealthCheckInterval time.Duration // 检测间隔，默认 5min
@@ -42,24 +47,25 @@ type Config struct {
 
 func LoadConfig() *Config {
 	c := &Config{
-		ListenAddr:            ":5051",
-		DBPath:               envStr("WR_DB_PATH", "data/webrouter.db"),
-		FlaskURL:             envStr("WR_FLASK_URL", "http://localhost:5050"),
-		DefaultTimeout:        envDuration("WR_TIMEOUT", 60*time.Second),
-		MaxRetryCount:         envInt("WR_MAX_RETRY", 2),
-		MaxFailover:           envInt("WR_MAX_FAILOVER", 3),
-		IdleConnTimeout:       envDuration("WR_IDLE_TIMEOUT", 90*time.Second),
-		MaxIdleConns:          envInt("WR_MAX_CONNS", 100),
-		MaxBodySize:           10 * 1024 * 1024,
-		RoutingStrategy:       envStr("WR_ROUTING", "smart"),
-		QuotaWarnThreshold:    envFloat("WR_QUOTA_WARN", 0.2),
+		ListenAddr:             ":5051",
+		DBPath:                 resolveDBPath(envStr("WR_DB_PATH", "")),
+		FlaskURL:               envStr("WR_FLASK_URL", "http://localhost:5050"),
+		DefaultTimeout:         envDuration("WR_TIMEOUT", 60*time.Second),
+		StreamTimeout:          envDuration("WR_STREAM_TIMEOUT", 180*time.Second),
+		MaxRetryCount:          envInt("WR_MAX_RETRY", 2),
+		MaxFailover:            envInt("WR_MAX_FAILOVER", 3),
+		IdleConnTimeout:        envDuration("WR_IDLE_TIMEOUT", 90*time.Second),
+		MaxIdleConns:           envInt("WR_MAX_CONNS", 100),
+		MaxBodySize:            10 * 1024 * 1024,
+		RoutingStrategy:        envStr("WR_ROUTING", "smart"),
+		QuotaWarnThreshold:     envFloat("WR_QUOTA_WARN", 0.2),
 		QuotaCriticalThreshold: envFloat("WR_QUOTA_CRIT", 0.05),
-		PredictionDays:        envInt("WR_PREDICT_DAYS", 7),
-		HealthCheckInterval:   envDuration("WR_HEALTH_INTERVAL", 5*time.Minute),
-		HealthTimeout:         envDuration("WR_HEALTH_TIMEOUT", 15*time.Second),
-		AlertCooldown:         envDuration("WR_ALERT_COOLDOWN", 5*time.Minute),
+		PredictionDays:         envInt("WR_PREDICT_DAYS", 7),
+		HealthCheckInterval:    envDuration("WR_HEALTH_INTERVAL", 5*time.Minute),
+		HealthTimeout:          envDuration("WR_HEALTH_TIMEOUT", 15*time.Second),
+		AlertCooldown:          envDuration("WR_ALERT_COOLDOWN", 5*time.Minute),
 
-		KnowledgeCapture:      envStr("WR_KNOWLEDGE_CAPTURE", "0") == "1",
+		KnowledgeCapture: envStr("WR_KNOWLEDGE_CAPTURE", "0") == "1",
 	}
 	return c
 }
@@ -103,4 +109,26 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		return d
 	}
 	return fallback
+}
+
+// resolveDBPath 解析数据库路径：
+//  1. 如果 WR_DB_PATH 环境变量已设置，直接使用
+//  2. 否则基于二进制文件位置自动推导到 backend/data/webrouter.db
+//     （wr-proxy/wr-proxy → ../backend/data/webrouter.db）
+func resolveDBPath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "data/webrouter.db"
+	}
+	dir := filepath.Dir(exe)
+	// 尝试 ../backend/data/webrouter.db
+	candidate := filepath.Join(dir, "..", "backend", "data", "webrouter.db")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	// 回退：相对路径（兼容 Docker 等部署）
+	return "data/webrouter.db"
 }

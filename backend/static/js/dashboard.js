@@ -1,5 +1,11 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* 仪表盘页面逻辑 */
 const DashboardPage = {
+  _autoRefreshTimer: null,
+  _autoRefreshEnabled: true,
+
   async load() {
     try {
       const data = await API.get('/dashboard/overview');
@@ -23,6 +29,8 @@ const DashboardPage = {
     }
 
     this.loadCacheHitRate();
+    this.loadTopTokens();
+    this.loadLatencyDistribution();
   },
 
   renderOverview(data) {
@@ -31,19 +39,31 @@ const DashboardPage = {
     statsEl.innerHTML = `
       <div class="stat-card">
         <div class="stat-value" style="color:var(--success)">${data.providers?.healthy || 0}/${data.providers?.total || 0}</div>
-        <div class="stat-label">可用数据源</div>
+        <div class="stat-label">${I18n.t('dashboard.availableProviders')}</div>
       </div>
       <div class="stat-card">
         <div class="stat-value">${formatNumber(data.usage?.today_requests || 0)}</div>
-        <div class="stat-label">今日调用</div>
+        <div class="stat-label">${I18n.t('dashboard.todayRequests')}</div>
       </div>
       <div class="stat-card">
         <div class="stat-value" style="color:${(data.usage?.error_rate || 0) > 5 ? 'var(--danger)' : 'var(--success)'}">${data.usage?.error_rate || 0}%</div>
-        <div class="stat-label">错误率</div>
+        <div class="stat-label">${I18n.t('dashboard.errorRate')}</div>
       </div>
       <div class="stat-card">
         <div class="stat-value">${formatYuan(data.cost?.month_cents || 0)}</div>
-        <div class="stat-label">月度成本</div>
+        <div class="stat-label">${I18n.t('dashboard.monthlyCost')}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--accent);font-size:18px;">${data.latency?.p50_ms || 0}<span style="font-size:12px;">ms</span></div>
+        <div class="stat-label">P50 ${I18n.t('dashboard.latency')}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--warning);font-size:18px;">${data.latency?.p90_ms || 0}<span style="font-size:12px;">ms</span></div>
+        <div class="stat-label">P90 ${I18n.t('dashboard.latency')}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color:var(--danger);font-size:18px;">${data.latency?.p99_ms || 0}<span style="font-size:12px;">ms</span></div>
+        <div class="stat-label">P99 ${I18n.t('dashboard.latency')}</div>
       </div>
     `;
   },
@@ -58,8 +78,8 @@ const DashboardPage = {
       data: {
         labels: data.data.map(d => d.date),
         datasets: [{
-          label: '调用量',
-          data: data.data.map(d => d.request_count || 0),
+          label: I18n.t("dashboard.requestVolume"),
+          data: data.data.map(d => d.requests || 0),
           borderColor: '#6366f1',
           backgroundColor: 'rgba(99,102,241,0.1)',
           tension: 0.3,
@@ -85,40 +105,40 @@ const DashboardPage = {
       const detailed = el.id === 'channel-list-channels';
 
       if (channels.length === 0) {
-        el.innerHTML = '<div class="empty-state"><div class="icon">📡</div><p>暂无渠道数据<br>请先在"渠道管理"中添加渠道</p></div>';
+        el.innerHTML = `<div class="empty-state"><div class="icon">📡</div><p>${I18n.t('dashboard.noChannelData')}<br>${I18n.t('common.goToChannel')}</p></div>`;
         return;
       }
 
       const cols = detailed
-        ? '<tr><th>渠道名</th><th>类型</th><th>状态</th><th>健康状态</th><th>延迟</th><th>操作</th></tr>'
-        : '<tr><th>渠道名</th><th>类型</th><th>状态</th><th>健康</th><th>操作</th></tr>';
+        ? `<tr><th>${I18n.t('dashboard.channelTableHeader')}</th><th>${I18n.t('dashboard.channelTypeHeader')}</th><th>${I18n.t('dashboard.channelStatusHeader')}</th><th>${I18n.t('dashboard.channelHealthHeader')}</th><th>${I18n.t('dashboard.channelLatencyHeader')}</th><th>${I18n.t('dashboard.channelActionsHeader')}</th></tr>`
+        : `<tr><th>${I18n.t('dashboard.channelTableHeader')}</th><th>${I18n.t('dashboard.channelTypeHeader')}</th><th>${I18n.t('dashboard.channelStatusHeader')}</th><th>${I18n.t('dashboard.channelHealthHeader')}</th><th>${I18n.t('dashboard.channelActionsHeader')}</th></tr>`;
 
       el.innerHTML = `<table>
         <thead>${cols}</thead>
         <tbody>${channels.map(ch => {
-          const statusBadge = ch.status === 'healthy' ? '<span class="badge badge-healthy">健康</span>'
-            : ch.status === 'dead' ? '<span class="badge badge-dead">异常</span>'
-            : ch.status === 'auth_failed' ? '<span class="badge badge-warning">认证失败</span>'
-            : ch.status === 'warning' ? '<span class="badge badge-warning">警告</span>'
-            : '<span class="badge badge-unknown">' + (ch.status || '未知') + '</span>';
+          const statusBadge = ch.status === 'healthy' ? `<span class="badge badge-healthy">${I18n.t('common.healthy')}</span>`
+            : ch.status === 'dead' ? `<span class="badge badge-dead">${I18n.t('common.unhealthy')}</span>`
+            : ch.status === 'auth_failed' ? `<span class="badge badge-warning">${I18n.t('common.authFailed')}</span>`
+            : ch.status === 'warning' ? `<span class="badge badge-warning">${I18n.t('common.warning')}</span>`
+            : '<span class="badge badge-unknown">' + (ch.status || I18n.t('common.unknown')) + '</span>';
           const latency = ch.last_latency_ms != null ? ch.last_latency_ms + 'ms' : '-';
 
           if (detailed) {
             return `<tr>
               <td>${ch.name || '-'}</td>
               <td>${ch.type || '-'}</td>
-              <td><span class="badge badge-healthy">启用</span></td>
+              <td><span class="badge badge-healthy">${I18n.t('common.enabled')}</span></td>
               <td>${statusBadge}</td>
               <td>${latency}</td>
-              <td><button class="btn-sm" onclick="DashboardPage.checkChannel(${ch.id})">检测</button></td>
+              <td><button class="btn-sm" onclick="DashboardPage.checkChannel(${ch.id})">${I18n.t('common.check')}</button></td>
             </tr>`;
           }
           return `<tr>
             <td>${ch.name || '-'}</td>
             <td>${ch.type || '-'}</td>
-            <td><span class="badge badge-healthy">启用</span></td>
+            <td><span class="badge badge-healthy">${I18n.t('common.enabled')}</span></td>
             <td>${statusBadge}</td>
-            <td><button class="btn-sm" onclick="DashboardPage.checkChannel(${ch.id})">检测</button></td>
+            <td><button class="btn-sm" onclick="DashboardPage.checkChannel(${ch.id})">${I18n.t('common.check')}</button></td>
           </tr>`;
         }).join('')}</tbody>
       </table>`;
@@ -128,10 +148,10 @@ const DashboardPage = {
   async checkChannel(id) {
     try {
       const result = await API.post(`/monitor/check/${id}`);
-      showToast(`渠道 ${result.name}: ${result.status}`);
+      showToast(I18n.t('dashboard.checkChannelResult', {name: result.name, status: result.status}));
       this.load();
     } catch (e) {
-      showToast('检测失败: ' + e.message);
+      showToast(I18n.t('common.checkFailed') + e.message);
     }
   },
 
@@ -147,7 +167,7 @@ const DashboardPage = {
     } catch (e) {
       console.error('Failed to load cache hit rate:', e);
       const contentEl = document.getElementById('cache-hit-content');
-      if (contentEl) contentEl.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
+      if (contentEl) contentEl.innerHTML = `<div class="empty-state"><p>${I18n.t('common.loadFailed')}</p></div>`;
     }
   },
 
@@ -157,7 +177,7 @@ const DashboardPage = {
 
     if (!data.data || data.data.length === 0) {
       if (totalEl) totalEl.style.display = 'none';
-      if (contentEl) contentEl.innerHTML = '<div class="empty-state"><div class="icon">💾</div><p>暂无缓存命中数据<br><span class="hint">需要上游 API 支持 prompt cache 才会产生数据</span></p></div>';
+      if (contentEl) contentEl.innerHTML = `<div class="empty-state"><div class="icon">💾</div><p>${I18n.t('dashboard.noCacheData')}<br><span class="hint">${I18n.t('dashboard.cacheNeedUpstream')}</span></p></div>`;
       return;
     }
 
@@ -167,9 +187,9 @@ const DashboardPage = {
         totalEl.style.display = 'block';
         totalEl.innerHTML = `
           <div style="display:flex;gap:24px;flex-wrap:wrap;">
-            <div><span style="color:var(--text-muted);font-size:12px;">总请求</span><br><strong>${formatNumber(data.total.requests)}</strong></div>
+            <div><span style="color:var(--text-muted);font-size:12px;">${I18n.t('common.totalRequests')}</span><br><strong>${formatNumber(data.total.requests)}</strong></div>
             <div><span style="color:var(--text-muted);font-size:12px;">Cached Tokens</span><br><strong style="color:#a78bfa;">${formatNumber(data.total.cached_tokens)}</strong></div>
-            <div><span style="color:var(--text-muted);font-size:12px;">综合命中率</span><br><strong style="color:${data.total.hit_rate > 30 ? 'var(--success)' : 'var(--warning)'};">${data.total.hit_rate}%</strong></div>
+            <div><span style="color:var(--text-muted);font-size:12px;">${I18n.t('dashboard.overallHitRate')}</span><br><strong style="color:${data.total.hit_rate > 30 ? 'var(--success)' : 'var(--warning)'};">${data.total.hit_rate}%</strong></div>
           </div>
         `;
       }
@@ -178,16 +198,16 @@ const DashboardPage = {
     }
 
     const isProvider = data.group_by === 'provider';
-    const label = isProvider ? '数据源' : '模型';
+    const label = isProvider ? I18n.t("common.provider") : I18n.t("common.model");
 
     if (contentEl) {
       contentEl.innerHTML = `<table>
         <thead><tr>
           <th>${label}</th>
-          <th>请求数</th>
+          <th>${I18n.t('common.requestsCount')}</th>
           <th>Input Tokens</th>
           <th>Cached Tokens</th>
-          <th>命中率</th>
+          <th>${I18n.t('dashboard.hitRate')}</th>
         </tr></thead>
         <tbody>${data.data.map(d => {
           const name = isProvider ? d.provider_name : d.model;
@@ -211,6 +231,168 @@ const DashboardPage = {
       </table>`;
     }
   },
+
+  async loadTopTokens() {
+    const labelEl = document.getElementById('dashboard-top-label');
+    const contentEl = document.getElementById('dashboard-top-content');
+
+    try {
+      const data = await API.get('/billing/top-tokens?hours=24&top=10');
+      const tokens = data.tokens || [];
+
+      if (!tokens.length) {
+        if (labelEl) labelEl.textContent = I18n.t("common.noData");
+        if (contentEl) contentEl.innerHTML = `<div class="empty-state"><p>${I18n.t('dashboard.noUsageData')}</p></div>`;
+        return;
+      }
+
+      if (labelEl) labelEl.textContent = I18n.t('dashboard.totalRequestsLabel', {total: formatNumber(data.total_requests)});
+
+      const maxRequests = Math.max(...tokens.map(t => t.request_count));
+
+      let html = '';
+      tokens.forEach((t, idx) => {
+        const barWidth = maxRequests > 0 ? (t.request_count / maxRequests * 100) : 0;
+        const rankColor = idx < 3 ? 'var(--accent)' : 'var(--text-muted)';
+
+        html += `<div style="margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+            <span style="font-weight:700;font-size:15px;color:${rankColor};min-width:26px;">#${idx + 1}</span>
+            <span style="font-weight:600;flex:1;">${esc(t.token_name)}</span>
+            <span style="color:var(--text-muted);font-size:12px;">${formatNumber(t.request_count)} ${I18n.t('common.times')}</span>
+            <span style="color:var(--accent);font-size:12px;">${formatYuan(t.cost_cents)}</span>
+            <span style="color:var(--text-muted);font-size:11px;min-width:38px;text-align:right;">${t.pct_of_total}%</span>
+          </div>
+          <div style="background:var(--bg);border-radius:3px;height:6px;margin-bottom:6px;">
+            <div style="background:var(--accent);height:100%;border-radius:3px;width:${barWidth}%;transition:width .3s;"></div>
+          </div>`;
+
+        if (t.model_distribution && t.model_distribution.length) {
+          html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-left:36px;">';
+          t.model_distribution.forEach(m => {
+            const mPct = t.request_count > 0 ? (m.count / t.request_count * 100).toFixed(1) : 0;
+            html += `<span style="font-size:11px;background:var(--bg);padding:1px 6px;border-radius:3px;">
+              ${esc(m.model_name)} ${mPct}% (${formatYuan(m.cost_cents)})
+            </span>`;
+          });
+          html += '</div>';
+        }
+
+        html += `</div>`;
+      });
+
+      if (contentEl) contentEl.innerHTML = html;
+    } catch (e) {
+      console.error('Failed to load top tokens:', e);
+      if (labelEl) labelEl.textContent = I18n.t("common.loadFailed");
+      if (contentEl) contentEl.innerHTML = `<div class="empty-state"><p>${I18n.t('common.loadFailed')}: ${esc(e.message)}</p></div>`;
+    }
+  },
+
+  // ----- 延迟分布 -----
+  async loadLatencyDistribution() {
+    try {
+      const data = await API.get('/monitoring/latency-distribution?hours=24&group_by=model');
+      this.renderLatencyChart(data);
+    } catch (e) {
+      console.error('Failed to load latency distribution:', e);
+    }
+  },
+
+  renderLatencyChart(data) {
+    const canvas = document.getElementById('latency-distribution-chart');
+    if (!canvas || !data.data || data.data.length === 0) return;
+
+    if (this._latencyChart) this._latencyChart.destroy();
+
+    const labels = data.data.map(d => d.name);
+    this._latencyChart = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'P50',
+            data: data.data.map(d => d.p50_ms),
+            backgroundColor: 'rgba(99,102,241,0.7)',
+            borderRadius: 3,
+          },
+          {
+            label: 'P90',
+            data: data.data.map(d => d.p90_ms),
+            backgroundColor: 'rgba(251,191,36,0.7)',
+            borderRadius: 3,
+          },
+          {
+            label: 'P99',
+            data: data.data.map(d => d.p99_ms),
+            backgroundColor: 'rgba(239,68,68,0.7)',
+            borderRadius: 3,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { color: '#8b8fa3' },
+          },
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#8b8fa3' },
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#8b8fa3' },
+            beginAtZero: true,
+          },
+        },
+      },
+    });
+  },
+
+  // ----- 自动刷新 -----
+  startAutoRefresh(intervalMs) {
+    this.stopAutoRefresh();
+    this._autoRefreshEnabled = true;
+    this._autoRefreshTimer = setInterval(() => {
+      if (this._autoRefreshEnabled) this.load();
+    }, intervalMs || 30000);
+  },
+
+  stopAutoRefresh() {
+    this._autoRefreshEnabled = false;
+    if (this._autoRefreshTimer) {
+      clearInterval(this._autoRefreshTimer);
+      this._autoRefreshTimer = null;
+    }
+  },
+
+  toggleAutoRefresh() {
+    const btn = document.getElementById('auto-refresh-btn');
+    if (this._autoRefreshTimer) {
+      this.stopAutoRefresh();
+      if (btn) btn.textContent = I18n.t('dashboard.startAutoRefresh');
+    } else {
+      this.startAutoRefresh();
+      if (btn) btn.textContent = I18n.t('dashboard.stopAutoRefresh');
+    }
+  },
+
+  // ----- CSV 导出 -----
+  async exportCSV() {
+    try {
+      const hours = 24;
+      const url = `/api/export/dashboard-csv?hours=${hours}`;
+      window.open(url, '_blank');
+    } catch (e) {
+      showToast('Export failed: ' + e.message);
+    }
+  },
+
 };
 
 /* 渠道管理页面 - 复用 DashboardPage 的数据加载，渲染到 channels 页面容器 */

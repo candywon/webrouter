@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -23,12 +26,12 @@ type KnowledgeAnalyzeRequest struct {
 
 // KnowledgeAnalyzeResult 分析结果
 type KnowledgeAnalyzeResult struct {
-	TaskID      string `json:"task_id"`
-	Status      string `json:"status"`
-	Summary     string `json:"summary"`
-	KeyFindings string `json:"key_findings"`
+	TaskID          string `json:"task_id"`
+	Status          string `json:"status"`
+	Summary         string `json:"summary"`
+	KeyFindings     string `json:"key_findings"`
 	Recommendations string `json:"recommendations"`
-	Error       string `json:"error,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 // analyzeKnowledge 单域分析引擎入口
@@ -37,12 +40,12 @@ func analyzeKnowledge(req KnowledgeAnalyzeRequest) (string, error) {
 
 	// 1. 记录分析任务到数据库
 	record := KnowledgeAnalysisRecord{
-		TaskID:      taskID,
-		TokenID:     req.TokenID,
-		DomainCode:  req.DomainCode,
-		Department:  req.Department,
+		TaskID:       taskID,
+		TokenID:      req.TokenID,
+		DomainCode:   req.DomainCode,
+		Department:   req.Department,
 		AnalysisType: req.AnalysisType,
-		Status:      "processing",
+		Status:       "processing",
 	}
 
 	if err := record.save(); err != nil {
@@ -80,13 +83,13 @@ func analyzeKnowledge(req KnowledgeAnalyzeRequest) (string, error) {
 
 // KnowledgeAnalysisRecord 分析记录 DB 操作
 type KnowledgeAnalysisRecord struct {
-	TaskID      string
-	TokenID     int
-	DomainCode  string
-	Department  string
+	TaskID       string
+	TokenID      int
+	DomainCode   string
+	Department   string
 	AnalysisType string
-	Status      string
-	Result      string
+	Status       string
+	Result       string
 }
 
 func (r *KnowledgeAnalysisRecord) save() error {
@@ -193,9 +196,9 @@ func queryKnowledgeItems(req KnowledgeAnalyzeRequest) ([]knowledgeItemRaw, error
 // analyzeItems 统计分析
 func analyzeItems(items []knowledgeItemRaw, req KnowledgeAnalyzeRequest) map[string]interface{} {
 	stats := map[string]interface{}{
-		"total_items": len(items),
-		"by_type":     map[string]int{},
-		"by_domain":   map[string]int{},
+		"total_items":    len(items),
+		"by_type":        map[string]int{},
+		"by_domain":      map[string]int{},
 		"avg_confidence": 0.0,
 	}
 
@@ -301,7 +304,7 @@ func callUpstreamLLM(model, prompt string) (string, error) {
 			{"role": "system", "content": "你是一个企业知识分析专家。"},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens": 4000,
+		"max_tokens":  4000,
 		"temperature": 0.3,
 	}
 
@@ -313,7 +316,7 @@ func callUpstreamLLM(model, prompt string) (string, error) {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", provider.APIKey)
+	httpReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
 
 	// 发送请求
 	client := &http.Client{Timeout: 120 * time.Second}

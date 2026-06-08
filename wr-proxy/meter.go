@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 // 计量模块：写日志、扣配额、限速计数
@@ -16,7 +19,7 @@ type Meter struct {
 
 type minuteBucket struct {
 	count      int
-	validCount int   // 有效请求次数（status < 400 且非重试且无错误）
+	validCount int // 有效请求次数（status < 400 且非重试且无错误）
 	tokens     int64
 	costCents  int64
 	start      time.Time

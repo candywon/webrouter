@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 /* 告警页面逻辑 */
 const AlertPage = {
   editingRule: null,
@@ -15,36 +18,36 @@ const AlertPage = {
     const el = document.getElementById('alert-rules');
     if (!el) return;
     if (rules.length === 0) {
-      el.innerHTML = '<div class="empty-state"><div class="icon">🔔</div><p>暂无告警规则<br>点击"添加规则"创建</p></div>';
+      el.innerHTML = `<div class="empty-state"><div class="icon">🔔</div><p>${I18n.t('alert.noRules')}<br>${I18n.t('alert.addRuleHint')}</p></div>`;
       return;
     }
 
     const conditionLabels = {
-      'key_failed': 'Key 失效',
-      'balance_low': '余额不足',
-      'error_rate': '错误率过高',
-      'usage_spike': '用量突增',
+      'key_failed': I18n.t("alert.keyFailed"),
+      'balance_low': I18n.t("alert.balanceLow"),
+      'error_rate': I18n.t("alert.errorRateHigh"),
+      'usage_spike': I18n.t("alert.usageSpike"),
     };
 
     const levelBadge = (level) => {
       const cls = level === 'critical' ? 'dead' : level === 'warning' ? 'warning' : 'info';
-      const labels = { critical: '严重', warning: '警告', info: '提示' };
+      const labels = { critical: I18n.t("common.critical"), warning: I18n.t("common.warning"), info: I18n.t("common.info") };
       return `<span class="badge badge-${cls}">${labels[level] || level}</span>`;
     };
 
     el.innerHTML = `<table>
-      <thead><tr><th>名称</th><th>触发条件</th><th>级别</th><th>告警通道</th><th>状态</th><th>操作</th></tr></thead>
+      <thead><tr><th>${I18n.t('common.name')}</th><th>${I18n.t('alert.triggerCondition')}</th><th>${I18n.t('alert.level')}</th><th>${I18n.t('alert.channel')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('common.actions')}</th></tr></thead>
       <tbody>${rules.map(r => `
         <tr>
           <td>${r.name}</td>
           <td>${conditionLabels[r.condition_type] || r.condition_type}</td>
           <td>${levelBadge(r.level)}</td>
           <td>${(r.channels || []).join(', ')}</td>
-          <td>${r.enabled ? '<span class="badge badge-healthy">启用</span>' : '<span class="badge badge-unknown">禁用</span>'}</td>
+          <td>${r.enabled ? `<span class="badge badge-healthy">${I18n.t('common.enabled')}</span>` : `<span class="badge badge-unknown">${I18n.t('common.disabled')}</span>`}</td>
           <td>
-            <button class="btn" onclick="AlertPage.editRule(${r.id})">✏️ 编辑</button>
-            <button class="btn" onclick="AlertPage.toggleRule(${r.id}, ${!r.enabled})">${r.enabled ? '禁用' : '启用'}</button>
-            <button class="btn btn-danger" onclick="AlertPage.deleteRule(${r.id})">删除</button>
+            <button class="btn" onclick="AlertPage.editRule(${r.id})">✏️ ${I18n.t('common.edit')}</button>
+            <button class="btn" onclick="AlertPage.toggleRule(${r.id}, ${!r.enabled})">${r.enabled ? I18n.t("common.disabled") : I18n.t("common.enable")}</button>
+            <button class="btn btn-danger" onclick="AlertPage.deleteRule(${r.id})">${I18n.t('common.delete')}</button>
           </td>
         </tr>
       `).join('')}</tbody>
@@ -56,7 +59,7 @@ const AlertPage = {
   showForm(rule) {
     this.editingRule = rule;
     const isEdit = !!rule;
-    const title = isEdit ? '编辑告警规则' : '添加告警规则';
+    const title = isEdit ? I18n.t('alert.editRule') : I18n.t("alert.addRule");
 
     const modalDiv = document.getElementById('alert-form-modal');
     if (modalDiv) modalDiv.remove();
@@ -71,48 +74,48 @@ const AlertPage = {
           <div class="modal-body">
             <form id="alert-form">
               <div class="form-group">
-                <label>规则名称 *</label>
-                <input type="text" id="af-name" required placeholder="如: DashScope Key失效告警">
+                <label>${I18n.t('alert.ruleNameRequired')}</label>
+                <input type="text" id="af-name" required placeholder="${I18n.t('alert.ruleNamePlaceholder')}">
               </div>
               <div class="form-group">
-                <label>触发条件 *</label>
+                <label>${I18n.t('alert.conditionRequired')}</label>
                 <select id="af-condition" onchange="AlertPage.onConditionChange()">
-                  <option value="key_failed">Key 失效 — 渠道健康检测连续失败</option>
-                  <option value="balance_low">余额不足 — 剩余额度低于阈值</option>
-                  <option value="error_rate">错误率过高 — 请求错误率超过阈值</option>
-                  <option value="usage_spike">用量突增 — 短时间内调用量异常飙升</option>
+                  <option value="key_failed">${I18n.t('alert.keyFailedDesc')}</option>
+                  <option value="balance_low">${I18n.t('alert.balanceLowDesc')}</option>
+                  <option value="error_rate">${I18n.t('alert.errorRateHighDesc')}</option>
+                  <option value="usage_spike">${I18n.t('alert.usageSpikeDesc')}</option>
                 </select>
               </div>
               <div id="af-threshold-group" class="form-group" style="display:none">
-                <label>阈值</label>
-                <input type="number" id="af-threshold" step="0.01" min="0" placeholder="如: 0.8">
-                <span class="hint">余额不足时为额度值，错误率时为百分比（0-1）</span>
+                <label>${I18n.t('alert.threshold')}</label>
+                <input type="number" id="af-threshold" step="0.01" min="0" placeholder="${I18n.t('common.placeholderExampleNumber')}">
+                <span class="hint">${I18n.t('alert.thresholdHint')}</span>
               </div>
               <div class="form-group">
-                <label>告警级别</label>
+                <label>${I18n.t('alert.level')}</label>
                 <select id="af-level">
-                  <option value="info">提示</option>
-                  <option value="warning" selected>警告</option>
-                  <option value="critical">严重</option>
+                  <option value="info">${I18n.t('common.info')}</option>
+                  <option value="warning" selected>${I18n.t('common.warning')}</option>
+                  <option value="critical">${I18n.t('common.critical')}</option>
                 </select>
               </div>
               <div class="form-group">
-                <label>告警通道</label>
+                <label>${I18n.t('alert.channel')}</label>
                 <div id="af-channels">
-                  <label class="switch-label"><input type="checkbox" id="af-ch-wechat" value="wechat" checked><span>微信</span></label>
-                  <label class="switch-label"><input type="checkbox" id="af-ch-email" value="email"><span>邮件</span></label>
+                  <label class="switch-label"><input type="checkbox" id="af-ch-wechat" value="wechat" checked><span>${I18n.t('alert.wechat')}</span></label>
+                  <label class="switch-label"><input type="checkbox" id="af-ch-email" value="email"><span>${I18n.t('alert.email')}</span></label>
                 </div>
-                <span class="hint">可多选，目前仅支持 wechat/email</span>
+                <span class="hint">${I18n.t('alert.channelHint')}</span>
               </div>
               <div class="form-group form-row">
                 <label class="switch-label">
                   <input type="checkbox" id="af-enabled" checked>
-                  <span>启用规则</span>
+                  <span>${I18n.t('alert.enableRule')}</span>
                 </label>
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn-primary">保存</button>
-                <button type="button" class="btn-secondary" onclick="AlertPage.hideForm()">取消</button>
+                <button type="submit" class="btn-primary">${I18n.t('common.save')}</button>
+                <button type="button" class="btn-secondary" onclick="AlertPage.hideForm()">${I18n.t('common.cancel')}</button>
               </div>
             </form>
           </div>
@@ -168,7 +171,7 @@ const AlertPage = {
 
   async submitForm() {
     const name = document.getElementById('af-name').value.trim();
-    if (!name) { showToast('规则名称不能为空'); return; }
+    if (!name) { showToast(I18n.t("alert.ruleNameRequiredError")); return; }
 
     const conditionType = document.getElementById('af-condition').value;
     const level = document.getElementById('af-level').value;
@@ -198,15 +201,15 @@ const AlertPage = {
     try {
       if (this.editingRule) {
         await API.put(`/alerts/rules/${this.editingRule.id}`, data);
-        showToast('规则已更新');
+        showToast(I18n.t("alert.ruleUpdated"));
       } else {
         await API.post('/alerts/rules', data);
-        showToast('规则已创建');
+        showToast(I18n.t("alert.ruleCreated"));
       }
       this.hideForm();
       this.load();
     } catch (e) {
-      showToast('保存失败: ' + (e.message || '未知错误'));
+      showToast(I18n.t("common.saveFailed") + (e.message || I18n.t("common.unknownError")));
     }
   },
 
@@ -218,10 +221,10 @@ const AlertPage = {
     try {
       const rules = (await API.get('/alerts/rules')).rules || [];
       const rule = rules.find(r => r.id === id);
-      if (!rule) { showToast('规则不存在'); return; }
+      if (!rule) { showToast(I18n.t("alert.ruleNotFound")); return; }
       this.showForm(rule);
     } catch (e) {
-      showToast('加载规则失败: ' + e.message);
+      showToast(I18n.t("alert.loadRuleFailed") + e.message);
     }
   },
 
@@ -229,14 +232,14 @@ const AlertPage = {
     try {
       await API.put(`/alerts/rules/${id}`, { enabled });
       this.load();
-    } catch (e) { showToast('操作失败'); }
+    } catch (e) { showToast(I18n.t("common.operationFailed")); }
   },
 
   async deleteRule(id) {
-    if (!confirm('确定删除此规则？')) return;
+    if (!confirm(I18n.t("alert.confirmDelete"))) return;
     try {
       await API.del(`/alerts/rules/${id}`);
       this.load();
-    } catch (e) { showToast('删除失败'); }
+    } catch (e) { showToast(I18n.t('common.deleteFailed')); }
   },
 };

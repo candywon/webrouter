@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """告警引擎 — 评估告警规则并发送通知"""
 import json, time, logging, asyncio, smtplib
 from email.mime.text import MIMEText
@@ -47,7 +50,7 @@ class EmailAlertChannel:
 
     def _sync_send(self, title, content):
         msg = MIMEText(content, 'plain', 'utf-8')
-        msg['Subject'] = f'[WebRouter告警] {title}'
+        msg['Subject'] = f'[WebRouter Alert] {title}'
         msg['From'] = self.from_addr
         msg['To'] = self.to_addr
 

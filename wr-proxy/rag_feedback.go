@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -14,19 +17,19 @@ import (
 
 // ragFeedback 单次 RAG 注入反馈记录
 type ragFeedback struct {
-	TokenID      int
-	TokenName    string
-	DomainCode   string
-	Query        string
-	HitCount     int    // 注入的知识条数
+	TokenID       int
+	TokenName     string
+	DomainCode    string
+	Query         string
+	HitCount      int     // 注入的知识条数
 	MinSimilarity float64 // 最低相关度
 	MaxSimilarity float64 // 最高相关度
-	Timestamp    string
+	Timestamp     string
 }
 
 var (
-	ragFeedbacks   []ragFeedback
-	ragFeedbacksMu sync.RWMutex
+	ragFeedbacks     []ragFeedback
+	ragFeedbacksMu   sync.RWMutex
 	ragFeedbackCount int64
 )
 
@@ -121,11 +124,11 @@ func handleRAGFeedbackSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		TokenID      int     `json:"token_id"`
-		TokenName    string  `json:"token_name"`
-		DomainCode   string  `json:"domain_code"`
-		Query        string  `json:"query"`
-		HitCount     int     `json:"hit_count"`
+		TokenID       int     `json:"token_id"`
+		TokenName     string  `json:"token_name"`
+		DomainCode    string  `json:"domain_code"`
+		Query         string  `json:"query"`
+		HitCount      int     `json:"hit_count"`
 		MinSimilarity float64 `json:"min_similarity"`
 		MaxSimilarity float64 `json:"max_similarity"`
 	}
@@ -135,14 +138,14 @@ func handleRAGFeedbackSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	RecordRAGFeedback(ragFeedback{
-		TokenID:      req.TokenID,
-		TokenName:    req.TokenName,
-		DomainCode:   req.DomainCode,
-		Query:        req.Query,
-		HitCount:     req.HitCount,
+		TokenID:       req.TokenID,
+		TokenName:     req.TokenName,
+		DomainCode:    req.DomainCode,
+		Query:         req.Query,
+		HitCount:      req.HitCount,
 		MinSimilarity: req.MinSimilarity,
 		MaxSimilarity: req.MaxSimilarity,
-		Timestamp:    time.Now().UTC().Format("2006-01-02 15:04:05"),
+		Timestamp:     time.Now().UTC().Format("2006-01-02 15:04:05"),
 	})
 
 	writeJSON(w, 200, map[string]string{"message": "feedback recorded"})
@@ -157,7 +160,7 @@ func handleRAGFeedbackStats(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, 200, map[string]interface{}{
 		"feedback": GetRAGFeedbackStats(),
-		"inject":   map[string]interface{}{
+		"inject": map[string]interface{}{
 			"hits":   ragInjectHits,
 			"misses": ragInjectMisses,
 		},

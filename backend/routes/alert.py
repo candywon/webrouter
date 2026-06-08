@@ -1,8 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """告警API"""
 import json
 from flask import Blueprint, jsonify, request
 from models.wr_models import AlertRule, AlertHistory
 from extensions import db
+from i18n.messages import get_message
 
 alert_bp = Blueprint('alert', __name__)
 
@@ -19,7 +23,7 @@ def create_rule():
     """创建告警规则"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'No data'}), 400
+        return jsonify({'error': get_message('no_data', request)}), 400
 
     rule = AlertRule(
         name=data.get('name', ''),
@@ -39,7 +43,7 @@ def update_rule(rule_id):
     """更新告警规则"""
     rule = AlertRule.query.get(rule_id)
     if not rule:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
 
     data = request.get_json()
     if 'name' in data:
@@ -64,7 +68,7 @@ def delete_rule(rule_id):
     """删除告警规则"""
     rule = AlertRule.query.get(rule_id)
     if not rule:
-        return jsonify({'error': 'Not found'}), 404
+        return jsonify({'error': get_message('not_found', request)}), 404
     db.session.delete(rule)
     db.session.commit()
     return jsonify({'deleted': rule_id})

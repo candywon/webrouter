@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
 """CLI配置生成器 — 为各类AI CLI工具生成配置文件/环境变量"""
 import json, logging
 

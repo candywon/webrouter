@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+// SPDX-License-Identifier: BUSL-1.1
+
 package main
 
 import (
@@ -52,8 +55,8 @@ func InitDB(dbPath string) error {
 	}
 
 	// 设置连接池大小，SQLite 适合小连接池
-	db.SetMaxOpenConns(1)   // SQLite 写串行，1 个写连接足够
-	db.SetMaxIdleConns(4)   // 读连接可复用
+	db.SetMaxOpenConns(1) // SQLite 写串行，1 个写连接足够
+	db.SetMaxIdleConns(4) // 读连接可复用
 
 	// SQLite 优化配置
 	pragmas := []string{
@@ -88,6 +91,21 @@ func InitDB(dbPath string) error {
 
 func migrate() error {
 	migrations := []string{
+		// wr_providers 主表（通常由 Flask 创建，这里兜底用于测试和独立运行）
+		`CREATE TABLE IF NOT EXISTS wr_providers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			type TEXT DEFAULT 'direct',
+			base_url TEXT NOT NULL,
+			api_key TEXT DEFAULT '',
+			models TEXT DEFAULT '',
+			tags TEXT DEFAULT '',
+			enabled INTEGER DEFAULT 1,
+			status TEXT DEFAULT 'unchecked',
+			last_latency_ms INTEGER DEFAULT 0,
+			last_error TEXT DEFAULT '',
+			last_check_at DATETIME
+		)`,
 		`CREATE TABLE IF NOT EXISTS wr_request_logs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			request_id TEXT NOT NULL,
@@ -149,6 +167,7 @@ func migrate() error {
 			priority INTEGER DEFAULT 50,
 			weight INTEGER DEFAULT 100,
 			supports_tools INTEGER DEFAULT 1,
+			fallback_enabled INTEGER DEFAULT 1,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 	}
@@ -163,7 +182,7 @@ func migrate() error {
 
 	// 增量迁移：为已有表添加新列（SQLite ALTER TABLE 只支持 ADD COLUMN）
 	alterMigrations := []string{
-		`ALTER TABLE wr_provider_ext ADD COLUMN supports_tools INTEGER DEFAULT 1`,
+		`ALTER TABLE wr_provider_ext ADD COLUMN fallback_enabled INTEGER DEFAULT 1`,
 		`ALTER TABLE wr_request_logs ADD COLUMN error_type TEXT DEFAULT ''`,
 		`ALTER TABLE wr_request_logs ADD COLUMN cached_tokens INTEGER DEFAULT 0`,
 		`ALTER TABLE wr_tokens ADD COLUMN smart_downgrade INTEGER DEFAULT 0`,

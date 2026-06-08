@@ -1,14 +1,19 @@
-"""CLI配置导出API — 导出 WR Token 给各种 CLI 工具"""
+# SPDX-FileCopyrightText: 2026 Jianlin Huang <https://webrouter.tech>
+# SPDX-License-Identifier: BUSL-1.1
+
+"""CLI config export API — export WR Token for various CLI tools."""
 import json
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
+from i18n.messages import get_message
 
 cli_bp = Blueprint('cli_export', __name__)
 
-# 支持的工具及其配置模板
+# Supported tools and their config templates. `description` and `instructions`
+# hold i18n keys resolved per-request via get_message().
 CLI_TOOLS = {
     'claude-code': {
         'name': 'Claude Code',
-        'description': 'Anthropic官方编程助手',
+        'description': 'cli_desc_claude_code',
         'env_vars': {
             'ANTHROPIC_API_KEY': '{api_key}',
             'ANTHROPIC_BASE_URL': '{base_url}/v1',
@@ -17,7 +22,7 @@ CLI_TOOLS = {
     },
     'codex': {
         'name': 'OpenAI Codex',
-        'description': 'OpenAI编程助手',
+        'description': 'cli_desc_codex',
         'env_vars': {
             'OPENAI_API_KEY': '{api_key}',
             'OPENAI_BASE_URL': '{base_url}/v1',
@@ -26,7 +31,7 @@ CLI_TOOLS = {
     },
     'openclaw': {
         'name': 'OpenClaw',
-        'description': 'AI编程助手',
+        'description': 'cli_desc_openclaw',
         'env_vars': {
             'OPENAI_API_KEY': '{api_key}',
             'OPENAI_BASE_URL': '{base_url}/v1',
@@ -35,7 +40,7 @@ CLI_TOOLS = {
     },
     'hermes': {
         'name': 'Hermes Agent',
-        'description': 'Hermes AI助手',
+        'description': 'cli_desc_hermes',
         'config_yaml': (
             'providers:\n'
             '  openai:\n'
@@ -45,12 +50,12 @@ CLI_TOOLS = {
     },
     'cursor': {
         'name': 'Cursor IDE',
-        'description': 'AI编程IDE',
-        'instructions': '在Cursor设置中：OpenAI API Key填 {api_key}，Base URL填 {base_url}/v1',
+        'description': 'cli_desc_cursor',
+        'instructions_key': 'cli_instructions_cursor',
     },
     'continue': {
         'name': 'Continue',
-        'description': 'VS Code AI插件',
+        'description': 'cli_desc_continue',
         'config_json': {
             'models': [{
                 'title': 'WebRouter',
@@ -66,22 +71,20 @@ CLI_TOOLS = {
 
 @cli_bp.route('/tools')
 def list_tools():
-    """列出支持的CLI工具"""
+    """List supported CLI tools."""
     tools = []
     for key, conf in CLI_TOOLS.items():
         tools.append({
             'id': key,
             'name': conf['name'],
-            'description': conf['description'],
+            'description': get_message(conf['description'], request),
         })
     return jsonify({'tools': tools})
 
 
 @cli_bp.route('/export/<tool_id>')
 def export_config(tool_id):
-    """导出指定工具的配置"""
-    from flask import request
-
+    """Export config for the specified tool."""
     if tool_id not in CLI_TOOLS:
         return jsonify({'error': f'Unsupported tool: {tool_id}'}), 404
 
@@ -94,33 +97,28 @@ def export_config(tool_id):
         'name': tool['name'],
     }
 
-    # Shell export
     if 'shell_export' in tool:
         result['shell'] = tool['shell_export'].format(
             api_key=api_key, base_url=base_url
         )
 
-    # 环境变量
     if 'env_vars' in tool:
         result['env_vars'] = {
             k: v.format(api_key=api_key, base_url=base_url)
             for k, v in tool['env_vars'].items()
         }
 
-    # YAML配置
     if 'config_yaml' in tool:
         result['yaml'] = tool['config_yaml'].format(
             api_key=api_key, base_url=base_url
         )
 
-    # JSON配置
     if 'config_json' in tool:
         config_str = json.dumps(tool['config_json'])
         result['json'] = config_str.replace('{api_key}', api_key).replace('{base_url}', base_url)
 
-    # 使用说明
-    if 'instructions' in tool:
-        result['instructions'] = tool['instructions'].format(
+    if 'instructions_key' in tool:
+        result['instructions'] = get_message(tool['instructions_key'], request).format(
             api_key=api_key, base_url=base_url
         )
 
@@ -129,9 +127,8 @@ def export_config(tool_id):
 
 @cli_bp.route('/test', methods=['POST'])
 def test_connection():
-    """测试API连接"""
-    from flask import request as req
-    data = req.get_json() or {}
+    """Test API connectivity."""
+    data = request.get_json() or {}
     base_url = data.get('base_url', '')
     api_key = data.get('api_key', '')
 
