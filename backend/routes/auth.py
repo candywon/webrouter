@@ -3,7 +3,7 @@
 
 """后台登录认证 API"""
 from datetime import datetime
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_user, logout_user, current_user, login_required
 from models.wr_models import AdminUser
 from extensions import db
