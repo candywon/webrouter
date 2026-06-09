@@ -88,7 +88,7 @@ One-click export of environment variables and config for Claude Code, Codex, Cur
 
 ### Try it Online
 
-Don't want to install anything? Try the live demo at **[demo.webrouter.tech](https://demo.webrouter.tech)** (login: `demo` / `demo123456`).
+Don't want to install anything? Try the live demo at **[demo.webrouter.tech](https://demo.webrouter.tech)** (login: `admin` / `admin123456`).
 
 ### Prerequisites
 
