@@ -62,25 +62,30 @@ const modelGradesPage = {
 
     let html = '';
     for (const [tier, items] of Object.entries(groups)) {
-      if (!items.length) continue;
-      html += `<div class="grade-group"><h4 class="grade-group-title">${tierLabels[tier]}</h4><table class="table"><thead><tr>`;
-      html += `<th>${I18n.t('common.model')}</th><th>${I18n.t('modelgrades.costIndex')}</th><th>${I18n.t('common.vendor')}</th><th>${I18n.t('common.description')}</th><th>${I18n.t('common.sortOrder')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('common.actions')}</th>`;
-      html += '</tr></thead><tbody>';
-      items.forEach(g => {
-        html += `<tr>
-          <td><strong>${esc(g.model)}</strong></td>
-          <td>${g.cost_index}</td>
-          <td><span class="badge">${esc(g.vendor)}</span></td>
-          <td class="text-muted" style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(g.description || '-')}</td>
-          <td>${g.sort_order}</td>
-          <td><span class="badge badge-${g.enabled ? 'success' : 'danger'}">${g.enabled ? I18n.t("common.enable") : I18n.t("common.disabled")}</span></td>
-          <td class="actions">
-            <button class="btn-icon" onclick="modelGradesPage.edit('${esc(g.model)}')" title="${I18n.t('common.edit')}">✏️</button>
-            <button class="btn-icon" onclick="modelGradesPage.delete('${esc(g.model)}')" title="${I18n.t('common.delete')}">🗑️</button>
-          </td>
-        </tr>`;
-      });
-      html += '</tbody></table></div>';
+      html += `<div class="grade-group"><h4 class="grade-group-title">${tierLabels[tier]}</h4>`;
+      if (!items.length) {
+        html += `<div class="empty-state" style="padding:24px 0;"><p style="color:var(--text-muted);font-size:13px;">${I18n.t('modelgrades.noData')}</p></div>`;
+      } else {
+        html += `<table class="table"><thead><tr>`;
+        html += `<th>${I18n.t('common.model')}</th><th>${I18n.t('modelgrades.costIndex')}</th><th>${I18n.t('common.vendor')}</th><th>${I18n.t('common.description')}</th><th>${I18n.t('common.sortOrder')}</th><th>${I18n.t('common.status')}</th><th>${I18n.t('common.actions')}</th>`;
+        html += '</tr></thead><tbody>';
+        items.forEach(g => {
+          html += `<tr>
+            <td><strong>${esc(g.model)}</strong></td>
+            <td>${g.cost_index}</td>
+            <td><span class="badge">${esc(g.vendor)}</span></td>
+            <td class="text-muted" style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(g.description || '-')}</td>
+            <td>${g.sort_order}</td>
+            <td><span class="badge badge-${g.enabled ? 'success' : 'danger'}">${g.enabled ? I18n.t("common.enable") : I18n.t("common.disabled")}</span></td>
+            <td class="actions">
+              <button class="btn-icon" onclick="modelGradesPage.edit('${esc(g.model)}')" title="${I18n.t('common.edit')}">✏️</button>
+              <button class="btn-icon" onclick="modelGradesPage.delete('${esc(g.model)}')" title="${I18n.t('common.delete')}">🗑️</button>
+            </td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+      }
+      html += '</div>';
     }
     container.innerHTML = html;
   },
