@@ -3,8 +3,14 @@
 </p>
 
 <p align="center">
+  <a href="https://webrouter.tech">
+    <img src="https://img.shields.io/badge/官网-webrouter.tech-4f46e5?style=for-the-badge&logo=internet-explorer" alt="官网" />
+  </a>
+  <a href="https://webrouter.tech/docs/">
+    <img src="https://img.shields.io/badge/文档-VitePress-0ea5e9?style=for-the-badge&logo=readthedocs" alt="文档" />
+  </a>
   <a href="https://demo.webrouter.tech">
-    <img src="https://img.shields.io/badge/在线演示-Demo-9cf?style=for-the-badge" alt="在线演示" />
+    <img src="https://img.shields.io/badge/在线演示-Demo-success?style=for-the-badge&logo=google-chrome" alt="在线演示" />
   </a>
 </p>
 
@@ -20,6 +26,7 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#核心功能">核心功能</a> ·
   <a href="#架构">架构</a> ·
+  <a href="https://webrouter.tech/docs/">文档</a> ·
   <a href="#许可证">许可证</a>
 </p>
 
@@ -126,6 +133,21 @@ open http://localhost:5050
 cd webrouter
 docker compose -f deploy/docker-compose.yml up -d
 ```
+
+---
+
+## 文档
+
+完整文档请访问 **[webrouter.tech/docs/](https://webrouter.tech/docs/)**：
+
+| 指南 | 内容 |
+|------|------|
+| [快速上手](https://webrouter.tech/docs/zh/guide/quick-start) | 快速开始、安装、部署方案 |
+| [核心概念](https://webrouter.tech/docs/zh/guide/architecture) | 架构、数据源管理、令牌与团队 |
+| [智能路由](https://webrouter.tech/docs/zh/guide/smart-routing) | 自动模型选择、降级策略 |
+| [记忆与知识库](https://webrouter.tech/docs/zh/guide/memory-recall) | 会话记忆召回、知识库与 RAG |
+| [运维管理](https://webrouter.tech/docs/zh/guide/monitoring) | 监控、告警、计费、脱敏 |
+| [API 参考](https://webrouter.tech/docs/zh/guide/api-reference) | 完整 API 文档 |
 
 ---
 
@@ -279,13 +301,19 @@ python3 backend/start.py logs      # 查看日志
 
 ---
 
-## 许可证
+## 许可证与版本
 
-WebRouter 社区版采用 **Business Source License 1.1** 协议。
+WebRouter 提供两个版本。完整对比见[官网价格方案](https://webrouter.tech/#pricing)。
 
-- ✅ 个人使用和企业内部生产部署免费
-- ❌ Change Date 前禁止商业转售（含托管 SaaS、OEM 嵌入）
-- 🔄 **2029-06-01** 起自动转为 **Apache-2.0** 协议
+| 功能 | 社区版 | 企业版 |
+|------|:-----:|:------:|
+| 价格 | 免费 | 定制 |
+| 最大并发 | 50 | 可定制 |
+| SSO / SAML / OIDC | — | ✅ |
+| 集群模式 | — | ✅ |
+| 审计日志 | 基础 | 自定义规则 |
+| 知识库与 RAG | 基础 | 高级 |
+| 协议 | BSL 1.1 → Apache 2.0 (2029) | 专有 EULA |
 
 完整文本见 [LICENSE](LICENSE)，双版策略见 [LICENSING.md](LICENSING.md)。
 

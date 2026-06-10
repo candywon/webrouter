@@ -3,8 +3,14 @@
 </p>
 
 <p align="center">
+  <a href="https://webrouter.tech">
+    <img src="https://img.shields.io/badge/Website-webrouter.tech-4f46e5?style=for-the-badge&logo=internet-explorer" alt="Website" />
+  </a>
+  <a href="https://webrouter.tech/docs/">
+    <img src="https://img.shields.io/badge/Docs-VitePress-0ea5e9?style=for-the-badge&logo=readthedocs" alt="Documentation" />
+  </a>
   <a href="https://demo.webrouter.tech">
-    <img src="https://img.shields.io/badge/Try%20Demo-Online-9cf?style=for-the-badge" alt="Try Live Demo" />
+    <img src="https://img.shields.io/badge/Try%20Demo-Online-success?style=for-the-badge&logo=google-chrome" alt="Try Live Demo" />
   </a>
 </p>
 
@@ -20,6 +26,7 @@
   <a href="#quick-start">Quick Start</a> ·
   <a href="#features">Features</a> ·
   <a href="#architecture">Architecture</a> ·
+  <a href="https://webrouter.tech/docs/">Docs</a> ·
   <a href="#license">License</a>
 </p>
 
@@ -126,6 +133,21 @@ open http://localhost:5050
 cd webrouter
 docker compose -f deploy/docker-compose.yml up -d
 ```
+
+---
+
+## Documentation
+
+Full documentation is available at **[webrouter.tech/docs/](https://webrouter.tech/docs/)**:
+
+| Guide | Topics |
+|-------|--------|
+| [Getting Started](https://webrouter.tech/docs/guide/quick-start) | Quick Start, Installation, Deployment |
+| [Core Concepts](https://webrouter.tech/docs/guide/architecture) | Architecture, Providers, Tokens & Teams |
+| [Smart Routing](https://webrouter.tech/docs/guide/smart-routing) | Auto model selection, fallback strategies |
+| [Memory & Knowledge](https://webrouter.tech/docs/guide/memory-recall) | Session Recall, Knowledge Base & RAG |
+| [Operations](https://webrouter.tech/docs/guide/monitoring) | Monitoring, Alerting, Billing, Desensitization |
+| [API Reference](https://webrouter.tech/docs/guide/api-reference) | Full API documentation |
 
 ---
 
@@ -279,13 +301,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ---
 
-## License
+## License & Editions
 
-WebRouter Community Edition is licensed under the **Business Source License 1.1**.
+WebRouter is available in two editions. See the [full comparison](https://webrouter.tech/#pricing) on our website.
 
-- ✅ Free for personal and internal production use
-- ❌ Commercial redistribution (reselling, managed SaaS, OEM) is prohibited before the Change Date
-- 🔄 On **2029-06-01**, the license automatically converts to **Apache-2.0**
+| Feature | Community | Enterprise |
+|---------|:---------:|:----------:|
+| Price | Free | Custom |
+| Max concurrent | 50 | Customizable |
+| SSO / SAML / OIDC | — | ✅ |
+| Cluster mode | — | ✅ |
+| Audit logging | Basic | Custom rules |
+| Knowledge Base & RAG | Basic | Advanced |
+| License | BSL 1.1 → Apache 2.0 (2029) | Proprietary EULA |
 
 See [LICENSE](LICENSE) for the full text and [LICENSING.md](LICENSING.md) for the dual-edition strategy.
 
