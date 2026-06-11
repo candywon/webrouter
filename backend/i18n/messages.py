@@ -134,6 +134,8 @@ MESSAGES = {
         'proxy_reload_failed': 'Reload failed: {e}',
         'request_failed': 'Request failed',
         'request_failed_detail': 'Request failed: {e}',
+        'demo_test_response': 'This is a simulated response from WebRouter Demo. The API test feature works correctly — in production, this will forward requests to the real upstream AI provider.',
+        'no_available_provider': 'No available provider for model "{model}". Possible causes: 1) Provider status is auth_failed/unhealthy (will auto-retry after backoff); 2) Model not configured in any enabled Provider; 3) All Providers are in cooldown. You can reload wr-proxy from Settings to force a refresh.',
 
         # Refresh / Cache
         'refresh_sent': 'Refresh request sent',
@@ -347,6 +349,8 @@ MESSAGES = {
         'proxy_reload_failed': '重载失败: {e}',
         'request_failed': '请求失败',
         'request_failed_detail': '请求失败: {e}',
+        'demo_test_response': '这是 WebRouter Demo 的模拟响应。API 测试功能运行正常 — 在正式环境中，请求将被转发到真实的上游 AI 服务。',
+        'no_available_provider': '没有可用的 Provider 处理模型 "{model}"。可能原因：1) Provider 状态为 auth_failed/不健康（系统会自动退避重试）；2) 模型未在任何启用的 Provider 中配置；3) 所有 Provider 都在冷却中。可在"系统设置"中重载 wr-proxy 强制刷新。',
 
         # Refresh / Cache
         'refresh_sent': '刷新请求已发送',

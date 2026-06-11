@@ -80,6 +80,12 @@ func (hc *HealthChecker) checkAll() {
 		p.LastLatencyMs = latency
 		p.LastError = errMsg
 
+		// auth_failed → healthy 时重置退避状态
+		if status == "healthy" && p.AuthFailCount > 0 {
+			p.ClearAuthFail()
+			LogInfo("HealthChecker: %s recovered from auth_failed, backoff reset", p.Name)
+		}
+
 		if status != "healthy" {
 			LogWarn("HealthChecker: %s (%s) → %s, latency=%dms, err=%s",
 				p.Name, p.Type, status, latency, errMsg)

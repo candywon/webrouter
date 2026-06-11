@@ -101,13 +101,8 @@ def create_app(config_class=None):
         if request.path.startswith('/api/auth/'):
             return None
 
-        # Demo 模式自动登录 + 核心数据只读保护
+        # Demo 模式核心数据只读保护
         if app.config.get('DEMO_MODE'):
-            from models.wr_models import AdminUser
-            if not current_user.is_authenticated:
-                demo_admin = AdminUser.query.filter_by(username='demo').first()
-                if demo_admin:
-                    login_user(demo_admin)
             # 核心数据只读保护：白名单之外的 POST/PUT/DELETE 返回 403
             if request.method in ('POST', 'PUT', 'DELETE') and request.path.startswith('/api/'):
                 allowed_prefixes = ('/api/demo/', '/api/settings/', '/api/desensitize/',

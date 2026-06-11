@@ -41,6 +41,11 @@ type Config struct {
 	// 告警
 	AlertCooldown time.Duration // 同一告警冷却时间，默认 5min
 
+	// auth_failed 退避
+	AuthFailBackoffBase      time.Duration // 初始退避时间，默认 5min
+	AuthFailBackoffMax       time.Duration // 最大退避时间，默认 1h
+	AuthFailBackoffMultiplier float64      // 退避倍率，默认 2.0
+
 	// 知识捕获
 	KnowledgeCapture bool // 是否开启知识捕获
 }
@@ -64,6 +69,10 @@ func LoadConfig() *Config {
 		HealthCheckInterval:    envDuration("WR_HEALTH_INTERVAL", 5*time.Minute),
 		HealthTimeout:          envDuration("WR_HEALTH_TIMEOUT", 15*time.Second),
 		AlertCooldown:          envDuration("WR_ALERT_COOLDOWN", 5*time.Minute),
+
+		AuthFailBackoffBase:       envDuration("WR_AUTH_FAIL_BACKOFF_BASE", 5*time.Minute),
+		AuthFailBackoffMax:        envDuration("WR_AUTH_FAIL_BACKOFF_MAX", 1*time.Hour),
+		AuthFailBackoffMultiplier: envFloat("WR_AUTH_FAIL_BACKOFF_MULT", 2.0),
 
 		KnowledgeCapture: envStr("WR_KNOWLEDGE_CAPTURE", "0") == "1",
 	}

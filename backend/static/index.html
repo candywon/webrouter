@@ -58,6 +58,7 @@
 <div style="display:flex;gap:12px;align-items:center;">
 <span class="header-version">v1.0</span>
 <button class="btn btn-sm lang-btn" data-i18n="lang.switch" onclick="I18n.setLang(I18n.lang==='zh-CN'?'en':'zh-CN')">EN</button>
+<button class="btn btn-sm" id="change-pwd-btn" data-i18n="common.changePassword" onclick="showChangePwdModal()">修改密码</button>
 <button class="btn btn-sm" data-i18n="common.logout" onclick="logoutAdmin()">退出登录</button>
 </div>
 </header>
@@ -783,9 +784,9 @@
 </div>
 <!-- JS 依赖 -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="/static/js/utils.js"></script>
+<script src="/static/js/utils.js?v=2"></script>
 <script src="/static/js/api.js"></script>
-<script src="/static/js/router.js"></script>
+<script src="/static/js/router.js?v=2"></script>
 <script src="/static/js/dashboard.js"></script>
 <script src="/static/js/providers.js"></script>
 <script src="/static/js/channel.js"></script>
@@ -793,7 +794,7 @@
 <script src="/static/js/pricing.js"></script>
 <script src="/static/js/modelgrades.js"></script>
 <script src="/static/js/reqcache.js"></script>
-<script src="/static/js/api-test.js"></script>
+<script src="/static/js/api-test.js?v=2"></script>
 <script src="/static/js/desensitize.js"></script>
 <script src="/static/js/monitor.js"></script>
 <script src="/static/js/alert.js"></script>
@@ -802,7 +803,69 @@
 <script src="/static/js/cli-export.js"></script>
 <script src="/static/js/settings.js"></script>
 <script src="/static/js/knowledge.js"></script>
-<script src="/static/js/login.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/login.js?v=2"></script>
+<!-- 修改密码弹窗 -->
+<div class="modal" id="change-pwd-modal" style="display:none">
+  <div class="modal-content" style="max-width:400px;">
+    <div class="modal-header">
+      <h3 data-i18n="common.changePassword">修改密码</h3>
+      <button class="modal-close" onclick="hideChangePwdModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label data-i18n="common.oldPassword">当前密码</label>
+        <input type="password" id="pwd-old" class="form-input" placeholder="输入当前密码" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="common.newPassword">新密码</label>
+        <input type="password" id="pwd-new" class="form-input" placeholder="至少 8 位" />
+      </div>
+      <div class="form-group">
+        <label data-i18n="common.confirmPassword">确认新密码</label>
+        <input type="password" id="pwd-confirm" class="form-input" placeholder="再次输入新密码" />
+      </div>
+      <div class="form-actions">
+        <button class="btn" onclick="hideChangePwdModal()" data-i18n="common.cancel">取消</button>
+        <button class="btn-primary" onclick="submitChangePwd()" data-i18n="common.save">保存</button>
+      </div>
+      <div id="pwd-msg" style="margin-top:8px;font-size:13px;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showChangePwdModal() {
+  document.getElementById('pwd-old').value = '';
+  document.getElementById('pwd-new').value = '';
+  document.getElementById('pwd-confirm').value = '';
+  document.getElementById('pwd-msg').textContent = '';
+  document.getElementById('change-pwd-modal').style.display = 'flex';
+}
+function hideChangePwdModal() {
+  document.getElementById('change-pwd-modal').style.display = 'none';
+}
+function submitChangePwd() {
+  const oldPwd = document.getElementById('pwd-old').value.trim();
+  const newPwd = document.getElementById('pwd-new').value;
+  const confirmPwd = document.getElementById('pwd-confirm').value;
+  const msgEl = document.getElementById('pwd-msg');
+  if (!oldPwd) { msgEl.style.color = 'red'; msgEl.textContent = '请输入当前密码'; return; }
+  if (newPwd.length < 8) { msgEl.style.color = 'red'; msgEl.textContent = '新密码至少 8 位'; return; }
+  if (newPwd !== confirmPwd) { msgEl.style.color = 'red'; msgEl.textContent = '两次密码输入不一致'; return; }
+  msgEl.textContent = '提交中...';
+  fetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }),
+  }).then(r => r.json()).then(data => {
+    if (data.error) { msgEl.style.color = 'red'; msgEl.textContent = data.error; return; }
+    msgEl.style.color = 'green';
+    msgEl.textContent = data.message || '密码修改成功';
+    setTimeout(hideChangePwdModal, 1500);
+  }).catch(e => { msgEl.style.color = 'red'; msgEl.textContent = '网络错误'; });
+}
+</script>
+
+<script src="/static/js/app.js?v=2"></script>
 </body>
 </html>

@@ -34,9 +34,28 @@ function statusBadge(status) {
 }
 
 function copyToClipboard(text) {
-  navigator.clipboard.writeText(text).then(() => {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(I18n.t("common.copiedToClipboard"));
+    }).catch(() => _fallbackCopy(text));
+  } else {
+    _fallbackCopy(text);
+  }
+}
+
+function _fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
     showToast(I18n.t("common.copiedToClipboard"));
-  });
+  } catch (_) {
+    showToast(I18n.t("common.copyFailed") || 'Copy failed');
+  }
+  document.body.removeChild(ta);
 }
 
 function showToast(msg, duration = 2000) {

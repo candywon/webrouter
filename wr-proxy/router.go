@@ -100,6 +100,17 @@ func ClearExpiredSticky() {
 func (r *Router) RefreshProviders(providers []*Provider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// 保留已有 Provider 的 auth_failed 退避状态
+	oldMap := make(map[int]*Provider)
+	for _, p := range r.providers {
+		oldMap[p.ID] = p
+	}
+	for _, p := range providers {
+		if old, ok := oldMap[p.ID]; ok {
+			p.AuthFailCount = old.AuthFailCount
+			p.AuthFailUntil = old.AuthFailUntil
+		}
+	}
 	r.providers = providers
 	LogInfo("Router: refreshed %d providers", len(providers))
 }

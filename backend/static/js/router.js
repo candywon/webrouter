@@ -5,6 +5,7 @@
 const Router = {
   routes: {},
   current: null,
+  _authenticated: false,
 
   register(path, handler) {
     this.routes[path] = handler;
@@ -21,6 +22,31 @@ const Router = {
 
   resolve() {
     let path = window.location.hash.slice(1) || '/';
+
+    // 认证守卫：未登录时只允许访问 /login
+    if (path !== '/login' && !this._authenticated) {
+      fetch('/api/auth/status', { credentials: 'same-origin' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.authenticated) {
+            this._authenticated = true;
+            this._doResolve(path);
+          } else {
+            window.location.hash = '/login';
+          }
+        })
+        .catch(() => { window.location.hash = '/login'; });
+      return;
+    }
+    // 已登录时访问 /login，重定向到首页
+    if (path === '/login' && this._authenticated) {
+      window.location.hash = '/';
+      return;
+    }
+    this._doResolve(path);
+  },
+
+  _doResolve(path) {
 
     // 支持 /providers/:id/channels 子路由
     if (path.match(/^\/providers\/\d+\/channels/)) {

@@ -221,6 +221,15 @@ def delete_token(token_id):
     return jsonify({'message': get_message('token_deleted', request)})
 
 
+@tokens_bp.route('/<int:token_id>/key')
+def get_token_key(token_id):
+    """获取 Token 完整密钥（仅管理员，谨慎使用）"""
+    token = WRToken.query.get(token_id)
+    if not token:
+        return jsonify({'error': 'Token not found'}), 404
+    return jsonify({'key': token.key})
+
+
 @tokens_bp.route('/<int:token_id>/reset-quota', methods=['POST'])
 def reset_quota(token_id):
     """重置 Token 配额"""

@@ -275,6 +275,10 @@
   "common.loadMore": "Load more",
   "common.loading": "Loading...",
   "common.loadingText": "Loading...",
+  "common.changePassword": "Change Password",
+  "common.oldPassword": "Current Password",
+  "common.newPassword": "New Password",
+  "common.confirmPassword": "Confirm Password",
   "common.logout": "Logout",
   "common.mainContent": "Main Content",
   "common.mediumComplexity": "Medium Complexity",
@@ -1219,5 +1223,6 @@
   "vendor.qwen": "Qwen",
   "vendor.zhipu": "Zhipu",
   "modelgrades.enhanced": "Enhanced",
-  "modelgrades.flagship": "Flagship"
+  "modelgrades.flagship": "Flagship",
+  "apitest.noProviderHint": "No available provider for this model. Possible causes: 1) Provider status is auth_failed/unhealthy (auto-retry with backoff); 2) Model not configured; 3) All Providers in cooldown. Try reloading wr-proxy from Settings."
 }

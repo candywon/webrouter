@@ -275,6 +275,10 @@
   "common.loadMore": "加载更多",
   "common.loading": "加载中...",
   "common.loadingText": "加载中...",
+  "common.changePassword": "修改密码",
+  "common.oldPassword": "当前密码",
+  "common.newPassword": "新密码",
+  "common.confirmPassword": "确认密码",
   "common.logout": "退出登录",
   "common.mainContent": "主内容",
   "common.mediumComplexity": "中等复杂度",
@@ -1219,5 +1223,6 @@
   "vendor.qwen": "通义千问",
   "vendor.zhipu": "智谱",
   "modelgrades.enhanced": "增强型",
-  "modelgrades.flagship": "旗舰型"
+  "modelgrades.flagship": "旗舰型",
+  "apitest.noProviderHint": "没有可用的 Provider 处理该模型。可能原因：1) Provider 状态异常（系统会自动退避重试）；2) 模型未配置；3) 所有 Provider 冷却中。可在系统设置中重载。"
 }

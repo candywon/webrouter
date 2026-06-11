@@ -48,6 +48,10 @@ type Provider struct {
 	ConsecFails   int        `json:"-"` // 连续失败次数
 	CooldownUntil *time.Time `json:"-"` // 冷却截止时间（长时限流/额度用完时设置）
 
+	// auth_failed 退避状态（运行时，reload 时保留）
+	AuthFailUntil *time.Time `json:"-"` // auth_failed 退避截止时间
+	AuthFailCount int        `json:"-"` // auth_failed 连续失败次数
+
 	// 按模型的冷却（单模型额度用完/限流时使用，不影响其他模型）
 	modelCooldown   map[string]time.Time `json:"-"`
 	modelCooldownMu sync.RWMutex         `json:"-"`
@@ -114,13 +118,44 @@ func (p *Provider) ModelCooldownSnapshot() map[string]time.Time {
 	return out
 }
 
+// SetAuthFailBackoff 设置 auth_failed 退避（指数退避）
+func (p *Provider) SetAuthFailBackoff() {
+	p.AuthFailCount++
+	base := cfg.AuthFailBackoffBase
+	maxDur := cfg.AuthFailBackoffMax
+	mult := cfg.AuthFailBackoffMultiplier
+
+	dur := base
+	for i := 1; i < p.AuthFailCount; i++ {
+		dur = time.Duration(float64(dur) * mult)
+		if dur > maxDur {
+			dur = maxDur
+			break
+		}
+	}
+	until := time.Now().Add(dur)
+	p.AuthFailUntil = &until
+}
+
+// ClearAuthFail 清除 auth_failed 退避状态（请求成功时调用）
+func (p *Provider) ClearAuthFail() {
+	p.AuthFailCount = 0
+	p.AuthFailUntil = nil
+}
+
 // IsAvailable 判断 Provider 是否可参与调度
 func (p *Provider) IsAvailable(model string) bool {
 	if !p.Enabled || !p.ProxyEnabled {
 		return false
 	}
-	if p.Status == "dead" || p.Status == "disabled" || p.Status == "auth_failed" {
+	if p.Status == "dead" || p.Status == "disabled" {
 		return false
+	}
+	// auth_failed: 退避期外允许试探性请求，退避期内跳过
+	if p.Status == "auth_failed" {
+		if p.AuthFailUntil != nil && time.Now().Before(*p.AuthFailUntil) {
+			return false
+		}
 	}
 	// 冷却期内跳过（长时限流/额度用完，等也没用）
 	if p.CooldownUntil != nil && time.Now().Before(*p.CooldownUntil) {

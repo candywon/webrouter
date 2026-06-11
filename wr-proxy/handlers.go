@@ -316,6 +316,14 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 				LogInfo("Proxy: %s/%s set model cooldown 30min (quota exhausted)", provider.Name, model)
 				continue
 			}
+			// auth_failed 退避：上游返回 401/403 → 设置指数退避
+			if result.StatusCode == 401 || result.StatusCode == 403 {
+				provider.SetAuthFailBackoff()
+				provider.Status = "auth_failed"
+				UpdateProviderStatus(provider.ID, "auth_failed", result.LatencyMs, result.Error)
+				LogInfo("Proxy: %s auth_failed, backoff count=%d", provider.Name, provider.AuthFailCount)
+				continue
+			}
 			if result.UpstreamError.Type == UpstreamErrRateLimited {
 				waitSec := ExtractRetryAfter(result.UpstreamError.Message)
 				if waitSec > 60 {

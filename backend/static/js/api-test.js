@@ -107,7 +107,12 @@ const ApiTestPage = {
             document.getElementById('at-raw-response').textContent = JSON.stringify(result, null, 2);
         } catch (e) {
             const elapsed = Date.now() - startTime;
-            document.getElementById('at-response-content').textContent = `${I18n.t('apitest.requestFailed')} ${e.message}`;
+            let msg = e.message || '';
+            // 友好化 "No available provider" 错误
+            if (msg.toLowerCase().includes('no available provider')) {
+                msg = I18n.t('apitest.noProviderHint') || msg;
+            }
+            document.getElementById('at-response-content').textContent = `${I18n.t('apitest.requestFailed')} ${msg}`;
             document.getElementById('at-response-content').style.color = 'var(--danger)';
             document.getElementById('at-response-time').textContent = `${elapsed}ms`;
         } finally {

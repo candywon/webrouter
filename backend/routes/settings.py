@@ -452,6 +452,20 @@ def test_proxy():
     }
 
     try:
+        # Demo 模式：wr-proxy 没有真实上游 key，直接返回模拟响应
+        if current_app.config.get('DEMO_MODE'):
+            return jsonify({
+                'id': 'demo-chatcmpl-mock',
+                'object': 'chat.completion',
+                'model': body.get('model', 'auto'),
+                'choices': [{
+                    'index': 0,
+                    'message': {'role': 'assistant', 'content': get_message('demo_test_response', request)},
+                    'finish_reason': 'stop',
+                }],
+                'usage': {'prompt_tokens': 5, 'completion_tokens': 8, 'total_tokens': 13},
+            })
+
         resp = _requests.post(
             f"{proxy_url}/v1/chat/completions",
             headers={
@@ -470,10 +484,51 @@ def test_proxy():
         if not resp.ok and isinstance(result, dict):
             err = result.get('error', {})
             if isinstance(err, dict):
+                err_msg = err.get('message', resp.text)
+            elif isinstance(err, str):
+                err_msg = err
+            else:
+                err_msg = result.get('message', get_message('request_failed', request))
+
+            # 503 "No available provider" → 自动 reload wr-proxy 后重试一次
+            if resp.status_code == 503 and 'no available provider' in err_msg.lower():
+                try:
+                    import time
+                    _requests.post(f"{proxy_url}/admin/reload", timeout=10)
+                    time.sleep(1)
+                    resp2 = _requests.post(
+                        f"{proxy_url}/v1/chat/completions",
+                        headers={
+                            'Authorization': f'Bearer {api_key}',
+                            'Content-Type': 'application/json',
+                        },
+                        json=body,
+                        timeout=60,
+                    )
+                    try:
+                        result2 = resp2.json()
+                    except ValueError:
+                        result2 = {'raw_response': resp2.text}
+                    if resp2.ok:
+                        return jsonify(result2), resp2.status_code
+                    # 重试仍失败，返回友好错误
+                    err2 = result2.get('error', {})
+                    if isinstance(err2, dict):
+                        err_msg2 = err2.get('message', resp2.text)
+                    elif isinstance(err2, str):
+                        err_msg2 = err2
+                    else:
+                        err_msg2 = str(result2)
+                    return jsonify({'error': get_message('no_available_provider', request).format(model=body.get('model', '')), 'detail': err_msg2}), resp2.status_code
+                except Exception:
+                    pass
+                return jsonify({'error': get_message('no_available_provider', request).format(model=body.get('model', '')), 'detail': err_msg}), resp.status_code
+
+            if isinstance(err, dict):
                 return jsonify({'error': err.get('message', resp.text)}), resp.status_code
             elif isinstance(err, str):
                 return jsonify({'error': err}), resp.status_code
-            return jsonify({'error': result.get('message', get_message('request_failed', request))}), resp.status_code
+            return jsonify({'error': err_msg}), resp.status_code
         return jsonify(result), resp.status_code
     except _requests.ConnectionError:
         return jsonify({'error': get_message('proxy_unreachable', request).format(proxy_url=proxy_url)}), 502

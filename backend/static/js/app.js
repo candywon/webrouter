@@ -26,16 +26,5 @@
   Router.register('/knowledge', KnowledgePage);
   Router.register('/settings', settingsPage);
 
-  const path = window.location.hash.slice(1) || '/';
-  if (path !== '/login') {
-    try {
-      const res = await fetch('/api/auth/status', { credentials: 'same-origin' });
-      const data = await res.json();
-      if (!data.authenticated) window.location.hash = '/login';
-    } catch (_) {
-      window.location.hash = '/login';
-    }
-  }
-
   Router.init();
 })();

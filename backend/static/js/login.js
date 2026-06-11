@@ -11,6 +11,7 @@ const LoginPage = {
         Router.navigate('/');
         return;
       }
+      this.demoMode = data.demo_mode;
     } catch (_) { /* ignore */ }
     this.render();
   },
@@ -18,6 +19,8 @@ const LoginPage = {
   render() {
     const el = document.getElementById('login-page-content');
     if (!el) return;
+    const defaultUser = this.demoMode ? 'demo' : 'admin';
+    const defaultPwd = this.demoMode ? 'demo123456' : '';
     el.innerHTML = `
       <div style="min-height:70vh;display:flex;align-items:center;justify-content:center;">
         <div class="card" style="width:360px;padding:28px;">
@@ -26,11 +29,11 @@ const LoginPage = {
           <form id="login-form">
             <div class="form-group">
               <label>${I18n.t('login.username')}</label>
-              <input type="text" id="login-username" autocomplete="username" value="admin" required>
+              <input type="text" id="login-username" autocomplete="username" value="${defaultUser}" required>
             </div>
             <div class="form-group">
               <label>${I18n.t('login.password')}</label>
-              <input type="password" id="login-password" autocomplete="current-password" required>
+              <input type="password" id="login-password" autocomplete="current-password" value="${defaultPwd}" required>
             </div>
             <div class="form-group form-row">
               <label class="switch-label">
@@ -65,6 +68,7 @@ const LoginPage = {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || I18n.t("login.failed"));
+      Router._authenticated = true;
       Router.navigate('/');
     } catch (e) {
       errorEl.textContent = e.message || I18n.t("login.failed");
@@ -77,5 +81,6 @@ async function logoutAdmin() {
   try {
     await fetch('/api/auth/logout', { method: 'POST' });
   } catch (_) { /* ignore */ }
+  Router._authenticated = false;
   Router.navigate('/login');
 }
