@@ -119,29 +119,11 @@ func (hc *HealthChecker) checkDirect(p *Provider) (string, int, string) {
 	if len(models) > 0 {
 		body = injectModel(body, models[0])
 	}
-	// 去重：如果 base_url 路径已包含 endpoint 的前缀，则去掉重复部分
-	// 例：base_url=.../compatible-mode/v1 + endpoint=/compatible-mode/v1/chat/completions
-	//   → 实际 endpoint=/chat/completions
-	if strings.HasSuffix(strings.TrimRight(p.BaseURL, "/"), endpoint) {
-		endpoint = "/"
-	} else {
-		parsed := parseURL(p.BaseURL)
-		basePath := strings.Trim(parsed.Path, "/")
-		if basePath != "" {
-			fullPrefix := "/" + basePath + "/"
-			if strings.HasPrefix(endpoint, fullPrefix) {
-				endpoint = strings.TrimPrefix(endpoint, fullPrefix)
-				if !strings.HasPrefix(endpoint, "/") {
-					endpoint = "/" + endpoint
-				}
-			} else if strings.HasSuffix(basePath, "/v1") && strings.HasPrefix(endpoint, "/v1/") {
-				endpoint = strings.TrimPrefix(endpoint, "/v1")
-				if !strings.HasPrefix(endpoint, "/") {
-					endpoint = "/" + endpoint
-				}
-			}
-		}
-	}
+	// 去重：智能处理 BaseURL 与 endpoint 之间的路径重复
+	// 使用 buildUpstreamURL 的逻辑统一处理 /v1, /v3 等版本前缀
+	upstreamURL := buildUpstreamURL(p.BaseURL, endpoint)
+	parsed := parseURL(upstreamURL)
+	endpoint = parsed.Path
 	return hc.sendTestRequest(p, endpoint, body)
 }
 

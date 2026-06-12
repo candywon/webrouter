@@ -19,6 +19,44 @@ import (
 )
 
 // ProxyService 代理服务
+// buildUpstreamURL 智能拼接上游 URL，去除 BaseURL 和 endpoint 之间的路径重复
+//
+// 规则：如果 BaseURL 路径以 /vN 结尾（含版本前缀），则去掉 endpoint 中的版本前缀。
+//
+//   base=.../compatible-mode/v1  + /v1/chat/completions → .../v1/chat/completions
+//   base=.../api/v3              + /v1/chat/completions → .../api/v3/chat/completions
+//   base=.../api/coding/v3       + /v1/chat/completions → .../api/coding/v3/chat/completions
+//   base=.../v1                  + /v1/chat/completions → .../v1/chat/completions
+//   base=.../api.openai.com      + /v1/chat/completions → .../api.openai.com/v1/chat/completions
+func buildUpstreamURL(baseURL, endpoint string) string {
+	base := strings.TrimRight(baseURL, "/")
+	if idx := strings.LastIndex(base, "/"); idx >= 0 {
+		suffix := base[idx+1:]
+		// 检查 BaseURL 是否以 /vN 结尾
+		if isVersionPrefix(suffix) && isVersionPrefix(endpoint[1:strings.Index(endpoint[1:], "/")+1]) {
+			// 去掉 endpoint 的 /vN 部分，只保留后面的路径
+			slashIdx := strings.Index(endpoint[1:], "/")
+			if slashIdx >= 0 {
+				return base + endpoint[1+slashIdx:]
+			}
+		}
+	}
+	return base + endpoint
+}
+
+// isVersionPrefix 判断字符串是否为版本前缀（如 "v1", "v3", "v2024"）
+func isVersionPrefix(s string) bool {
+	if len(s) < 2 || s[0] != 'v' {
+		return false
+	}
+	for _, c := range s[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 type ProxyService struct {
 	client *http.Client
 }
@@ -64,10 +102,7 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 
 	// 构造上游 URL — 智能处理 /v1 重复问题
 	// 如果 BaseURL 已包含 /v1（如 DashScope compatible-mode/v1），则 endpoint 去掉 /v1 前缀
-	upstreamURL := provider.BaseURL + endpoint
-	if strings.HasSuffix(provider.BaseURL, "/v1") && strings.HasPrefix(endpoint, "/v1/") {
-		upstreamURL = provider.BaseURL + endpoint[3:] // 去掉 endpoint 的 /v1 前缀
-	}
+	upstreamURL := buildUpstreamURL(provider.BaseURL, endpoint)
 
 	// 构造上游请求
 	upstreamReq, err := http.NewRequest(req.Method, upstreamURL, bytes.NewReader(body))
@@ -204,10 +239,7 @@ func (ps *ProxyService) ForwardBinary(provider *Provider, endpoint string,
 	start := time.Now()
 
 	// 构造上游 URL
-	upstreamURL := provider.BaseURL + endpoint
-	if strings.HasSuffix(provider.BaseURL, "/v1") && strings.HasPrefix(endpoint, "/v1/") {
-		upstreamURL = provider.BaseURL + endpoint[3:]
-	}
+	upstreamURL := buildUpstreamURL(provider.BaseURL, endpoint)
 
 	upstreamReq, err := http.NewRequest(req.Method, upstreamURL, bytes.NewReader(body))
 	if err != nil {
