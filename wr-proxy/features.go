@@ -7,11 +7,15 @@ package main
 // 功能由 wr-proxy 在请求转发到上游之前自动处理请求体实现
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -96,17 +100,24 @@ func ApplyFeatureTransforms(body []byte, model string, token *Token) ([]byte, st
 }
 
 // --- 动态内容后置 ---
+//
+// 目的：让上游 prompt cache 命中率更高。cache 看的是请求前缀的字节稳定性，
+// 因此 messages[] 的相对顺序绝对不能动；只能在单条消息的 content 内部把
+// 「易变片段」下沉到尾部，让前缀更稳定。
+//
+// 改动范围：仅 system 消息 + 最后一条 user 消息（cache 命中收益最大的两个位置）。
+// 多模态 content（content 是 array）整条跳过——重排数组里的 part 会破坏图文配对。
 
-// 动态内容正则模式
+// 动态内容正则模式（命中任一即视为动态片段）
 var dynamicPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`https?://[^\s\)]+`),           // URL
+	regexp.MustCompile(`https?://[^\s)]+`),            // URL
 	regexp.MustCompile(`\d{4}[-/]\d{1,2}[-/]\d{1,2}`), // 日期
 	regexp.MustCompile(`\d{1,2}:\d{2}(:\d{2})?`),      // 时间
 	regexp.MustCompile(`\b[a-f0-9]{32,}\b`),           // 哈希/UUID
 	regexp.MustCompile(`\d{11,}`),                     // 长数字
 }
 
-// hasDynamicContent 判断消息是否包含动态内容
+// hasDynamicContent 判断文本是否包含动态片段
 func hasDynamicContent(text string) bool {
 	for _, pat := range dynamicPatterns {
 		if pat.MatchString(text) {
@@ -116,60 +127,20 @@ func hasDynamicContent(text string) bool {
 	return false
 }
 
-// reorderDynamicContentLast 将包含动态内容的消息移到同 role 组的末尾
+// reorderDynamicContentLast 在不破坏 messages 顺序的前提下，把可重排消息
+// 的 content 内部按段落分成 静态 || 动态 两部分，动态段落整体下沉到末尾。
 func reorderDynamicContentLast(messages []interface{}) []interface{} {
-	// 按 role 分组，把含动态内容的 message 移到该 role 组内最后
-	type group struct {
-		role     string
-		messages []interface{}
-	}
-	var groups []group
-
-	for _, msg := range messages {
+	// 找到最后一条 user 消息的下标，仅它和所有 system 消息参与重排
+	lastUserIdx := -1
+	for i, msg := range messages {
 		m, ok := msg.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		role, _ := m["role"].(string)
-		content, _ := m["content"].(string)
-
-		// 找到或创建对应 role 的组
-		idx := -1
-		for i, g := range groups {
-			if g.role == role {
-				idx = i
-				break
-			}
-		}
-		if idx == -1 {
-			groups = append(groups, group{role: role})
-			idx = len(groups) - 1
-		}
-
-		if hasDynamicContent(content) {
-			// 动态内容：追加到该 role 组末尾
-			groups[idx].messages = append(groups[idx].messages, msg)
-		} else {
-			// 静态内容：插入到该 role 组开头
-			groups[idx].messages = append([]interface{}{msg}, groups[idx].messages...)
+		if role, _ := m["role"].(string); role == "user" {
+			lastUserIdx = i
 		}
 	}
-
-	// 展平
-	result := make([]interface{}, 0, len(messages))
-	for _, g := range groups {
-		result = append(result, g.messages...)
-	}
-	return result
-}
-
-// --- Token 压缩（简化版） ---
-
-// compressSystemPrompts 对超长的 system prompt 进行简化标记
-// 真正的压缩需要调用一次轻量模型做摘要，这里先做结构优化：
-// 将长 system prompt 中的 instruction 部分提取为简短标记
-func compressSystemPrompts(messages []interface{}) []interface{} {
-	const systemPromptThreshold = 2000 // 超过 2000 字符的 system prompt 触发处理
 
 	for i, msg := range messages {
 		m, ok := msg.(map[string]interface{})
@@ -177,46 +148,138 @@ func compressSystemPrompts(messages []interface{}) []interface{} {
 			continue
 		}
 		role, _ := m["role"].(string)
-		if role != "system" {
+		if role != "system" && i != lastUserIdx {
 			continue
 		}
-		content, _ := m["content"].(string)
-		if len(content) < systemPromptThreshold {
+		content, isString := m["content"].(string)
+		if !isString || content == "" {
+			// 多模态 content（array）或空内容：跳过
 			continue
 		}
-
-		// 简化策略：保留前 500 字符和后 200 字符，中间用标记替换
-		// 这是对上游 prompt cache 的优化，减少重复发送的 token
-		prefix := content[:min(500, len(content))]
-		suffix := ""
-		if len(content) > 700 {
-			suffix = content[len(content)-200:]
+		reordered := reorderContentParagraphs(content)
+		if reordered == content {
+			continue
 		}
+		m["content"] = reordered
+		messages[i] = m
+	}
+	return messages
+}
 
-		compressed := fmt.Sprintf("%s\n\n[... %d 字符省略 ...]\n\n%s", prefix, len(content)-700, suffix)
-		m["content"] = compressed
-		m["__compressed"] = true
-		m["__original_length"] = len(content)
+// reorderContentParagraphs 按空行切段，含动态片段的段整体下沉到末尾，
+// 静态段和动态段各自的相对顺序保留。
+func reorderContentParagraphs(content string) string {
+	// 用空行（\n\n）切段，单换行视为段内换行
+	paragraphs := strings.Split(content, "\n\n")
+	if len(paragraphs) < 2 {
+		return content
+	}
+	var staticParts, dynamicParts []string
+	hasDynamic := false
+	for _, p := range paragraphs {
+		if hasDynamicContent(p) {
+			dynamicParts = append(dynamicParts, p)
+			hasDynamic = true
+		} else {
+			staticParts = append(staticParts, p)
+		}
+	}
+	if !hasDynamic || len(staticParts) == 0 {
+		// 全静态或全动态：重排无收益
+		return content
+	}
+	return strings.Join(append(staticParts, dynamicParts...), "\n\n")
+}
+
+// --- Token 压缩（无损规范化） ---
+//
+// 名为压缩，实为「确定性、零内容损失的规范化」：
+//   - 折叠连续空白：多个空格/制表符 → 单空格；3+ 个换行 → 2 个换行
+//   - 去除每行尾随空白
+//   - 折叠重复 markdown 分隔线（连续多条 `---` / `***` → 1 条）
+//
+// 不做语义改写，不调上游 LLM；不再注入 `__compressed` 等非标字段
+// （严格上游会因未知字段返回 400）。
+
+var (
+	tokenSpaceRun  = regexp.MustCompile(`[ \t]+`)
+	tokenManyLF    = regexp.MustCompile(`\n{3,}`)
+	tokenLineTrail = regexp.MustCompile(`[ \t]+\n`)
+	tokenHRRun     = regexp.MustCompile(`(?m)^([-*]{3,})[ \t]*\n(?:[ \t]*[-*]{3,}[ \t]*\n){1,}`)
+)
+
+// normalizeWhitespace 对长 system content 做无损规范化，长度短于阈值则原样返回
+func normalizeWhitespace(content string) string {
+	out := tokenSpaceRun.ReplaceAllString(content, " ")
+	out = tokenLineTrail.ReplaceAllString(out, "\n")
+	out = tokenManyLF.ReplaceAllString(out, "\n\n")
+	out = tokenHRRun.ReplaceAllString(out, "$1\n")
+	return strings.TrimRight(out, " \n\t")
+}
+
+// compressSystemPrompts 仅对超长 system 消息触发规范化，短 prompt 不折腾
+func compressSystemPrompts(messages []interface{}) []interface{} {
+	const systemPromptThreshold = 4000
+
+	for i, msg := range messages {
+		m, ok := msg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if role, _ := m["role"].(string); role != "system" {
+			continue
+		}
+		content, isString := m["content"].(string)
+		if !isString || len(content) < systemPromptThreshold {
+			continue
+		}
+		normalized := normalizeWhitespace(content)
+		if normalized == content {
+			continue
+		}
+		m["content"] = normalized
 		messages[i] = m
 	}
 	return messages
 }
 
 // --- 会话压缩 ---
+//
+// 目的：长会话发到上游会撞 token 上限 / 拖慢首字。压缩思路是：把早期对话用 LLM
+// 摘要成一条 system 消息，仅保留最近 N 轮原文。
+//
+// 关键约束：
+//  1. LLM 调用耗时秒级，不能阻塞用户请求 → 走「异步预热缓存」：第一次命中阈值时
+//     直接放行原 messages，并在后台调 LLM 算摘要、按内容哈希入内存缓存；下一次
+//     同样的历史前缀进来才用缓存里的摘要替换。冷启动一次，热路径零延迟。
+//  2. 缓存键用早期消息的内容哈希 —— 多轮对话只在尾部增长，前缀稳定，命中率高。
+//  3. 缓存 miss 时返回原 messages 而不是降级为字符串拼接 —— 上游能吃下完整对话
+//     总比拿到一个糟糕摘要好。
+//  4. 不再注入 __session_summary / __compressed_count 字段（严格上游会因未知字段 400）。
 
-// compressSessionHistory 当对话轮数过多时，压缩早期消息
+const (
+	sessionCompressThreshold = 10 // 超过这个轮数（含 system）才触发压缩判定
+	sessionCompressKeepRecent = 5 // 保留最近 N 条非 system 消息原文
+	sessionSummaryMaxEntries  = 256 // sync.Map 简易容量上限，超过则不再写入新条目
+)
+
+// 会话摘要缓存（key = sha256(canonical-json of toCompress)）
+var (
+	sessionSummaryCache    sync.Map // map[string]string
+	sessionSummaryInflight sync.Map // map[string]struct{}，去重并发预热
+	sessionSummaryEntries  int64    // atomic 计数，配合 sessionSummaryMaxEntries 控制写入
+)
+
+// compressSessionHistory 命中阈值时尝试用缓存的 LLM 摘要替换早期消息。
+// 缓存未命中：原 messages 原样返回 + 后台预热一次。
 func compressSessionHistory(messages []interface{}) []interface{} {
-	const compressionThreshold = 10 // 超过 10 轮对话触发压缩
-	const keepRecent = 5            // 保留最近 5 轮不压缩
-
-	if len(messages) <= compressionThreshold {
+	if len(messages) <= sessionCompressThreshold {
 		return messages
 	}
 
-	// 找到需要压缩的部分（除了最近 keepRecent 条之外的非 system 消息）
+	// 拆出 system 消息和可压缩消息（保持各自相对顺序）
 	systemMsgs := make([]interface{}, 0)
 	compressable := make([]interface{}, 0)
-
 	for _, msg := range messages {
 		m, ok := msg.(map[string]interface{})
 		if !ok {
@@ -229,39 +292,78 @@ func compressSessionHistory(messages []interface{}) []interface{} {
 			compressable = append(compressable, msg)
 		}
 	}
-
-	if len(compressable) <= keepRecent {
+	if len(compressable) <= sessionCompressKeepRecent {
 		return messages
 	}
 
-	// 分离要压缩的和要保留的
-	toCompress := compressable[:len(compressable)-keepRecent]
-	toKeep := compressable[len(compressable)-keepRecent:]
+	toCompress := compressable[:len(compressable)-sessionCompressKeepRecent]
+	toKeep := compressable[len(compressable)-sessionCompressKeepRecent:]
 
-	// 生成摘要
-	summary := generateSessionSummary(toCompress)
-	summaryMsg := map[string]interface{}{
-		"role":               "system",
-		"content":            fmt.Sprintf("[会话摘要 - 压缩了 %d 条历史消息]\n%s", len(toCompress), summary),
-		"__session_summary":  true,
-		"__compressed_count": len(toCompress),
+	key := hashMessages(toCompress)
+
+	if cached, ok := sessionSummaryCache.Load(key); ok {
+		summary, _ := cached.(string)
+		if summary == "" {
+			return messages
+		}
+		summaryMsg := map[string]interface{}{
+			"role":    "system",
+			"content": "[历史摘要] " + summary,
+		}
+		result := make([]interface{}, 0, len(systemMsgs)+1+len(toKeep))
+		result = append(result, systemMsgs...)
+		result = append(result, summaryMsg)
+		result = append(result, toKeep...)
+		return result
 	}
 
-	// 重组：system messages + 摘要 + 最近消息
-	result := make([]interface{}, 0, len(systemMsgs)+1+len(toKeep))
-	result = append(result, systemMsgs...)
-	result = append(result, summaryMsg)
-	result = append(result, toKeep...)
-
-	return result
+	// 缓存 miss：异步预热（同一 key 已有 inflight 不重复触发）
+	if _, loaded := sessionSummaryInflight.LoadOrStore(key, struct{}{}); !loaded {
+		go prewarmSessionSummary(key, toCompress)
+	}
+	return messages
 }
 
-// generateSessionSummary 生成会话摘要（简化版：提取关键信息）
-func generateSessionSummary(messages []interface{}) string {
-	var builder strings.Builder
-	topics := make(map[string]int)
-	totalLen := 0
+// hashMessages 对 toCompress 计算稳定哈希，作为摘要缓存键
+func hashMessages(messages []interface{}) string {
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		// json.Marshal 对 map[string]interface{} 实际不会失败；兜底回退到长度 + 首尾内容
+		return fmt.Sprintf("fallback:%d", len(messages))
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
 
+// prewarmSessionSummary 后台调 LLM 生成摘要并写入缓存
+func prewarmSessionSummary(key string, messages []interface{}) {
+	defer sessionSummaryInflight.Delete(key)
+
+	if atomic.LoadInt64(&sessionSummaryEntries) >= sessionSummaryMaxEntries {
+		LogWarn("[session-compress] cache full, skip prewarm key=%s", key[:12])
+		return
+	}
+
+	prompt := buildSessionSummaryPrompt(messages)
+	summary, err := callExtractionLLM(prompt)
+	if err != nil {
+		LogWarn("[session-compress] prewarm failed key=%s: %v", key[:12], err)
+		return
+	}
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+	if _, loaded := sessionSummaryCache.LoadOrStore(key, summary); !loaded {
+		atomic.AddInt64(&sessionSummaryEntries, 1)
+		LogInfo("[session-compress] cached summary key=%s len=%d msgs=%d", key[:12], len(summary), len(messages))
+	}
+}
+
+// buildSessionSummaryPrompt 把对话历史拼成发给摘要 LLM 的 prompt
+func buildSessionSummaryPrompt(messages []interface{}) string {
+	var b strings.Builder
+	b.WriteString("请用不超过 200 字的中文，提炼以下多轮对话的核心信息（保留用户的关键问题、已确认的事实/决定、未解决的问题），用于替代原始上下文。直接输出摘要正文，不要任何前后缀：\n\n")
 	for _, msg := range messages {
 		m, ok := msg.(map[string]interface{})
 		if !ok {
@@ -269,28 +371,21 @@ func generateSessionSummary(messages []interface{}) string {
 		}
 		role, _ := m["role"].(string)
 		content, _ := m["content"].(string)
-		totalLen += len(content)
-
-		// 提取前 50 个字符作为话题关键词
-		if role == "user" && len(content) > 0 {
-			key := strings.TrimSpace(content[:min(50, len(content))])
-			topics[key]++
+		if content == "" || role == "" {
+			continue
 		}
+		b.WriteString(role)
+		b.WriteString(": ")
+		// 单条裁掉过长内容，避免 prompt 爆炸
+		if len(content) > 2000 {
+			b.WriteString(content[:2000])
+			b.WriteString("……")
+		} else {
+			b.WriteString(content)
+		}
+		b.WriteString("\n\n")
 	}
-
-	builder.WriteString(fmt.Sprintf("共 %d 轮对话，约 %d 字符。主要话题：", len(messages), totalLen))
-	i := 0
-	for topic := range topics {
-		if i >= 5 {
-			break
-		}
-		if i > 0 {
-			builder.WriteString("、")
-		}
-		builder.WriteString(topic)
-		i++
-	}
-	return builder.String()
+	return b.String()
 }
 
 // ReloadFeatures 热刷新特性开关（由 reload 调用）
