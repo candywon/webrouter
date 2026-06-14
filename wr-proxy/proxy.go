@@ -136,7 +136,7 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 		if isStream {
 			timeout = cfg.StreamTimeout
 		} else {
-			timeout = cfg.DefaultTimeout
+			timeout = GetDefaultTimeout()
 		}
 	}
 	// 流式请求至少使用 StreamTimeout
@@ -419,7 +419,7 @@ func (ps *ProxyService) ForwardAnthropic(provider *Provider,
 		if isStream {
 			timeout = cfg.StreamTimeout
 		} else {
-			timeout = cfg.DefaultTimeout
+			timeout = GetDefaultTimeout()
 		}
 	}
 	if isStream && timeout < cfg.StreamTimeout {
@@ -513,12 +513,13 @@ func (ps *ProxyService) ForwardBinary(provider *Provider, endpoint string,
 
 	// 设置超时
 	timeout := time.Duration(provider.TimeoutSeconds) * time.Second
+	defaultTimeout := GetDefaultTimeout()
 	if timeout <= 0 {
-		timeout = cfg.DefaultTimeout
+		timeout = defaultTimeout
 	}
 	// 二进制请求可能需要更长超时（大文件上传）
-	if timeout < cfg.DefaultTimeout {
-		timeout = cfg.DefaultTimeout
+	if timeout < defaultTimeout {
+		timeout = defaultTimeout
 	}
 	ps.client.Timeout = timeout
 

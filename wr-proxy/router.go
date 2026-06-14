@@ -26,6 +26,16 @@ func (r *Router) Strategy() string {
 	return r.strategy
 }
 
+// SetStrategy 热切换调度策略（reload 时调用）
+func (r *Router) SetStrategy(s string) {
+	if s == "" {
+		return
+	}
+	r.mu.Lock()
+	r.strategy = s
+	r.mu.Unlock()
+}
+
 var router = &Router{
 	strategy: "smart",
 }
@@ -179,7 +189,7 @@ func (r *Router) SelectProviderWithFormat(model string, token *Token, excludeIDs
 
 	// 4. 按策略选
 	var selected *Provider
-	switch r.strategy {
+	switch r.Strategy() {
 	case "least_latency":
 		selected = selectFromGroups(selectLeastLatency, primary, hot, cold)
 	case "cost_first":

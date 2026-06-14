@@ -250,7 +250,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return router.SelectProvider(model, token, excl, sessionID)
 	}
 
-	for attempt := 0; attempt <= cfg.MaxFailover; attempt++ {
+	for attempt := 0; attempt <= GetMaxFailover(); attempt++ {
 		// 选 Provider
 		var provider *Provider
 		if attempt == 0 && costOptimalProvider != nil && !intInSlice(costOptimalProvider.ID, excludeIDs) {
@@ -380,7 +380,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 			// 同 Provider 重试（仅限 rate_limited/timeout 等可恢复错误）
 			if ShouldRetrySameProvider(result.UpstreamError) {
-				for retry := 0; retry < provider.MaxRetries && retry < cfg.MaxRetryCount; retry++ {
+				for retry := 0; retry < provider.MaxRetries && retry < GetMaxRetryCount(); retry++ {
 					// 限流场景：短暂等待后重试
 					if result.UpstreamError.Type == UpstreamErrRateLimited {
 						time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond) // 0.5s, 1s 递增
@@ -583,8 +583,10 @@ func handleReload(w http.ResponseWriter, r *http.Request) {
 	}
 	// 同时刷新厂商测试配置
 	ReloadVendorTestConfigs()
-	// 同时刷新优化特性开关
+	// 同时刷新优化特性开关（含六维度复杂度配置）
 	ReloadFeatures()
+	// 同时刷新动态代理设置（routing_strategy / default_timeout / max_failover / max_retry_count）
+	LoadProxySettings()
 	// 审计：配置全量重载（合规要求）
 	LogConfigChange("reload_all", 0, map[string]interface{}{
 		"provider_count": len(router.GetProviders()),
@@ -1000,7 +1002,7 @@ func handleBinaryProxy(w http.ResponseWriter, r *http.Request, endpoint string) 
 	var lastResult *ProxyResult
 	var selectedProvider *Provider
 
-	for attempt := 0; attempt <= cfg.MaxFailover; attempt++ {
+	for attempt := 0; attempt <= GetMaxFailover(); attempt++ {
 		provider := router.SelectProvider(model, token, excludeIDs, sessionID)
 		if provider == nil {
 			if lastResult != nil {

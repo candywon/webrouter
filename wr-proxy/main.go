@@ -78,6 +78,10 @@ func main() {
 	// 3.11 加载六维度复杂度配置
 	LoadComplexityConfig()
 
+	// 3.12 加载动态代理设置（routing_strategy / default_timeout / max_failover / max_retry_count）
+	// 这些字段在 admin 后台可改，reload 时会再次刷新。
+	InitProxySettings()
+
 	// 4. 初始化代理服务
 	proxySvc = NewProxyService()
 
