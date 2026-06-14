@@ -1289,7 +1289,30 @@ class SettingsPage {
         }
     }
 
-    showRestoreDialog() {
+    async showRestoreDialog() {
+        let backups = [];
+        try {
+            const result = await API.get('/settings/backups');
+            backups = Array.isArray(result.backups) ? result.backups : [];
+        } catch (e) {
+            showToast(I18n.t('settings.backupListFailed') + (e.message || ''), 'error');
+            return;
+        }
+
+        const fmtSize = (n) => {
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+            return (n / 1024 / 1024).toFixed(1) + ' MB';
+        };
+        const fmtTime = (ts) => new Date(ts * 1000).toLocaleString();
+
+        const optsHtml = backups.length === 0
+            ? `<option value="">${this.escHtml(I18n.t('settings.noBackups'))}</option>`
+            : backups.map(b => {
+                const label = `${b.name}  ·  ${fmtSize(b.size)}  ·  ${fmtTime(b.mtime)}`;
+                return `<option value="${this.escHtml(b.path)}">${this.escHtml(label)}</option>`;
+            }).join('');
+
         const modalHtml = `
             <div id="restore-modal" class="modal" style="display:flex">
                 <div class="modal-content">
@@ -1299,11 +1322,12 @@ class SettingsPage {
                     </div>
                     <div class="modal-body">
                         <div class="form-group">
-                            <label>${I18n.t('settings.backupPath')}</label>
-                            <input type="text" id="restore-path" class="form-input" placeholder="${I18n.t('settings.backupPathPlaceholder')}">
+                            <label>${I18n.t('settings.selectBackup')}</label>
+                            <select id="restore-path" class="form-input" ${backups.length === 0 ? 'disabled' : ''}>${optsHtml}</select>
                         </div>
+                        <p style="color:var(--warning, #d97706);font-size:12px;margin:0 0 12px 0;">⚠️ ${I18n.t('settings.restoreWarning')}</p>
                         <div class="form-actions">
-                            <button class="btn-primary" onclick="settingsPage.restore()">${I18n.t('settings.restore')}</button>
+                            <button class="btn-primary" onclick="settingsPage.restore()" ${backups.length === 0 ? 'disabled' : ''}>${I18n.t('settings.restore')}</button>
                             <button class="btn-secondary" onclick="settingsPage.closeRestoreModal()">${I18n.t('common.cancel')}</button>
                         </div>
                     </div>
@@ -1316,14 +1340,18 @@ class SettingsPage {
     }
 
     async restore() {
-        const path = document.getElementById('restore-path').value.trim();
+        const path = (document.getElementById('restore-path').value || '').trim();
         if (!path) {
             showToast(I18n.t("settings.enterBackupPath"), 'error');
             return;
         }
+        if (!confirm(I18n.t('settings.restoreConfirm'))) return;
         try {
-            await API.post('/settings/restore', { backup_path: path });
-            showToast(I18n.t("settings.restoreSuccess"));
+            const result = await API.post('/settings/restore', { backup_path: path });
+            const reloadNote = result && result.proxy_reload_ok === false
+                ? ' (' + I18n.t('settings.proxyReloadHintAfterRestore') + ')'
+                : '';
+            showToast(I18n.t("settings.restoreSuccess") + reloadNote);
             this.closeRestoreModal();
         } catch (e) {
             showToast(I18n.t("settings.restoreFailed") + (e.message || ''), 'error');

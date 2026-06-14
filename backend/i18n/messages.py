@@ -111,6 +111,7 @@ MESSAGES = {
         'backup_sqlite_only': 'Backup only supports SQLite',
         'restore_sqlite_only': 'Restore only supports SQLite',
         'backup_file_not_found': 'Backup file not found',
+        'backup_path_not_allowed': 'Backup path must be under the DB directory and named as <db>.backup_*',
         'restored': 'Restored',
 
         # SMTP
@@ -326,6 +327,7 @@ MESSAGES = {
         'backup_sqlite_only': '备份仅支持 SQLite',
         'restore_sqlite_only': '恢复仅支持 SQLite',
         'backup_file_not_found': '备份文件未找到',
+        'backup_path_not_allowed': '备份路径必须位于 DB 目录下，且文件名以 <db>.backup_ 开头',
         'restored': '已恢复',
 
         # SMTP

@@ -215,6 +215,43 @@ def create_backup():
     return jsonify({'message': get_message('backup_sqlite_only', request)})
 
 
+@settings_bp.route('/backups', methods=['GET'])
+def list_backups():
+    """列出当前 DB 目录下所有备份文件，按修改时间降序"""
+    db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
+    if not db_uri.startswith('sqlite:///'):
+        return jsonify({'backups': [], 'message': get_message('backup_sqlite_only', request)})
+
+    db_path = db_uri.replace('sqlite:///', '')
+    db_dir = os.path.dirname(db_path) or '.'
+    db_basename = os.path.basename(db_path)
+    prefix = db_basename + '.backup_'
+
+    items = []
+    try:
+        for name in os.listdir(db_dir):
+            if not name.startswith(prefix):
+                continue
+            full = os.path.join(db_dir, name)
+            if not os.path.isfile(full):
+                continue
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            items.append({
+                'name': name,
+                'path': full,
+                'size': st.st_size,
+                'mtime': int(st.st_mtime),
+            })
+    except OSError as e:
+        return jsonify({'error': str(e)}), 500
+
+    items.sort(key=lambda x: x['mtime'], reverse=True)
+    return jsonify({'backups': items, 'db_dir': db_dir})
+
+
 FEATURE_TOGGLE_DEFS = [
     {
         'key': 'feature_dynamic_content_last',
@@ -351,20 +388,58 @@ def seed_features():
 
 @settings_bp.route('/restore', methods=['POST'])
 def restore_backup():
-    """恢复备份"""
-    data = request.get_json()
+    """恢复备份
+
+    安全约束：备份路径必须位于 DB 同目录，且文件名以 `<db_basename>.backup_` 开头。
+    成功后顺手 ping wr-proxy /admin/reload，让其内存缓存（providers/tokens/settings）
+    立即对齐恢复后的数据。
+    """
+    data = request.get_json() or {}
     backup_path = data.get('backup_path', '')
-    if not backup_path or not os.path.exists(backup_path):
+    if not backup_path:
         return jsonify({'error': get_message('backup_file_not_found', request)}), 404
 
     db_uri = current_app.config.get('SQLALCHEMY_DATABASE_URI', '')
-    if db_uri.startswith('sqlite:///'):
-        db_path = db_uri.replace('sqlite:///', '')
-        import shutil
-        shutil.copy2(backup_path, db_path)
-        return jsonify({'message': get_message('restored', request)})
+    if not db_uri.startswith('sqlite:///'):
+        return jsonify({'error': get_message('restore_sqlite_only', request)}), 400
 
-    return jsonify({'error': get_message('restore_sqlite_only', request)}), 400
+    db_path = db_uri.replace('sqlite:///', '')
+    db_dir = os.path.realpath(os.path.dirname(db_path) or '.')
+    db_basename = os.path.basename(db_path)
+
+    # 路径白名单：只允许 DB 目录下、命名匹配 `<db>.backup_*` 的文件
+    real = os.path.realpath(backup_path)
+    if not (os.path.dirname(real) == db_dir
+            and os.path.basename(real).startswith(db_basename + '.backup_')):
+        return jsonify({'error': get_message('backup_path_not_allowed', request)}), 400
+
+    if not os.path.isfile(real):
+        return jsonify({'error': get_message('backup_file_not_found', request)}), 404
+
+    import shutil
+    shutil.copy2(real, db_path)
+
+    # 通知 wr-proxy 刷新内存缓存（失败不视为整体失败，restore 本身已成功）
+    proxy_reload_ok = False
+    proxy_reload_error = ''
+    try:
+        proxy_url = SystemSetting.get('proxy_url')
+        if not proxy_url:
+            proxy_url = os.environ.get(
+                'WR_PROXY_URL',
+                f"http://localhost:{current_app.config.get('PROXY_PORT', 5051)}")
+        resp = _requests.post(f"{proxy_url}/admin/reload", timeout=5)
+        proxy_reload_ok = resp.ok
+        if not resp.ok:
+            proxy_reload_error = f"HTTP {resp.status_code}"
+    except Exception as e:
+        proxy_reload_error = str(e)
+
+    return jsonify({
+        'message': get_message('restored', request),
+        'proxy_reload_ok': proxy_reload_ok,
+        'proxy_reload_error': proxy_reload_error,
+    })
 
 
 @settings_bp.route('/test-email', methods=['POST'])
