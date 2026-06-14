@@ -1,13 +1,13 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  base: '/docs/',
+  base: '/webrouter/',
   title: 'WebRouter',
   description: 'Unified AI API Gateway — Manage all your LLM providers in one place',
   lang: 'en-US',
 
   head: [
-    ['link', { rel: 'icon', href: '/docs/logo.svg' }],
+    ['link', { rel: 'icon', href: '/webrouter/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#2563eb' }],
   ],
 
