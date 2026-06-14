@@ -109,6 +109,10 @@ func (hc *HealthChecker) checkProvider(p *Provider) (status string, latencyMs in
 
 // checkDirect 直连官方 API 检测
 func (hc *HealthChecker) checkDirect(p *Provider) (string, int, string) {
+	// Anthropic 协议：单独走 /v1/messages + x-api-key
+	if p.ApiFormat == "anthropic" {
+		return hc.checkAnthropic(p)
+	}
 	// 根据 base_url 识别厂商，使用最小化测试请求
 	endpoint, body := getVendorTestConfig(p.BaseURL)
 	if endpoint == "" {
@@ -119,12 +123,29 @@ func (hc *HealthChecker) checkDirect(p *Provider) (string, int, string) {
 	if len(models) > 0 {
 		body = injectModel(body, models[0])
 	}
-	// 去重：智能处理 BaseURL 与 endpoint 之间的路径重复
-	// 使用 buildUpstreamURL 的逻辑统一处理 /v1, /v3 等版本前缀
-	upstreamURL := buildUpstreamURL(p.BaseURL, endpoint)
-	parsed := parseURL(upstreamURL)
-	endpoint = parsed.Path
 	return hc.sendTestRequest(p, endpoint, body)
+}
+
+// checkAnthropic 对 Anthropic 协议上游做最小化检测
+func (hc *HealthChecker) checkAnthropic(p *Provider) (string, int, string) {
+	model := "claude-haiku-4-5"
+	models := parseModelsList(p.Models)
+	if len(models) > 0 {
+		model = models[0]
+	}
+	body := fmt.Sprintf(`{"model":"%s","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`, model)
+
+	url := buildUpstreamURL(p.BaseURL, "/v1/messages")
+	req, err := http.NewRequest("POST", url, strings.NewReader(body))
+	if err != nil {
+		return "dead", 0, err.Error()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	if p.APIKey != "" {
+		req.Header.Set("x-api-key", p.APIKey)
+	}
+	return hc.doRequest(req)
 }
 
 // checkAggregate 聚合平台检测（OpenAI 兼容）
@@ -161,7 +182,7 @@ func (hc *HealthChecker) checkGeneric(p *Provider) (string, int, string) {
 
 // sendTestRequest 发送测试 chat 请求
 func (hc *HealthChecker) sendTestRequest(p *Provider, endpoint, body string) (string, int, string) {
-	url := strings.TrimRight(p.BaseURL, "/") + endpoint
+	url := buildUpstreamURL(p.BaseURL, endpoint)
 	req, err := http.NewRequest("POST", url, strings.NewReader(body))
 	if err != nil {
 		return "dead", 0, err.Error()
@@ -176,7 +197,7 @@ func (hc *HealthChecker) sendTestRequest(p *Provider, endpoint, body string) (st
 
 // sendGET 发送 GET 请求
 func (hc *HealthChecker) sendGET(p *Provider, endpoint string) (string, int, string) {
-	url := strings.TrimRight(p.BaseURL, "/") + endpoint
+	url := buildUpstreamURL(p.BaseURL, endpoint)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "dead", 0, err.Error()

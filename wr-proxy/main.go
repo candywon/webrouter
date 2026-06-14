@@ -87,7 +87,10 @@ func main() {
 		LogWarn("Failed to load desensitize rules: %v", err)
 	}
 
-	// 4.6 初始化知识捕获模块（始终启动 infra，按 system_settings 动态开关）
+	// 4.6 初始化知识库表 + 捕获模块
+	if err := InitKnowledgeTables(); err != nil {
+		LogWarn("Knowledge tables init failed: %v", err)
+	}
 	knowledgeEnabled := cfg.KnowledgeCapture
 	if knowledgeEnabled {
 		// 首次启动时如果 env 已开，确保 DB 设置同步
@@ -115,6 +118,9 @@ func main() {
 	}
 
 	// 4.8 启动会话记忆召回（独立于 knowledge_capture 全局开关，按 token 控制）
+	if err := InitSessionMemoryTables(); err != nil {
+		LogWarn("Session memory tables init failed: %v", err)
+	}
 	InitSessionMemoryWorker()
 	go startSessionMemoryCleanup()
 	LogInfo("Session Memory Recall: ENABLED (per-token)")

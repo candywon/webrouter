@@ -96,17 +96,6 @@ func processKnowledgeEntry(entry KnowledgeEntry) {
 		return
 	}
 
-	// 补充信号检测（对接近阈值的数据再做一次判断）
-	if len(entry.Response) < 500 && entry.TurnCount < 3 {
-		if !hasKnowledgeSignals(entry.Prompt, entry.Response) {
-			knowledgeStatsMu.Lock()
-			knowledgeStats.TotalFiltered++
-			knowledgeStats.TodayFiltered++
-			knowledgeStatsMu.Unlock()
-			return
-		}
-	}
-
 	// 写入 raw 表
 	if err := saveKnowledgeRaw(entry); err != nil {
 		LogWarn("[knowledge] failed to save raw entry: %v", err)
@@ -196,8 +185,11 @@ func extractResponse(body []byte) string {
 	if choices, ok := obj["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
 			if message, ok := choice["message"].(map[string]interface{}); ok {
-				if content, ok := message["content"].(string); ok {
+				if content, ok := message["content"].(string); ok && content != "" {
 					return content
+				}
+				if reasoning, ok := message["reasoning_content"].(string); ok && reasoning != "" {
+					return reasoning
 				}
 			}
 		}
@@ -207,8 +199,11 @@ func extractResponse(body []byte) string {
 	if choices, ok := obj["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
 			if delta, ok := choice["delta"].(map[string]interface{}); ok {
-				if content, ok := delta["content"].(string); ok {
+				if content, ok := delta["content"].(string); ok && content != "" {
 					return content
+				}
+				if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+					return reasoning
 				}
 			}
 		}

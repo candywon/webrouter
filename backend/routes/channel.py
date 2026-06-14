@@ -30,10 +30,12 @@ def list_channels(provider_id):
     for ch in channels:
         d = ch.to_dict()
         d['resolved_base_url'] = ch.resolve_base_url(provider)
+        d['resolved_anthropic_base_url'] = ch.resolve_anthropic_base_url(provider)
         d['resolved_models'] = ch.resolve_models(provider)
         d['resolved_priority'] = ch.resolve_priority(ext)
         d['resolved_weight'] = ch.resolve_weight(ext)
         d['resolved_cost_multiplier'] = ch.resolve_cost_multiplier(ext)
+        d['resolved_api_format'] = ch.resolve_api_format(ext)
         result.append(d)
 
     # 附加 Provider 自身的默认配置（作为"默认渠道"）
@@ -42,6 +44,7 @@ def list_channels(provider_id):
         'provider_id': provider_id,
         'name': '(Provider default)',
         'base_url': provider.base_url,
+        'anthropic_base_url': getattr(provider, 'anthropic_base_url', '') or '',
         'api_key_masked': provider.api_key_masked or '***',
         'models': provider.models_list,
         'priority': ext.priority if ext else 50,
@@ -74,6 +77,8 @@ def create_channel(provider_id):
         provider_id=provider_id,
         name=data['name'].strip(),
         base_url=data.get('base_url', ''),
+        anthropic_base_url=data.get('anthropic_base_url', ''),
+        api_format=data.get('api_format', ''),
         api_key=data.get('api_key', ''),
         models=json.dumps(data['models']) if isinstance(data.get('models'), list) else data.get('models', ''),
         priority=data.get('priority', 0),
@@ -101,7 +106,7 @@ def update_channel(provider_id, channel_id):
     if not data:
         return jsonify({'error': get_message('no_data', request)}), 400
 
-    for field in ['name', 'base_url', 'api_key', 'notes']:
+    for field in ['name', 'base_url', 'anthropic_base_url', 'api_key', 'notes', 'api_format']:
         if field in data:
             setattr(ch, field, data[field])
     # 更新 Key 后重置状态
@@ -157,6 +162,8 @@ def batch_create_channels(provider_id):
             provider_id=provider_id,
             name=item['name'].strip(),
             base_url=item.get('base_url', ''),
+            anthropic_base_url=item.get('anthropic_base_url', ''),
+            api_format=item.get('api_format', ''),
             api_key=item.get('api_key', ''),
             models=json.dumps(item['models']) if isinstance(item.get('models'), list) else item.get('models', ''),
             priority=item.get('priority', 0),

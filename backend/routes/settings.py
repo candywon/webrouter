@@ -132,7 +132,7 @@ def list_all_settings():
 
 @settings_bp.route('/<string:key>', methods=['PUT'], strict_slashes=False)
 def update_single_setting(key):
-    """更新单个设置项"""
+    """更新单个设置项；不存在则按值类型自动创建"""
     data = request.get_json()
     if not data:
         return jsonify({'error': get_message('no_data', request)}), 400
@@ -143,7 +143,27 @@ def update_single_setting(key):
 
     s = SystemSetting.query.filter_by(key=key).first()
     if not s:
-        return jsonify({'error': get_message('setting_not_found', request).format(key=key)}), 404
+        if isinstance(value, bool):
+            vtype = 'bool'
+        elif isinstance(value, int):
+            vtype = 'int'
+        elif isinstance(value, float):
+            vtype = 'float'
+        elif isinstance(value, (dict, list)):
+            vtype = 'json'
+        else:
+            vtype = 'string'
+        s = SystemSetting(
+            key=key,
+            value=json.dumps(value, ensure_ascii=False),
+            value_type=vtype,
+            description=data.get('description', ''),
+            category=data.get('category', 'general'),
+            editable=True,
+        )
+        db.session.add(s)
+        db.session.commit()
+        return jsonify({'message': get_message('settings_updated', request), 'setting': s.to_dict(), 'created': True})
 
     if not s.editable:
         return jsonify({'error': get_message('setting_not_editable', request).format(key=key)}), 403

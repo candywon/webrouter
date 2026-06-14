@@ -11,9 +11,11 @@ class SettingsPage {
         this.categories = [];
         this.filterCategory = '';
         this.editingKey = null;
+        this.providers = [];
     }
 
     async load() {
+        await this.loadProviders();
         await this.loadSettings();
         // 自动初始化 wr-proxy 优化特性开关
         const hasFeature = this.settings.some(s => s.key === 'feature_dynamic_content_last');
@@ -24,6 +26,15 @@ class SettingsPage {
         const hasComplexity = this.settings.some(s => s.key === 'smart_complexity_config');
         if (!hasComplexity) {
             await this.seedFeatures();
+        }
+    }
+
+    async loadProviders() {
+        try {
+            const data = await API.get('/providers/');
+            this.providers = (data.providers || []).filter(p => p.enabled);
+        } catch (e) {
+            this.providers = [];
         }
     }
 
@@ -166,6 +177,9 @@ class SettingsPage {
 
         // 六维度复杂度配置
         html += this.renderComplexityConfig();
+
+        // 知识提取（LLM 评估）配置
+        html += this.renderExtractConfig();
 
         // 日志清理周期
         if (logSetting) {
@@ -347,6 +361,133 @@ class SettingsPage {
             this.loadSettings();
         } catch (e) {
             showToast(I18n.t("settings.initFailed") + (e.message || ''), 'error');
+        }
+    }
+
+    // 渲染知识提取配置卡片（extract_provider_id / extract_model / extract_timeout_sec / extract_batch_size / extract_force_json_object）
+    renderExtractConfig() {
+        const get = (k, def) => {
+            const s = this.settings.find(x => x.key === k);
+            return s ? s.value : def;
+        };
+        const providerId  = parseInt(get('extract_provider_id', 0)) || 0;
+        const model       = get('extract_model', '');
+        const timeoutSec  = parseInt(get('extract_timeout_sec', 120)) || 120;
+        const batchSize   = parseInt(get('extract_batch_size', 5)) || 5;
+        const forceJson   = !!get('extract_force_json_object', false);
+
+        // provider 选项 + 当前选中 provider 的可用模型
+        const selected = this.providers.find(p => p.id === providerId);
+        const providerOpts = ['<option value="0">— 自动（按路由顺序）—</option>']
+            .concat(this.providers.map(p => {
+                const dot = (p.status === 'healthy') ? '🟢' : (p.status === 'unhealthy' ? '🟡' : '🔴');
+                return `<option value="${p.id}" ${p.id === providerId ? 'selected' : ''}>${dot} #${p.id} ${this.escHtml(p.name)} (${p.status})</option>`;
+            })).join('');
+
+        const modelOpts = (() => {
+            if (!selected || !selected.models || !Array.isArray(selected.models) || selected.models.length === 0) {
+                return '';
+            }
+            return selected.models.map(m => `<option value="${this.escHtml(m)}" ${m === model ? 'selected' : ''}>${this.escHtml(m)}</option>`).join('');
+        })();
+
+        return `
+        <div class="card" style="border-left:3px solid var(--info, #4a90e2);">
+            <div class="card-header">
+                <span class="card-title">🧠 知识提取（LLM 评估）配置</span>
+                <button class="btn-secondary btn-sm" onclick="settingsPage.runExtractNow()">立即跑一次</button>
+            </div>
+            <div style="padding:16px;">
+                <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">
+                    用于把 wr_knowledge_raw 里的对话条目提炼为结构化知识。修改后下一轮提取（5min 周期或手动触发）即生效，无需重启 wr-proxy。
+                </p>
+                <div style="display:grid;grid-template-columns:160px 1fr;gap:12px 16px;align-items:center;">
+                    <label>评估 Provider</label>
+                    <select id="extract-provider-id" onchange="settingsPage.onExtractProviderChange()" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);">
+                        ${providerOpts}
+                    </select>
+
+                    <label>评估模型</label>
+                    <div style="display:flex;gap:8px;">
+                        ${modelOpts ? `<select id="extract-model-select" onchange="document.getElementById('extract-model').value=this.value" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);min-width:180px;"><option value="">— 选择 —</option>${modelOpts}</select>` : ''}
+                        <input type="text" id="extract-model" value="${this.escHtml(model)}" placeholder="如 ark-code-latest / qwen3-coder-flash" style="flex:1;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);">
+                    </div>
+
+                    <label>单次超时 (秒)</label>
+                    <input type="number" id="extract-timeout-sec" value="${timeoutSec}" min="10" max="600" style="width:120px;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);">
+
+                    <label>每轮批量大小</label>
+                    <input type="number" id="extract-batch-size" value="${batchSize}" min="1" max="20" style="width:120px;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);">
+
+                    <label>强制 JSON Object</label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                        <input type="checkbox" id="extract-force-json" ${forceJson ? 'checked' : ''}>
+                        <span style="color:var(--text-muted);font-size:12px;">勾选后请求带 response_format=json_object（仅 OpenAI/DeepSeek/Qwen 兼容；ARK/Doubao 会 400）</span>
+                    </label>
+                </div>
+                <div style="margin-top:16px;display:flex;gap:8px;">
+                    <button class="btn-primary" onclick="settingsPage.saveExtractConfig()">保存</button>
+                    <span id="extract-save-hint" style="color:var(--text-muted);font-size:12px;align-self:center;"></span>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    onExtractProviderChange() {
+        // 切换 provider 后重渲染该卡片，让"评估模型"下拉刷新成新 provider 支持的模型列表
+        const newId = parseInt(document.getElementById('extract-provider-id').value) || 0;
+        const cur = this.settings.find(s => s.key === 'extract_provider_id');
+        if (cur) cur.value = newId;
+        else this.settings.push({key: 'extract_provider_id', value: newId, value_type: 'int'});
+        // 同时把当前模型 input 留空，提示用户重新选
+        const inp = document.getElementById('extract-model');
+        if (inp) inp.value = '';
+        const cm = this.settings.find(s => s.key === 'extract_model');
+        if (cm) cm.value = '';
+        this.render();
+    }
+
+    async saveExtractConfig() {
+        const providerId = parseInt(document.getElementById('extract-provider-id').value) || 0;
+        const model      = document.getElementById('extract-model').value.trim();
+        const timeoutSec = parseInt(document.getElementById('extract-timeout-sec').value) || 120;
+        const batchSize  = parseInt(document.getElementById('extract-batch-size').value) || 5;
+        const forceJson  = document.getElementById('extract-force-json').checked;
+
+        if (providerId > 0 && !model) {
+            showToast('指定了 Provider，请同时填写评估模型', 'error');
+            return;
+        }
+
+        const hint = document.getElementById('extract-save-hint');
+        if (hint) hint.textContent = '保存中...';
+
+        await this.saveSetting('extract_provider_id', providerId);
+        await this.saveSetting('extract_model', model);
+        await this.saveSetting('extract_timeout_sec', timeoutSec);
+        await this.saveSetting('extract_batch_size', batchSize);
+        await this.saveSetting('extract_force_json_object', forceJson);
+
+        if (hint) hint.textContent = '已保存，下一轮提取生效';
+        await this.loadSettings();
+    }
+
+    async runExtractNow() {
+        try {
+            const proxyBase = (this.settings.find(s => s.key === 'gateway_url')?.value) || 'http://localhost:5051';
+            const resp = await fetch(`${proxyBase}/admin/knowledge_extract`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({batch_size: parseInt(document.getElementById('extract-batch-size')?.value) || 5}),
+            });
+            const result = await resp.json();
+            if (result.error) {
+                showToast('提取失败: ' + result.error, 'error');
+            } else {
+                showToast(result.message || `已处理 ${result.processed} 条`);
+            }
+        } catch (e) {
+            showToast('调用失败: ' + e.message, 'error');
         }
     }
 
@@ -805,7 +946,8 @@ class SettingsPage {
             s.key !== 'feature_dynamic_content_last' &&
             s.key !== 'feature_token_compression' &&
             s.key !== 'feature_session_compression' &&
-            s.key !== 'smart_complexity_config'
+            s.key !== 'smart_complexity_config' &&
+            !s.key.startsWith('extract_')
         );
 
         if (filtered.length === 0) {

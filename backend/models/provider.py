@@ -31,6 +31,10 @@ class Provider(db.Model):
     name = db.Column(db.String(100), nullable=False)
     type = db.Column(db.String(20), nullable=False, default=TYPE_CUSTOM)
     base_url = db.Column(db.String(500), nullable=False)
+    # Anthropic 兼容端点（可选）。多数厂商同时提供 OpenAI / Anthropic 两套兼容接口，
+    # base_url 为 OpenAI 端点，anthropic_base_url 为 Anthropic 端点。配置后，wr-proxy
+    # 会按客户端协议选对应端点直通，避免协议翻译导致的能力损失。
+    anthropic_base_url = db.Column(db.String(500), default='')
 
     # 认证信息
     api_key = db.Column(db.String(500))
@@ -102,6 +106,7 @@ class Provider(db.Model):
             'name': self.name,
             'type': self.type,
             'base_url': self.base_url,
+            'anthropic_base_url': self.anthropic_base_url or '',
             'api_key_masked': self.api_key_masked,
             'models': self.models_list,
             'tags': self.tags_list,

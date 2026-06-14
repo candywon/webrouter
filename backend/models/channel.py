@@ -24,8 +24,10 @@ class ProviderChannel(db.Model):
     
     # 独立配置（为空则继承 Provider）
     base_url = db.Column(db.String(500), default='')              # 空=继承 Provider
+    anthropic_base_url = db.Column(db.String(500), default='')   # Anthropic 兼容端点，空=继承 Provider
     api_key = db.Column(db.String(500), default='')               # 空=继承 Provider
     models = db.Column(db.Text, default='')                        # JSON: ["gpt-4o"], 空=继承 Provider
+    api_format = db.Column(db.String(20), default='')             # 上游协议: ''=继承父Provider / openai / anthropic
     
     # 渠道自身调度参数（为0则继承 ProviderExt）
     priority = db.Column(db.Integer, default=0)                    # 0=继承
@@ -58,6 +60,12 @@ class ProviderChannel(db.Model):
         """解析实际 base_url（渠道 > Provider）"""
         return self.base_url if self.base_url else provider.base_url
 
+    def resolve_anthropic_base_url(self, provider):
+        """解析实际 anthropic_base_url（渠道 > Provider）"""
+        if self.anthropic_base_url:
+            return self.anthropic_base_url
+        return getattr(provider, 'anthropic_base_url', '') or ''
+
     def resolve_api_key(self, provider):
         """解析实际 api_key（渠道 > Provider）"""
         return self.api_key if self.api_key else (provider.api_key or '')
@@ -66,6 +74,14 @@ class ProviderChannel(db.Model):
         """解析实际模型列表（渠道 > Provider）"""
         own = self.models_list
         return own if own else provider.models_list
+
+    def resolve_api_format(self, provider_ext):
+        """解析实际 API 协议格式（渠道 > ProviderExt）。
+        渠道留空表示继承父 Provider 的设置。
+        """
+        if self.api_format:
+            return self.api_format
+        return (provider_ext.api_format if provider_ext else 'auto') or 'auto'
 
     def resolve_priority(self, provider_ext):
         """解析实际优先级"""
@@ -86,6 +102,8 @@ class ProviderChannel(db.Model):
             'provider_id': self.provider_id,
             'name': self.name,
             'base_url': self.base_url or '(继承Provider)',
+            'anthropic_base_url': self.anthropic_base_url or '',
+            'api_format': self.api_format or '',
             'api_key_masked': self.api_key[:4] + '...' + self.api_key[-4:] if self.api_key and len(self.api_key) >= 8 else ('(继承Provider)' if not self.api_key else '***'),
             'models': self.models_list,
             'priority': self.priority or '(继承)',

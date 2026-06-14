@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,6 +189,10 @@ func migrate() error {
 		`ALTER TABLE wr_tokens ADD COLUMN smart_downgrade INTEGER DEFAULT 0`,
 		`ALTER TABLE wr_tokens ADD COLUMN desensitize_enabled INTEGER DEFAULT 0`,
 		`ALTER TABLE wr_tokens ADD COLUMN desensitize_level TEXT DEFAULT 'standard'`,
+		`ALTER TABLE wr_provider_ext ADD COLUMN api_format TEXT DEFAULT 'auto'`,
+		`ALTER TABLE wr_providers ADD COLUMN anthropic_base_url TEXT DEFAULT ''`,
+		`ALTER TABLE wr_provider_channels ADD COLUMN anthropic_base_url TEXT DEFAULT ''`,
+		`ALTER TABLE wr_provider_channels ADD COLUMN api_format TEXT DEFAULT ''`,
 	}
 	for _, m := range alterMigrations {
 		if _, err := db.Exec(m); err != nil {
@@ -360,6 +365,14 @@ func LoadSetting(key string, defaultValue interface{}) interface{} {
 		if err := json.Unmarshal([]byte(valStr), &v); err == nil {
 			return v
 		}
+	case "string", "":
+		// 后端 settings.py 用 json.dumps 序列化所有值，纯字符串会被双引号包住。
+		// 优先按 JSON 解析（去引号 + 处理转义），失败再回退到原文。
+		var s string
+		if err := json.Unmarshal([]byte(valStr), &s); err == nil {
+			return s
+		}
+		return valStr
 	}
 	return defaultValue
 }
@@ -422,6 +435,7 @@ func LoadHealthTestConfigs() []VendorTestConfig {
 func LoadProviders() ([]*Provider, error) {
 	rows, err := db.Query(`
 		SELECT p.id, p.name, p.type, p.base_url,
+		       COALESCE(p.anthropic_base_url, '') as anthropic_base_url,
 		       COALESCE(p.api_key, '') as api_key,
 		       COALESCE(p.models, '') as models,
 		       COALESCE(p.tags, '') as tags,
@@ -439,7 +453,8 @@ func LoadProviders() ([]*Provider, error) {
 		       COALESCE(q.quota_total, 0) as quota_total,
 		       COALESCE(q.quota_used, 0) as quota_used,
 		       COALESCE(q.quota_source, 'unknown') as quota_source,
-		       COALESCE(e.supports_tools, 1) as supports_tools
+		       COALESCE(e.supports_tools, 1) as supports_tools,
+		       COALESCE(e.api_format, 'auto') as api_format
 		FROM wr_providers p
 		LEFT JOIN wr_provider_ext e ON p.id = e.provider_id
 		LEFT JOIN wr_provider_quota q ON p.id = q.provider_id
@@ -458,13 +473,13 @@ func LoadProviders() ([]*Provider, error) {
 		var lastCheck sql.NullTime
 
 		if err := rows.Scan(
-			&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.APIKey,
+			&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.AnthropicBaseURL, &p.APIKey,
 			&p.Models, &p.Tags, &p.Enabled, &p.Status,
 			&p.LastLatencyMs, &lastErr,
 			&p.Priority, &p.Weight, &p.ProxyEnabled,
 			&p.RateLimitRPM, &p.TimeoutSeconds, &p.MaxRetries, &p.CostMultiplier,
 			&p.QuotaTotal, &p.QuotaUsed, &p.QuotaSource,
-			&p.SupportsTools,
+			&p.SupportsTools, &p.ApiFormat,
 		); err != nil {
 			LogWarn("scan provider: %v", err)
 			continue
@@ -475,9 +490,81 @@ func LoadProviders() ([]*Provider, error) {
 		if lastCheck.Valid {
 			p.LastCheckAt = &lastCheck.Time
 		}
+		// 解析 "auto" 协议格式（按 base_url 域名推断）
+		p.ApiFormat = resolveApiFormat(p.BaseURL, p.ApiFormat)
 		providers = append(providers, p)
 	}
 	return providers, nil
+}
+
+// urlPattern host 精确 + path 段前缀，用于 vendor URL 识别
+type urlPattern struct{ host, path string }
+
+// resolveApiFormat 解析 Provider 上游 API 协议格式
+// apiFormat 为 "openai" / "anthropic" 时直接返回（用户显式选择，最高优先级）
+// 为 "auto" 或空时按 base_url vendor 规则兜底匹配
+//
+// 与 backend ProviderFactory.{ANTHROPIC,OPENAI}_URL_PATTERNS 保持一致。
+// 采用 host 精确 + path 段前缀匹配，避免 /api/coding 误命中 /api/coding-openai。
+func resolveApiFormat(baseURL, apiFormat string) string {
+	switch apiFormat {
+	case "openai", "anthropic":
+		return apiFormat
+	}
+	// 已知 Anthropic 子路径必须先判断（火山方舟 /api/v3/anthropic 在 /api/v3 之前）
+	anthropicPatterns := []urlPattern{
+		{"api.anthropic.com", ""},
+		{"ark.cn-beijing.volces.com", "/api/v3/anthropic"},
+		{"ark.cn-beijing.volces.com", "/api/coding"},
+		{"open.bigmodel.cn", "/api/anthropic"},
+		{"dashscope.aliyuncs.com", "/api/v2/apps/anthropic"},
+	}
+	if matchURLPattern(baseURL, anthropicPatterns) {
+		return "anthropic"
+	}
+	return "openai"
+}
+
+// matchURLPattern host 精确 + path 段前缀匹配
+func matchURLPattern(baseURL string, patterns []urlPattern) bool {
+	u, err := url.Parse(strings.ToLower(baseURL))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	pathSegs := splitNonEmpty(u.Path, "/")
+	for _, p := range patterns {
+		if host != p.host {
+			continue
+		}
+		if p.path == "" {
+			return true
+		}
+		target := splitNonEmpty(p.path, "/")
+		if len(pathSegs) >= len(target) {
+			ok := true
+			for i, seg := range target {
+				if pathSegs[i] != seg {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitNonEmpty(s, sep string) []string {
+	out := make([]string, 0, 4)
+	for _, p := range strings.Split(s, sep) {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // LoadChannels 从 DB 加载 Channel 并展开为 Provider 调度项
@@ -490,6 +577,7 @@ func LoadChannels(providers []*Provider) []*Provider {
 	rows, err := db.Query(`
 		SELECT c.id, c.provider_id, c.name,
 		       COALESCE(c.base_url, '') as base_url,
+		       COALESCE(c.anthropic_base_url, '') as anthropic_base_url,
 		       COALESCE(c.api_key, '') as api_key,
 		       COALESCE(c.models, '') as models,
 		       COALESCE(c.priority, 0) as priority,
@@ -499,7 +587,8 @@ func LoadChannels(providers []*Provider) []*Provider {
 		       c.enabled,
 		       COALESCE(c.status, 'unchecked') as status,
 		       COALESCE(c.last_latency_ms, 0) as last_latency_ms,
-		       COALESCE(c.last_error, '') as last_error
+		       COALESCE(c.last_error, '') as last_error,
+		       COALESCE(c.api_format, '') as api_format
 		FROM wr_provider_channels c
 		WHERE c.enabled = 1
 		ORDER BY c.provider_id, COALESCE(c.priority, 0) DESC
@@ -519,13 +608,13 @@ func LoadChannels(providers []*Provider) []*Provider {
 	var channelProviders []*Provider
 	for rows.Next() {
 		var chID, providerID, priority, weight, rateLimitRPM, lastLatencyMs int
-		var name, baseURL, apiKey, models, status, lastErr string
+		var name, baseURL, anthropicBaseURL, apiKey, models, status, lastErr, chApiFormat string
 		var costMultiplier float64
 		var enabled bool
 
-		if err := rows.Scan(&chID, &providerID, &name, &baseURL, &apiKey, &models,
+		if err := rows.Scan(&chID, &providerID, &name, &baseURL, &anthropicBaseURL, &apiKey, &models,
 			&priority, &weight, &rateLimitRPM, &costMultiplier,
-			&enabled, &status, &lastLatencyMs, &lastErr); err != nil {
+			&enabled, &status, &lastLatencyMs, &lastErr, &chApiFormat); err != nil {
 			LogWarn("scan channel: %v", err)
 			continue
 		}
@@ -541,6 +630,10 @@ func LoadChannels(providers []*Provider) []*Provider {
 		resolvedBaseURL := baseURL
 		if resolvedBaseURL == "" {
 			resolvedBaseURL = parent.BaseURL
+		}
+		resolvedAnthropicBaseURL := anthropicBaseURL
+		if resolvedAnthropicBaseURL == "" {
+			resolvedAnthropicBaseURL = parent.AnthropicBaseURL
 		}
 		resolvedAPIKey := apiKey
 		if resolvedAPIKey == "" {
@@ -567,32 +660,45 @@ func LoadChannels(providers []*Provider) []*Provider {
 			resolvedCostMul = parent.CostMultiplier
 		}
 
+		// API 格式继承：channel 自填 > parent.ApiFormat > 按 base_url 的 vendor 兜底
+		// 注意：当 channel 改了 base_url 而 parent.ApiFormat 仍是默认 'auto' 时，
+		// resolveApiFormat 会按 channel 的 base_url 重新匹配 vendor 规则。
+		var resolvedApiFormat string
+		if chApiFormat != "" {
+			resolvedApiFormat = chApiFormat
+		} else {
+			resolvedApiFormat = parent.ApiFormat
+		}
+		resolvedApiFormat = resolveApiFormat(resolvedBaseURL, resolvedApiFormat)
+
 		// 编码 ID: channelID*100000 + providerID，确保唯一
 		encodedID := chID*100000 + providerID
 
 		cp := &Provider{
-			ID:             encodedID,
-			Name:           fmt.Sprintf("%s/%s", parent.Name, name),
-			Type:           parent.Type,
-			BaseURL:        resolvedBaseURL,
-			APIKey:         resolvedAPIKey,
-			Models:         resolvedModels,
-			Tags:           parent.Tags,
-			Priority:       resolvedPriority,
-			Weight:         resolvedWeight,
-			ProxyEnabled:   parent.ProxyEnabled,
-			RateLimitRPM:   resolvedRPM,
-			TimeoutSeconds: parent.TimeoutSeconds,
-			MaxRetries:     parent.MaxRetries,
-			CostMultiplier: resolvedCostMul,
-			Enabled:        enabled,
-			Status:         status,
-			LastLatencyMs:  lastLatencyMs,
-			LastError:      lastErr,
-			QuotaTotal:     parent.QuotaTotal,
-			QuotaUsed:      parent.QuotaUsed,
-			QuotaSource:    parent.QuotaSource,
-			SupportsTools:  parent.SupportsTools,
+			ID:               encodedID,
+			Name:             fmt.Sprintf("%s/%s", parent.Name, name),
+			Type:             parent.Type,
+			BaseURL:          resolvedBaseURL,
+			AnthropicBaseURL: resolvedAnthropicBaseURL,
+			APIKey:           resolvedAPIKey,
+			Models:           resolvedModels,
+			Tags:             parent.Tags,
+			Priority:         resolvedPriority,
+			Weight:           resolvedWeight,
+			ProxyEnabled:     parent.ProxyEnabled,
+			RateLimitRPM:     resolvedRPM,
+			TimeoutSeconds:   parent.TimeoutSeconds,
+			MaxRetries:       parent.MaxRetries,
+			CostMultiplier:   resolvedCostMul,
+			Enabled:          enabled,
+			Status:           status,
+			LastLatencyMs:    lastLatencyMs,
+			LastError:        lastErr,
+			QuotaTotal:       parent.QuotaTotal,
+			QuotaUsed:        parent.QuotaUsed,
+			QuotaSource:      parent.QuotaSource,
+			SupportsTools:    parent.SupportsTools,
+			ApiFormat:        resolvedApiFormat,
 		}
 		channelProviders = append(channelProviders, cp)
 	}
@@ -656,6 +762,7 @@ func LoadTokenByKey(key string) (*Token, error) {
 		       COALESCE(knowledge_capture_enabled, 0), COALESCE(knowledge_department, ''),
 		       COALESCE(rag_enabled, 0), COALESCE(rag_min_relevance, 0.7),
 		       COALESCE(rag_top_k, 3), COALESCE(system_prompt_knowledge, ''),
+		       COALESCE(session_recall_enabled, 0),
 		       enabled, expires_at, created_at
 		FROM wr_tokens WHERE key = ?`, key,
 	).Scan(&t.ID, &t.Name, &t.Key, &userID, &t.Models, &t.ProviderIDs,
@@ -664,6 +771,7 @@ func LoadTokenByKey(key string) (*Token, error) {
 		&t.DesensitizeEnabled, &t.DesensitizeLevel,
 		&t.KnowledgeCaptureEnabled, &t.KnowledgeDepartment,
 		&t.RAGEnabled, &t.RAGMinRelevance, &t.RAGTopK, &t.SystemPromptKnowledge,
+		&t.SessionRecallEnabled,
 		&t.Enabled, &expiresAt, &t.CreatedAt,
 	)
 

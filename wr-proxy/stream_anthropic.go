@@ -41,6 +41,8 @@ func StreamAnthropicResponse(w http.ResponseWriter, upstreamResp *http.Response,
 	flusher.Flush()
 
 	var fullText strings.Builder
+	var reasoningBuf strings.Builder
+	var hasContent bool
 	var inputTokens, outputTokens int
 
 	for {
@@ -69,7 +71,8 @@ func StreamAnthropicResponse(w http.ResponseWriter, upstreamResp *http.Response,
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content          string `json:"content"`
+					ReasoningContent string `json:"reasoning_content"`
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
@@ -91,6 +94,7 @@ func StreamAnthropicResponse(w http.ResponseWriter, upstreamResp *http.Response,
 
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {
+				hasContent = true
 				fullText.WriteString(choice.Delta.Content)
 
 				sendAnthropicEvent(w, "content_block_delta", map[string]interface{}{
@@ -102,10 +106,25 @@ func StreamAnthropicResponse(w http.ResponseWriter, upstreamResp *http.Response,
 				})
 				flusher.Flush()
 			}
+			if choice.Delta.ReasoningContent != "" {
+				reasoningBuf.WriteString(choice.Delta.ReasoningContent)
+			}
 
 			// finish
 			if choice.FinishReason != nil {
 				stopReason := mapFinishReason(*choice.FinishReason)
+
+				// 如果没有 content 但有 reasoning，输出 reasoning 作为 content
+				if !hasContent && reasoningBuf.Len() > 0 {
+					sendAnthropicEvent(w, "content_block_delta", map[string]interface{}{
+						"type":  "text_delta",
+						"index": 0,
+						"delta": map[string]interface{}{
+							"text": reasoningBuf.String(),
+						},
+					})
+					flusher.Flush()
+				}
 
 				sendAnthropicEvent(w, "content_block_stop", map[string]interface{}{
 					"index": 0,

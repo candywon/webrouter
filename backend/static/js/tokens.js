@@ -39,6 +39,7 @@ class TokensPage {
         try {
             const data = await API.get('/tokens/');
             this.tokens = data.tokens || [];
+            this.sortTokens();
             this.render();
         } catch (e) {
             console.error('Failed to load tokens:', e);
@@ -49,6 +50,15 @@ class TokensPage {
 
     bindEvents() {
         // 事件由 render() 中的 onclick 内联处理
+    }
+
+    sortTokens() {
+        const rank = (t) => {
+            if (!t.enabled) return 3;
+            if (t.is_expired) return 2;
+            return 0; // enabled + 未过期
+        };
+        this.tokens.sort((a, b) => rank(a) - rank(b) || a.id - b.id);
     }
 
     render() {

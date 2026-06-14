@@ -16,12 +16,17 @@ type Provider struct {
 	Name           string     `json:"name"`
 	Type           string     `json:"type"` // direct/aggregate/litellm/custom
 	BaseURL        string     `json:"base_url"`
+	// AnthropicBaseURL 上游 Anthropic 兼容端点（可选）。
+	// 多数厂商同时提供 OpenAI 与 Anthropic 兼容接口，BaseURL 为 OpenAI 端点，AnthropicBaseURL 为 Anthropic 端点。
+	// 路由层根据客户端协议选择对应端点直通，避免协议翻译。
+	AnthropicBaseURL string   `json:"anthropic_base_url,omitempty"`
 	APIKey         string     `json:"api_key,omitempty"`
 	Models         string     `json:"models"`          // JSON array string: ["gpt-4o","claude-3"]
 	Tags           string     `json:"tags"`            // JSON array string
 	Priority       int        `json:"priority"`        // 0-100: 90+主力, 50-89热备, 1-49冷备, 0禁用
 	Weight         int        `json:"weight"`          // 调度权重 0-100
 	ProxyEnabled   bool       `json:"proxy_enabled"`   // 是否纳入代理池
+	ApiFormat      string     `json:"api_format"`      // openai/anthropic/auto — 上游 API 协议格式
 	RateLimitRPM   int        `json:"rate_limit_rpm"`  // 每分钟请求上限, 0=不限
 	TimeoutSeconds int        `json:"timeout_seconds"` // 请求超时
 	MaxRetries     int        `json:"max_retries"`     // 最大重试次数
@@ -55,6 +60,38 @@ type Provider struct {
 	// 按模型的冷却（单模型额度用完/限流时使用，不影响其他模型）
 	modelCooldown   map[string]time.Time `json:"-"`
 	modelCooldownMu sync.RWMutex         `json:"-"`
+}
+
+// EndpointFor 根据客户端协议返回该 Provider 应使用的上游端点和实际协议格式。
+// clientFormat: "openai" / "anthropic"
+// 返回 (url, effectiveFormat)：
+//   - 若 Provider 显式提供了对应协议端点，直通无翻译
+//   - 否则降级到主 URL（BaseURL 配合 ApiFormat），可能需要翻译层
+func (p *Provider) EndpointFor(clientFormat string) (string, string) {
+	switch clientFormat {
+	case "anthropic":
+		if p.AnthropicBaseURL != "" {
+			return p.AnthropicBaseURL, "anthropic"
+		}
+	case "openai":
+		// Provider 主格式是 anthropic 但客户端要 openai：若没配独立 OpenAI 端点，主 URL 可能就是 anthropic 的，需要翻译
+		if p.ApiFormat == "openai" {
+			return p.BaseURL, "openai"
+		}
+	}
+	// 兜底：用主 URL + 主格式
+	return p.BaseURL, p.ApiFormat
+}
+
+// HasFormat 检查 Provider 是否原生支持指定客户端协议（无翻译开销）
+func (p *Provider) HasFormat(clientFormat string) bool {
+	switch clientFormat {
+	case "anthropic":
+		return p.AnthropicBaseURL != "" || p.ApiFormat == "anthropic"
+	case "openai":
+		return p.ApiFormat == "openai"
+	}
+	return false
 }
 
 // SetModelCooldown 为指定模型设置冷却截止时间

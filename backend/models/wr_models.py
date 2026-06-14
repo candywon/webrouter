@@ -212,6 +212,7 @@ class ProviderExt(db.Model):
     weight = db.Column(db.Integer, default=100)               # 调度权重
     supports_tools = db.Column(db.Boolean, default=True)      # 是否支持 function calling / tools
     fallback_enabled = db.Column(db.Boolean, default=True)    # 有 Channel 时，Provider 主体是否作为兜底渠道参与调度
+    api_format = db.Column(db.String(20), default='auto')     # 上游 API 协议: openai/anthropic/auto
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
@@ -226,6 +227,7 @@ class ProviderExt(db.Model):
             'weight': self.weight,
             'supports_tools': self.supports_tools,
             'fallback_enabled': self.fallback_enabled,
+            'api_format': self.api_format or 'auto',
         }
 
 
@@ -245,15 +247,19 @@ class ProviderQuota(db.Model):
 
     @property
     def quota_remaining(self):
-        if self.quota_total <= 0:
+        total = self.quota_total or 0
+        used = self.quota_used or 0
+        if total <= 0:
             return -1
-        return max(0, self.quota_total - self.quota_used)
+        return max(0, total - used)
 
     @property
     def quota_ratio(self):
-        if self.quota_total <= 0:
+        total = self.quota_total or 0
+        used = self.quota_used or 0
+        if total <= 0:
             return 1.0
-        return max(0, (self.quota_total - self.quota_used) / self.quota_total)
+        return max(0, (total - used) / total)
 
     def to_dict(self):
         return {

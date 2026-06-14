@@ -10,24 +10,40 @@ import (
 )
 
 // shouldCapture 第1级信号筛选：判断是否值得捕获为知识
+// 策略：先识别是否工作/问询内容，再过滤噪音；宁可多捕获再提取，不遗漏有价值信息
 func shouldCapture(entry KnowledgeEntry) bool {
-	// 1. 响应太短（<200字符），大概率是简单问答
+	// 1. 极短响应（<30字符），基本是确认词，无知识价值
+	if len(entry.Response) < 30 {
+		return false
+	}
+
+	// 2. 纯寒暄/闲聊检测
+	if isSmallTalk(entry.Prompt) && len(entry.Response) < 150 {
+		return false
+	}
+
+	// 3. 问询/检索意图 → 强信号，直接捕获（知识多来自问询场景）
+	if isKnowledgeRetrieval(entry.Prompt) {
+		return true
+	}
+
+	// 4. 包含工作信号 → 直接捕获（不论长度）
+	if hasWorkSignals(entry.Prompt, entry.Response) {
+		return true
+	}
+
+	// 5. 短响应但包含知识信号（数字、结论、建议等）→ 捕获
 	if len(entry.Response) < 200 {
-		return false
+		return hasKnowledgeSignals(entry.Prompt, entry.Response)
 	}
 
-	// 2. 对话轮数太少（<3轮）且响应不够长，大概率是简单查询
-	if entry.TurnCount < 3 && len(entry.Response) < 500 {
-		return false
-	}
-
-	// 3. 代码占比过高（>60%），大概率是编程
-	if codeBlockRatio(entry.Prompt+entry.Response) > 0.6 {
-		return false
-	}
-
-	// 4. 明确的翻译/改写意图
+	// 6. 明确的翻译/改写意图 → 不捕获
 	if isTranslationOrRewrite(entry.Prompt) {
+		return false
+	}
+
+	// 7. 代码占比过高（>80%），纯编程实现，非知识
+	if codeBlockRatio(entry.Prompt+entry.Response) > 0.8 {
 		return false
 	}
 
@@ -65,6 +81,112 @@ var translationPatterns = []string{
 }
 
 var analysisKeywords = []string{"分析", "计算", "对比", "评估", "analyze", "compare"}
+
+// isSmallTalk 判断是否为寒暄/闲聊
+func isSmallTalk(prompt string) bool {
+	lower := strings.TrimSpace(strings.ToLower(prompt))
+	smallTalkPatterns := []string{
+		"你好", "hi", "hello", "hey", "嗨", "早上好", "下午好", "晚上好",
+		"good morning", "good afternoon", "good evening",
+		"谢谢", "thanks", "thank you", "好的", "ok", "okay",
+		"再见", "bye", "goodbye",
+	}
+	for _, p := range smallTalkPatterns {
+		if lower == p || lower == p+"！" || lower == p+"!" || lower == p+"。" {
+			return true
+		}
+	}
+	if len([]rune(prompt)) <= 6 {
+		return true
+	}
+	return false
+}
+
+// isKnowledgeRetrieval 判断是否为知识问询/检索意图
+// 这类 prompt 是最强烈的知识捕获信号：用户在寻找/回忆信息，说明该信息有知识价值
+func isKnowledgeRetrieval(prompt string) bool {
+	lower := strings.ToLower(prompt)
+
+	// 中文问询/检索词
+	retrievalPatterns := []string{
+		// 查找/检索类
+		"找一下", "查一下", "搜一下", "查到", "找到", "搜索",
+		"看一下", "帮我找", "帮我查", "哪里有", "谁有",
+		// 问询类
+		"问一下", "请问", "咨询一下", "确认一下", "核实",
+		// 记忆/回忆类
+		"还记得", "记不记得", "回忆一下", "想起来", "之前说",
+		"上次", "以前", "之前讨论", "之前聊过", "刚才说的",
+		// 了解/获取类
+		"了解一下", "说明一下", "介绍一下", "解释一下",
+		"告诉我", "说说", "讲一下", "有没有",
+		// 归纳/整理类
+		"归纳", "梳理", "整理一下", "总结一下", "列一下",
+		"哪些", "几个", "多少",
+		// 比较类
+		"区别", "对比", "比较", "不同", "差异",
+	}
+	for _, p := range retrievalPatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+
+	// 英文问询模式
+	engPatterns := []string{
+		"find", "search", "look up", "check",
+		"remember", "recall", "what did we", "previously",
+		"tell me about", "explain", "describe",
+		"summarize", "organize", "list", "compare",
+	}
+	for _, p := range engPatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+
+	// 疑问句式（"XX是什么"、"怎么XX"、"为什么XX"）
+	questionPatterns := []string{"是什么", "怎么", "为什么", "如何", "哪些",
+		"what is", "how to", "how do", "why", "which"}
+	for _, p := range questionPatterns {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasWorkSignals 判断是否包含工作/业务信号
+func hasWorkSignals(prompt, response string) bool {
+	combined := strings.ToLower(prompt + " " + response)
+
+	// 业务/工作关键词
+	workKeywords := []string{
+		"方案", "策略", "流程", "规范", "标准", "架构", "设计", "部署", "运维",
+		"配置", "需求", "排期", "交付", "上线", "回滚", "监控", "告警",
+		"报告", "总结", "归纳", "梳理", "清单", "checklist",
+		"成本", "预算", "报价", "合同", "供应商", "客户",
+		"policy", "strategy", "process", "standard", "architecture",
+		"design", "deploy", "config", "requirement", "schedule",
+		"release", "rollback", "monitor", "alert", "report",
+	}
+	for _, w := range workKeywords {
+		if strings.Contains(combined, w) {
+			return true
+		}
+	}
+
+	// 包含结构化内容（列表、步骤、表格标记）
+	structureSignals := []string{"1.", "1、", "- ", "•", "步骤", "首先", "step "}
+	for _, s := range structureSignals {
+		if strings.Contains(combined, s) {
+			return true
+		}
+	}
+
+	return false
+}
 
 // isTranslationOrRewrite 判断 prompt 是否为纯翻译/改写意图
 func isTranslationOrRewrite(prompt string) bool {

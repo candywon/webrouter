@@ -610,7 +610,10 @@ func selectModelByTier(tier ModelTier, token *Token) string {
 		}
 	}
 	if best != nil {
-		return best.Model
+		// 验证该模型有可用 Provider
+		if router.SelectProvider(best.Model, token, nil, "") != nil {
+			return best.Model
+		}
 	}
 
 	// 该 tier 没有可用模型，往下一级找（降级优先保可用性）
@@ -627,11 +630,13 @@ func selectModelByTier(tier ModelTier, token *Token) string {
 		return selectModelByTier(TierEconomy, token)
 	}
 
-	// 兜底：返回第一个可用模型
-	if len(availableModels) > 0 {
-		return availableModels[0]
+	// 兜底：返回第一个有可用 Provider 的模型
+	for _, m := range availableModels {
+		if router.SelectProvider(m, token, nil, "") != nil {
+			return m
+		}
 	}
-	return "qwen3-coder-flash" // 终极兜底
+	return ""
 }
 
 func getAvailableModels(token *Token) []string {
@@ -644,12 +649,19 @@ func getAvailableModels(token *Token) []string {
 		if !p.IsAvailable("") { // 不限 model，只看 Provider 状态
 			continue
 		}
+		// smart 选模型时排除 unhealthy/auth_failed/timeout 的 Provider，
+		// 避免选了模型但实际无可用 Provider
+		if p.Status == "unhealthy" || p.Status == "auth_failed" || p.Status == "timeout" {
+			continue
+		}
 		if token != nil && !token.CanUseProvider(p.ID) {
 			continue
 		}
 		for _, m := range parseModelsList(p.Models) {
 			if token == nil || token.CanUseModel(m) {
-				modelSet[m] = true
+				if !p.IsModelCooling(m) {
+					modelSet[m] = true
+				}
 			}
 		}
 	}

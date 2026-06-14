@@ -128,6 +128,13 @@ func (r *Router) GetProviders() []*Provider {
 // excludeIDs: 本次请求链中已失败的 Provider，避免循环
 // sessionID: 会话 ID，用于粘性路由（同一 session 固定到同一 Provider 以利用 prompt cache）
 func (r *Router) SelectProvider(model string, token *Token, excludeIDs []int, sessionID string) *Provider {
+	return r.SelectProviderWithFormat(model, token, excludeIDs, sessionID, "")
+}
+
+// SelectProviderWithFormat 同 SelectProvider，额外支持 api_format 过滤
+// requireFormat: "openai" / "anthropic" / "" (不限制)
+// 用于带 tools 的请求场景：跨协议翻译会丢 tool_use/tool_calls，必须选协议匹配的 provider
+func (r *Router) SelectProviderWithFormat(model string, token *Token, excludeIDs []int, sessionID, requireFormat string) *Provider {
 	r.mu.RLock()
 	providers := r.providers
 	r.mu.RUnlock()
@@ -146,6 +153,11 @@ func (r *Router) SelectProvider(model string, token *Token, excludeIDs []int, se
 		}
 		// 额度紧急 → 跳过
 		if p.QuotaTotal > 0 && p.QuotaRatio() < cfg.QuotaCriticalThreshold {
+			continue
+		}
+		// 协议匹配（用于带 tools 的请求，避免跨协议翻译丢 tool_use/tool_calls）
+		// 双 URL 场景：provider 有 AnthropicBaseURL 时也视作支持 anthropic 协议
+		if requireFormat != "" && !p.HasFormat(requireFormat) {
 			continue
 		}
 		candidates = append(candidates, p)

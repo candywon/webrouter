@@ -131,11 +131,10 @@ class DirectProviderAdapter(BaseProviderAdapter):
         provider_models = self.get_models()
         if provider_models:
             body['model'] = provider_models[0]
-        # 智能去重：如果 base_url 路径已包含 endpoint 的前缀，则去掉重复部分
-        # 例1：base_url=.../compatible-mode/v1 + endpoint=/compatible-mode/v1/chat/completions
-        #   → 实际 endpoint=/chat/completions
-        # 例2：base_url=.../v1 + endpoint=/v1/chat/completions
-        #   → 实际 endpoint=/chat/completions
+        # 智能去重：如果 base_url 路径以 /vN 结尾，且 endpoint 也以 /vN 开头，去掉 endpoint 的版本前缀
+        # 例1：base_url=.../compatible-mode/v1 + endpoint=/v1/chat/completions → /chat/completions
+        # 例2：base_url=.../api/coding/v3   + endpoint=/v1/chat/completions → /chat/completions
+        # 例3：base_url=.../v1              + endpoint=/v1/chat/completions → /chat/completions
         endpoint = config['endpoint']
         base_path = parsed.path.strip('/') if parsed.path else ''
         if base_path:
@@ -144,10 +143,15 @@ class DirectProviderAdapter(BaseProviderAdapter):
                 endpoint = endpoint[len(base_path) + 1:]
                 if not endpoint.startswith('/'):
                     endpoint = '/' + endpoint
-            elif base_path.endswith('/v1') and endpoint.startswith('/v1/'):
-                endpoint = endpoint[3:]
-                if not endpoint.startswith('/'):
-                    endpoint = '/' + endpoint
+            else:
+                # base_url 以 /vN 结尾，endpoint 以 /vN 开头 → 去掉 endpoint 的版本前缀
+                import re
+                base_suffix = base_path.rsplit('/', 1)[-1] if '/' in base_path else base_path
+                ep_version_match = re.match(r'^/(v\d+)/', endpoint)
+                if re.match(r'^v\d+$', base_suffix) and ep_version_match:
+                    endpoint = endpoint[len(ep_version_match.group(1)) + 1:]
+                    if not endpoint.startswith('/'):
+                        endpoint = '/' + endpoint
 
         headers = config.get('headers_extra', {})
         return self._send_test_request(endpoint, body, headers=headers)
@@ -312,6 +316,109 @@ class ProviderFactory:
     @classmethod
     def get_supported_types(cls):
         return list(cls._adapters.keys())
+
+    @classmethod
+    def auto_detect_anthropic_url(cls, base_url: str) -> str:
+        """根据已知厂商 OpenAI URL 推断对应的 Anthropic 兼容端点 URL。
+        返回空字符串表示该厂商无 Anthropic 兼容端点或未知。
+        """
+        if not base_url:
+            return ''
+        url = base_url.rstrip('/')
+        lower = url.lower()
+
+        # 火山方舟 Doubao：OpenAI /api/v3 ↔ Anthropic /api/v3 (内部分流到 /v1/messages)
+        # 实测两套接口共用一个 base，差异在请求路径
+        if 'ark.cn-beijing.volces.com' in lower:
+            # /api/v3/chat/completions ↔ /api/v3/anthropic/v1/messages
+            # ForwardAnthropic 会拼接 /v1/messages，所以 anthropic_base 给到 .../api/v3/anthropic
+            if '/api/v3/anthropic' in lower:
+                return url
+            if lower.endswith('/api/v3') or '/api/v3' in lower:
+                return url.split('/api/v3')[0] + '/api/v3/anthropic'
+            return url + '/anthropic'
+
+        # 智谱 GLM：OpenAI /api/paas/v4 ↔ Anthropic /api/anthropic
+        if 'open.bigmodel.cn' in lower:
+            return 'https://open.bigmodel.cn/api/anthropic'
+
+        # DashScope：OpenAI /compatible-mode/v1 ↔ Anthropic /api/v2/apps/anthropic
+        if 'dashscope.aliyuncs.com' in lower:
+            return 'https://dashscope.aliyuncs.com/api/v2/apps/anthropic'
+
+        # Anthropic 官方
+        if 'api.anthropic.com' in lower:
+            return url  # 主 URL 就是 Anthropic 端点
+
+        # OpenAI / Moonshot / DeepSeek / Mistral 等仅 OpenAI
+        return ''
+
+    # 已知 vendor 的 Anthropic 端点：(host, path_prefix)
+    # path_prefix 按 "/" 分段匹配，避免 /api/coding 误命中 /api/coding-openai 等。
+    # 空 path_prefix 表示整个 host 都是 Anthropic 协议。
+    ANTHROPIC_URL_PATTERNS = (
+        ('api.anthropic.com', ''),
+        ('ark.cn-beijing.volces.com', '/api/v3/anthropic'),
+        ('ark.cn-beijing.volces.com', '/api/coding'),
+        ('open.bigmodel.cn', '/api/anthropic'),
+        ('dashscope.aliyuncs.com', '/api/v2/apps/anthropic'),
+    )
+
+    OPENAI_URL_PATTERNS = (
+        ('api.openai.com', ''),
+        ('api.deepseek.com', ''),
+        ('api.moonshot.cn', ''),
+        ('api.mistral.ai', ''),
+        ('api.groq.com', ''),
+        ('api.x.ai', ''),
+        ('generativelanguage.googleapis.com', ''),
+        ('open.bigmodel.cn', '/api/paas'),
+        ('dashscope.aliyuncs.com', '/compatible-mode'),
+        ('ark.cn-beijing.volces.com', '/api/v3'),  # 注意需在 anthropic 子路径之后判断
+    )
+
+    @classmethod
+    def _match_url_pattern(cls, base_url: str, patterns):
+        """对 (host, path_prefix) 列表做 host 精确 + path 段前缀匹配。
+        命中返回 "host+path"，未命中返回空字符串。
+        """
+        if not base_url:
+            return ''
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(base_url.lower())
+        except Exception:
+            return ''
+        host = (parsed.hostname or '').strip()
+        # 把 path 拆成段，便于做精确前缀匹配（/api/coding 不会匹配 /api/coding-openai）
+        path_segs = [s for s in (parsed.path or '').strip('/').split('/') if s]
+        for p_host, p_path in patterns:
+            if host != p_host:
+                continue
+            if not p_path:
+                return p_host
+            target_segs = [s for s in p_path.strip('/').split('/') if s]
+            if len(path_segs) >= len(target_segs) and path_segs[:len(target_segs)] == target_segs:
+                return p_host + p_path
+        return ''
+
+    @classmethod
+    def auto_detect_api_format(cls, base_url: str):
+        """识别 base_url 是 OpenAI 还是 Anthropic 协议端点。
+        返回 (format, matched_pattern)：
+          format ∈ {'anthropic', 'openai', 'auto'}
+          matched_pattern 为命中的 host+path（auto 时为空字符串）
+        """
+        if not base_url:
+            return 'auto', ''
+        # Anthropic 子路径必须先判断（火山方舟 /api/v3/anthropic 在 /api/v3 之前）
+        m = cls._match_url_pattern(base_url, cls.ANTHROPIC_URL_PATTERNS)
+        if m:
+            return 'anthropic', m
+        m = cls._match_url_pattern(base_url, cls.OPENAI_URL_PATTERNS)
+        if m:
+            return 'openai', m
+        return 'auto', ''
 
     @classmethod
     def auto_detect_type(cls, base_url: str) -> str:

@@ -91,6 +91,7 @@ type ProxyResult struct {
 	StreamAborted bool                // 流式响应中途被错误中断
 	Truncated     bool                // 响应被截断（finish_reason=length 或 JSON 不完整）
 	StreamContent string              // 流式响应累积内容（用于知识捕获）
+	Passthrough   bool                // 响应已是客户端期望的最终格式，跳过解析直接转发
 }
 
 // Forward 转发请求到上游 Provider
@@ -231,7 +232,248 @@ func (ps *ProxyService) Forward(provider *Provider, endpoint string,
 	return resp, result
 }
 
-// ForwardBinary 转发二进制/多媒体请求（跳过 JSON 解析和流式检测）
+// ForwardSmart 根据 provider 协议能力选择合适的转发路径
+// - provider 支持 anthropic 协议（ApiFormat="anthropic" 或配了 AnthropicBaseURL）：
+//     · Anthropic 客户端 → 直通 ForwardAnthropic
+//     · OpenAI 客户端 → 翻译 OpenAI→Anthropic 后 ForwardAnthropic
+// - 仅 OpenAI 协议：
+//     · OpenAI 客户端 → 直通 Forward
+//     · Anthropic 客户端 → 翻译 Anthropic→OpenAI 后 Forward
+//
+// 决策准则：当 provider 同时支持两种协议且客户端是 Anthropic，优先走 Anthropic 路径以保留原生 thinking blocks / tool_use。
+func (ps *ProxyService) ForwardSmart(provider *Provider, endpoint string,
+	req *http.Request, body []byte, model string) (*http.Response, *ProxyResult) {
+
+	nativeAnth := req.Header.Get("X-WR-Anthropic-Native") == "1"
+
+	// 判断本次请求是否应走 Anthropic 上游路径
+	// 1. provider 仅支持 anthropic（无 OpenAI 端点）→ 必须走
+	// 2. provider 支持双协议 + 客户端是 Anthropic → 优先走（保留 thinking blocks）
+	// 3. 其他情况 → 走 OpenAI 路径
+	useAnthropicUpstream := false
+	if provider.ApiFormat == "anthropic" {
+		useAnthropicUpstream = true
+	} else if provider.AnthropicBaseURL != "" && nativeAnth {
+		useAnthropicUpstream = true
+	}
+
+	if !useAnthropicUpstream {
+		if nativeAnth {
+			// Anthropic 客户端 → OpenAI 上游：先翻译为 OpenAI 格式
+			oaBody, err := TranslateAnthropicToOpenAI(body)
+			if err != nil {
+				return nil, &ProxyResult{
+					StatusCode: 502,
+					Error:      fmt.Sprintf("translate anthropic→openai req: %v", err),
+				}
+			}
+			// 端点也需重映射：/v1/messages → /v1/chat/completions
+			openAIEndpoint := endpoint
+			if strings.Contains(endpoint, "/messages") {
+				openAIEndpoint = "/v1/chat/completions"
+			}
+			return ps.Forward(provider, openAIEndpoint, req, oaBody, model)
+		}
+		return ps.Forward(provider, endpoint, req, body, model)
+	}
+
+	// 仅对 chat.completions/messages 类的请求做翻译；其他端点回退到普通 Forward
+	if !strings.Contains(endpoint, "chat/completions") && !strings.Contains(endpoint, "/messages") {
+		return ps.Forward(provider, endpoint, req, body, model)
+	}
+
+	// Anthropic 上游
+	var anthBody []byte
+	if nativeAnth {
+		// 客户端已经是 Anthropic 格式 → 直通
+		anthBody = body
+	} else {
+		// OpenAI 客户端 → 翻译为 Anthropic
+		var err error
+		anthBody, err = TranslateOpenAIToAnthropicRequest(body)
+		if err != nil {
+			return nil, &ProxyResult{
+				StatusCode: 502,
+				Error:      fmt.Sprintf("translate to anthropic: %v", err),
+			}
+		}
+	}
+
+	resp, result := ps.ForwardAnthropic(provider, req, anthBody, model)
+	if resp == nil || result.StatusCode >= 400 {
+		return resp, result
+	}
+
+	// 原生 Anthropic 直通：响应不做任何转换
+	if nativeAnth {
+		result.Passthrough = true
+		return resp, result
+	}
+
+	// 2. 上游成功 → 把 Anthropic 响应译为 OpenAI 格式
+	if result.IsStream {
+		// 用 io.Pipe 把 Anthropic SSE 实时转换为 OpenAI SSE
+		pr, pw := io.Pipe()
+		go func() {
+			defer pw.Close()
+			defer resp.Body.Close()
+			if err := AnthropicSSEToOpenAISSE(pw, resp.Body, model); err != nil {
+				LogWarn("ForwardSmart: anthropic→openai SSE convert: %v", err)
+			}
+		}()
+		// 用新的 Body 替换原 resp.Body；状态码、header 不变
+		newResp := *resp
+		newResp.Body = pr
+		// Content-Length 已不再准确
+		newResp.Header = resp.Header.Clone()
+		newResp.Header.Del("Content-Length")
+		newResp.Header.Set("Content-Type", "text/event-stream")
+		return &newResp, result
+	}
+
+	// 非流式：读完整 body，转换后替换
+	rawBody, readErr := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if readErr != nil {
+		result.Error = fmt.Sprintf("read anthropic body: %v", readErr)
+		result.StatusCode = 502
+		return resp, result
+	}
+	// 上游可能返回 gzip/deflate 压缩响应，先解压再翻译
+	decoded := decodeResponseBody(rawBody, resp.Header.Get("Content-Encoding"))
+	converted, err := TranslateAnthropicToOpenAIResponse(decoded)
+	if err != nil {
+		LogWarn("ForwardSmart: translate anthropic→openai response: %v (passing raw)", err)
+		converted = decoded
+	}
+	// 解析 usage 写入 result
+	result.InputTokens, result.OutputTokens = parseAnthropicUsageFromBody(decoded)
+	resp.Body = io.NopCloser(bytes.NewReader(converted))
+	resp.Header = resp.Header.Clone()
+	resp.Header.Del("Content-Length")
+	resp.Header.Del("Content-Encoding")
+	resp.Header.Set("Content-Type", "application/json")
+	return resp, result
+}
+
+// parseAnthropicUsageFromBody 提取 Anthropic 响应中的 usage
+func parseAnthropicUsageFromBody(body []byte) (int64, int64) {
+	var r struct {
+		Usage *struct {
+			InputTokens  int64 `json:"input_tokens"`
+			OutputTokens int64 `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil || r.Usage == nil {
+		return 0, 0
+	}
+	return r.Usage.InputTokens, r.Usage.OutputTokens
+}
+
+// ForwardAnthropic 转发请求到 Anthropic 协议的上游 Provider
+// 使用 x-api-key + anthropic-version header；endpoint 强制走 /v1/messages
+func (ps *ProxyService) ForwardAnthropic(provider *Provider,
+	req *http.Request, body []byte, model string) (*http.Response, *ProxyResult) {
+
+	start := time.Now()
+	isStream := isStreamRequest(body)
+
+	// 优先使用独立配置的 Anthropic 端点（双 URL 场景），否则回退到主 BaseURL
+	anthBase := provider.AnthropicBaseURL
+	if anthBase == "" {
+		anthBase = provider.BaseURL
+	}
+	upstreamURL := buildUpstreamURL(anthBase, "/v1/messages")
+
+	upstreamReq, err := http.NewRequest("POST", upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, &ProxyResult{
+			StatusCode: 502,
+			Error:      fmt.Sprintf("build upstream request: %v", err),
+			LatencyMs:  int(time.Since(start).Milliseconds()),
+		}
+	}
+
+	// 复制必要请求头（去掉 Authorization / x-api-key / Host），保留 Accept/User-Agent 等
+	for k, vv := range req.Header {
+		if strings.EqualFold(k, "Host") ||
+			strings.EqualFold(k, "Authorization") ||
+			strings.EqualFold(k, "x-api-key") ||
+			strings.EqualFold(k, "Content-Length") {
+			continue
+		}
+		for _, v := range vv {
+			upstreamReq.Header.Add(k, v)
+		}
+	}
+	upstreamReq.Header.Set("Content-Type", "application/json")
+	upstreamReq.Header.Set("anthropic-version", "2023-06-01")
+	// 强制不压缩，便于本端做 SSE/JSON 解析与翻译
+	upstreamReq.Header.Set("Accept-Encoding", "identity")
+	if provider.APIKey != "" {
+		upstreamReq.Header.Set("x-api-key", provider.APIKey)
+	}
+
+	timeout := time.Duration(provider.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		if isStream {
+			timeout = cfg.StreamTimeout
+		} else {
+			timeout = cfg.DefaultTimeout
+		}
+	}
+	if isStream && timeout < cfg.StreamTimeout {
+		timeout = cfg.StreamTimeout
+	}
+	ps.client.Timeout = timeout
+
+	resp, err := ps.client.Do(upstreamReq)
+	if err != nil {
+		return nil, &ProxyResult{
+			StatusCode: 502,
+			Error:      fmt.Sprintf("upstream request failed: %v", err),
+			LatencyMs:  int(time.Since(start).Milliseconds()),
+		}
+	}
+
+	result := &ProxyResult{
+		StatusCode: resp.StatusCode,
+		IsStream:   isStream,
+		LatencyMs:  int(time.Since(start).Milliseconds()),
+	}
+
+	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+		provider.ConsecFails++
+	} else if resp.StatusCode < 400 {
+		provider.ConsecFails = 0
+	}
+
+	if resp.StatusCode >= 400 {
+		rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		body := decodeResponseBody(rawBody, resp.Header.Get("Content-Encoding"))
+		if readErr == nil && len(body) > 0 {
+			result.UpstreamError = DetectUpstreamError(resp.StatusCode, body)
+			if result.UpstreamError.Type != UpstreamErrNone && result.Error == "" {
+				result.Error = fmt.Sprintf("upstream semantic error: %s - %s",
+					result.UpstreamError.Type, result.UpstreamError.Message)
+			}
+			if result.Error == "" {
+				snippet := strings.TrimSpace(string(body))
+				if len(snippet) > 500 {
+					snippet = snippet[:500] + "…"
+				}
+				result.Error = fmt.Sprintf("upstream HTTP %d: %s", resp.StatusCode, snippet)
+			}
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(rawBody))
+		return resp, result
+	}
+
+	return resp, result
+}
+
+
 // 用于 audio/image 端点，body 可以是 JSON 或 multipart
 func (ps *ProxyService) ForwardBinary(provider *Provider, endpoint string,
 	req *http.Request, body []byte, model string, contentType string, isMultipart bool) (*http.Response, *ProxyResult) {
@@ -379,7 +621,8 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 
 	var lastChunk strings.Builder
 	var lastFinishReason string          // 跟踪最后一个 finish_reason
-	var streamContentBuf strings.Builder // 累积流式内容（用于知识捕获，上限 10KB）
+	var streamContentBuf strings.Builder       // 累积流式 content（最终答案，用于知识捕获，上限 10KB）
+	var streamReasoningBuf strings.Builder   // 累积流式 reasoning_content（思考过程）
 	const maxStreamCapture = 10 * 1024
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -414,41 +657,48 @@ func StreamResponse(w http.ResponseWriter, resp *http.Response,
 			if data != "[DONE]" {
 				lastChunk.Reset()
 				lastChunk.WriteString(data)
-
-				// 累积流式内容（用于知识捕获）
-				if streamContentBuf.Len() < maxStreamCapture {
-					if delta := extractStreamDeltaContent(data); delta != "" {
-						streamContentBuf.WriteString(delta)
+					// 累积流式内容（用于知识捕获，分 content/reasoning 双缓冲）
+					if streamContentBuf.Len() < maxStreamCapture {
+						c, r := extractStreamDeltaContent(data)
+						if c != "" {
+							streamContentBuf.WriteString(c)
+						}
+						if r != "" {
+							streamReasoningBuf.WriteString(r)
+						}
 					}
-				}
 
-				// 提取 finish_reason（流式）
-				if fr := extractFinishReason(data); fr != "" {
-					lastFinishReason = fr
-				}
-
-				// 检测流中的语义错误（如额度用完、限流等）
-				errDetail := DetectStreamError(data)
-				if errDetail.Type != UpstreamErrNone {
-					LogWarn("StreamResponse: detected error in stream: type=%s code=%s msg=%s",
-						errDetail.Type, errDetail.Code, errDetail.Message)
-					result.UpstreamError = errDetail
-					result.StreamAborted = true
-					if result.Error == "" {
-						result.Error = fmt.Sprintf("stream error: %s - %s",
-							errDetail.Type, errDetail.Message)
+					// 提取 finish_reason（流式）
+					if fr := extractFinishReason(data); fr != "" {
+						lastFinishReason = fr
 					}
-					// 继续读取剩余数据（不中断流），但标记为 aborted
-					// 上层 handleProxy 会根据 StreamAborted 决定是否 failover
+
+					// 检测流中的语义错误（如额度用完、限流等）
+					errDetail := DetectStreamError(data)
+					if errDetail.Type != UpstreamErrNone {
+						LogWarn("StreamResponse: detected error in stream: type=%s code=%s msg=%s",
+							errDetail.Type, errDetail.Code, errDetail.Message)
+						result.UpstreamError = errDetail
+						result.StreamAborted = true
+						if result.Error == "" {
+							result.Error = fmt.Sprintf("stream error: %s - %s",
+								errDetail.Type, errDetail.Message)
+						}
+						// 继续读取剩余数据（不中断流），但标记为 aborted
+						// 上层 handleProxy 会根据 StreamAborted 决定是否 failover
+					}
 				}
 			}
 		}
-	}
 
 	result.LatencyMs = int(time.Since(start).Milliseconds())
 
-	// 保存流式内容（用于知识捕获）
-	result.StreamContent = streamContentBuf.String()
+	// 保存流式内容（优先 content/最终答案，无 content 时回退 reasoning_content/思考过程）
+	if streamContentBuf.Len() > 0 {
+		result.StreamContent = streamContentBuf.String()
+	} else if streamReasoningBuf.Len() > 0 {
+		result.StreamContent = streamReasoningBuf.String()
+	}
 
 	// 从最后一个 chunk 提取 usage
 	usage := parseStreamUsage(lastChunk.String())
@@ -666,19 +916,21 @@ func decodeResponseBody(body []byte, encoding string) []byte {
 }
 
 // extractStreamDeltaContent 从 SSE data chunk 中提取 delta content
-func extractStreamDeltaContent(data string) string {
+func extractStreamDeltaContent(data string) (string, string) {
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"delta"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-		return ""
+		return "", ""
 	}
 	if len(chunk.Choices) > 0 {
-		return chunk.Choices[0].Delta.Content
+		d := chunk.Choices[0].Delta
+		return d.Content, d.ReasoningContent
 	}
-	return ""
+	return "", ""
 }

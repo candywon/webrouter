@@ -13,6 +13,15 @@ from i18n.messages import get_message
 providers_bp = Blueprint('providers', __name__)
 
 
+def _auto_detect_api_format(base_url: str) -> str:
+    """根据已知 vendor URL 模式推断上游 API 协议（仅返回格式，不返回命中规则）。
+    用于 _provider_full_dict 给前端兜底显示，正式建议见 /detect 接口。
+    """
+    from models.provider_factory import ProviderFactory
+    fmt, _ = ProviderFactory.auto_detect_api_format(base_url)
+    return fmt
+
+
 def _get_or_create_ext(provider_id):
     """获取或创建 Provider 扩展配置"""
     ext = ProviderExt.query.get(provider_id)
@@ -51,6 +60,7 @@ def _provider_full_dict(provider, include_secrets=False):
             'priority': 50,
             'weight': 100,
             'supports_tools': True,
+            'api_format': _auto_detect_api_format(provider.base_url),
         })
 
     # 额度信息
@@ -59,7 +69,7 @@ def _provider_full_dict(provider, include_secrets=False):
         d.update(quota.to_dict())
 
     # 预测信息
-    if quota and quota.quota_total > 0:
+    if quota and (quota.quota_total or 0) > 0:
         d['prediction'] = _predict_quota(quota)
 
     return d
@@ -173,6 +183,11 @@ def create_provider():
 
     provider = Provider(name=name, type=provider_type, base_url=base_url)
 
+    # 可选 Anthropic 兼容端点（双 URL 场景）
+    anthropic_base_url = (data.get('anthropic_base_url') or '').strip()
+    if anthropic_base_url:
+        provider.anthropic_base_url = anthropic_base_url
+
     # 通用字段
     api_key = (data.get('api_key') or '').strip()
     if api_key:
@@ -226,6 +241,12 @@ def create_provider():
         provider.weight = ext.weight
     if 'supports_tools' in data:
         ext.supports_tools = bool(data['supports_tools'])
+    if 'api_format' in data and data['api_format']:
+        ext.api_format = str(data['api_format'])
+    elif not ext.api_format:
+        # 不再自动写入具体格式：保持 'auto'，由代理运行时按 vendor 规则兜底，
+        # 用户可在 UI 下拉显式选择以覆盖。
+        ext.api_format = 'auto'
     db.session.add(ext)
 
     # 创建额度记录（可选）
@@ -264,6 +285,8 @@ def update_provider(provider_id):
         provider.name = data['name'].strip()
     if 'base_url' in data:
         provider.base_url = data['base_url'].strip()
+    if 'anthropic_base_url' in data:
+        provider.anthropic_base_url = (data.get('anthropic_base_url') or '').strip()
     if 'api_key' in data:
         api_key = data['api_key'].strip()
         provider.api_key = api_key
@@ -304,6 +327,8 @@ def update_provider(provider_id):
         provider.weight = ext.weight
     if 'supports_tools' in data:
         ext.supports_tools = bool(data['supports_tools'])
+    if 'api_format' in data:
+        ext.api_format = str(data['api_format'] or 'auto')
 
     # 额度字段
     if 'quota_total' in data or 'quota_used' in data or 'quota_source' in data:
@@ -433,10 +458,18 @@ def auto_detect():
 
     from models.provider_factory import ProviderFactory
     detected_type = ProviderFactory.auto_detect_type(base_url)
+    detected_anthropic_url = ProviderFactory.auto_detect_anthropic_url(base_url)
+    suggested_api_format, matched_pattern = ProviderFactory.auto_detect_api_format(base_url)
     type_config = Provider.get_type_config(detected_type)
 
     return jsonify({
         'detected_type': detected_type,
+        'detected_anthropic_base_url': detected_anthropic_url,
+        # 'suggested_*' 表明这是建议而非强制——用户可在 UI 覆盖
+        'suggested_api_format': suggested_api_format,
+        'matched_pattern': matched_pattern,
+        # 兼容旧前端字段名（已废弃，新代码用 suggested_api_format）
+        'detected_api_format': suggested_api_format,
         'type_config': type_config,
     })
 

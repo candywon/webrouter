@@ -23,12 +23,36 @@ type KnowledgeExtractBatch struct {
 	BatchSize  int // 每次处理的 raw 条数
 	Model      string
 	TimeoutSec int
+	ProviderID int // 0 = 自动挑第一个可用 provider；>0 = 强制使用指定 provider
 }
 
 var extractBatch = KnowledgeExtractBatch{
 	BatchSize:  5,
 	Model:      "qwen3-coder-flash",
 	TimeoutSec: 120,
+	ProviderID: 0,
+}
+
+// loadExtractRuntimeConfig 每次提取任务运行前从 wr_system_settings 读取最新配置覆盖默认值。
+//   extract_model         (string) — 评估用的模型名
+//   extract_provider_id   (int)    — 强制指向某个 provider（0=自动）
+//   extract_timeout_sec   (int)    — 单次评估请求超时
+//   extract_batch_size    (int)    — 每轮处理 raw 条数
+func loadExtractRuntimeConfig() {
+	if v, ok := LoadSetting("extract_model", "").(string); ok && v != "" {
+		extractBatch.Model = v
+	}
+	if v, ok := LoadSetting("extract_provider_id", 0).(int); ok && v > 0 {
+		extractBatch.ProviderID = v
+	} else {
+		extractBatch.ProviderID = 0
+	}
+	if v, ok := LoadSetting("extract_timeout_sec", 0).(int); ok && v > 0 {
+		extractBatch.TimeoutSec = v
+	}
+	if v, ok := LoadSetting("extract_batch_size", 0).(int); ok && v > 0 {
+		extractBatch.BatchSize = v
+	}
 }
 
 // ExtractionResult LLM 单条 raw 提取结果
@@ -57,6 +81,9 @@ type rawEntry struct {
 
 // ExtractRawToKnowledge 从 raw 表批量提取知识
 func ExtractRawToKnowledge() (processed int, err error) {
+	// 0. 每次运行前从 wr_system_settings 读取最新配置（运维改动 → 立即生效）
+	loadExtractRuntimeConfig()
+
 	// 1. 查询 pending 状态的 raw 数据
 	rows, err := db.Query(`
 		SELECT id, request_id, token_id, token_name, model_name,
@@ -200,21 +227,32 @@ type rawEntryForAssess struct {
 func buildAssessPrompt(entry rawEntryForAssess) string {
 	var buf bytes.Buffer
 
-	buf.WriteString("你是一个企业知识提取专家。请分析以下对话是否包含有价值的企业知识。\n\n")
+	buf.WriteString("你是一个企业知识提取专家。你的核心能力是从零散、碎片化的对话中识别、归纳和组织知识。\n\n")
+
+	buf.WriteString("## 重要原则\n")
+	buf.WriteString("1. 知识往往是零碎分散的，一段简短对话可能就是一个知识点的一部分\n")
+	buf.WriteString("2. 用户问询（查找、回忆、确认、对比）本身就是知识需求的强烈信号\n")
+	buf.WriteString("3. 即使回复很简练，只要包含具体信息、结论或建议，就值得捕获\n")
+	buf.WriteString("4. 你需要做逻辑归纳：从对话中提炼出核心意思，组织成结构化的知识条目\n\n")
 
 	buf.WriteString(fmt.Sprintf("## 对话内容\n"))
 	buf.WriteString(fmt.Sprintf("【对话轮数】%d\n", entry.TurnCount))
 	buf.WriteString(fmt.Sprintf("【Prompt】\n%s\n\n", truncate(entry.Prompt, 2000)))
 	buf.WriteString(fmt.Sprintf("【Response】\n%s\n\n", truncate(entry.Response, 3000)))
 
-	buf.WriteString("## 提取要求\n")
-	buf.WriteString("请判断该对话是否包含以下类型的企业知识：\n")
+	buf.WriteString("## 分析步骤\n")
+	buf.WriteString("1. **识别意图**：用户在问什么？是在查找信息、确认事实、还是寻求建议？\n")
+	buf.WriteString("2. **提炼核心**：回复中哪些是实质信息（数据、结论、方法、规则）？\n")
+	buf.WriteString("3. **归纳组织**：将碎片信息组织成完整的知识条目\n")
+	buf.WriteString("4. **判断价值**：这些信息是否对未来的类似问题有参考价值？\n\n")
+
+	buf.WriteString("## 知识类型\n")
 	buf.WriteString("- **factual**（事实性）：具体数据、指标、规则、定义、联系方式、配置信息等\n")
 	buf.WriteString("- **analytical**（分析性）：分析结论、趋势判断、原因推断、决策建议等\n")
 	buf.WriteString("- **procedural**（流程性）：操作步骤、审批流程、规范指南、SOP等\n\n")
 
 	buf.WriteString("## 输出格式（严格 JSON，不要其他内容）\n")
-	buf.WriteString(`{"has_knowledge": true/false, "knowledge_type": "factual/analytical/procedural", "confidence": 0.0-1.0, "domain_code": "对应业务域代码", "title": "知识标题（50字以内）", "summary": "知识摘要（200字以内）", "data_points": ["事实性数据点数组（仅factual类型需要）"]}`)
+	buf.WriteString(`{"has_knowledge": true/false, "knowledge_type": "factual/analytical/procedural", "confidence": 0.0-1.0, "domain_code": "业务域代码（如tech/finance/hr/legal/admin/sales/marketing/service/strategy）", "title": "知识标题（50字以内，提炼核心）", "summary": "知识摘要（200字以内，归纳组织后的完整表述）", "data_points": ["关键事实数据点数组"]}`)
 
 	return buf.String()
 }
@@ -392,36 +430,88 @@ func callExtractionLLM(prompt string) (string, error) {
 		return "", fmt.Errorf("no available provider")
 	}
 
-	// 选择一个可用的 Provider（不盲目取第一个）
-	var provider *Provider
-	for _, p := range providers {
-		if p.IsAvailable("") {
-			provider = p
-			break
+	// 选 provider：
+	//   1) 配置 extract_provider_id 指定 → 严格使用（不可用则报错，由外层 skipped + warn）
+	//      支持父 Provider ID 与"channel 展开后的虚拟 ID"两种匹配：
+	//        - p.ID == cfgID                                （未启用 channel 的 Provider）
+	//        - p.ID > 100000 && p.ID % 100000 == cfgID      （channel 展开形成的虚拟 ID）
+	//      多个匹配时优先挑 IsAvailable 的，否则取第一个并由 IsAvailable 报错说明状态。
+	//   2) 否则降级为"自动模式"：构建候选列表（IsAvailable 的 OpenAI 协议 provider），
+	//      逐个 try，单个失败切下一个；全部失败才返回最后一个 error。
+	if extractBatch.ProviderID > 0 {
+		cfgID := extractBatch.ProviderID
+		var matched []*Provider
+		for _, p := range providers {
+			if p.ID == cfgID || (p.ID > 100000 && p.ID%100000 == cfgID) {
+				matched = append(matched, p)
+			}
 		}
-	}
-	if provider == nil {
-		return "", fmt.Errorf("no healthy provider available")
+		if len(matched) == 0 {
+			return "", fmt.Errorf("extract_provider_id=%d not loaded by router", cfgID)
+		}
+		var provider *Provider
+		for _, p := range matched {
+			if p.IsAvailable(extractBatch.Model) {
+				provider = p
+				break
+			}
+		}
+		if provider == nil {
+			p := matched[0]
+			return "", fmt.Errorf("extract provider %d (%s, id=%d) unavailable for model %s (status=%s)",
+				cfgID, p.Name, p.ID, extractBatch.Model, p.Status)
+		}
+		return tryExtractWithProvider(provider, prompt)
 	}
 
+	// 自动模式：候选列表 = IsAvailable && OpenAI 协议（避免发到 Anthropic 端点直接 404）
+	var candidates []*Provider
+	for _, p := range providers {
+		if !p.IsAvailable(extractBatch.Model) {
+			continue
+		}
+		if p.ApiFormat == "anthropic" {
+			continue
+		}
+		candidates = append(candidates, p)
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no healthy openai-format provider available for extract model %s", extractBatch.Model)
+	}
+
+	var lastErr error
+	for _, p := range candidates {
+		out, err := tryExtractWithProvider(p, prompt)
+		if err == nil {
+			return out, nil
+		}
+		LogWarn("[extract] provider %d (%s) failed: %v, trying next candidate", p.ID, p.Name, err)
+		lastErr = err
+	}
+	return "", fmt.Errorf("all %d candidate providers failed; last error: %w", len(candidates), lastErr)
+}
+
+// tryExtractWithProvider 用指定 provider 调一次评估 LLM 并返回原始 content
+func tryExtractWithProvider(provider *Provider, prompt string) (string, error) {
 	body := map[string]interface{}{
 		"model": extractBatch.Model,
 		"messages": []map[string]interface{}{
-			{"role": "system", "content": "你是一个企业知识提取专家。请严格按 JSON 格式输出，不要其他内容。"},
+			{"role": "system", "content": "你是一个企业知识提取专家。请严格按 JSON 格式输出，不要其他内容。直接以 { 开头，} 结尾，不要包裹 markdown 代码块。"},
 			{"role": "user", "content": prompt},
 		},
-		"max_tokens":      1000,
-		"temperature":     0.1,
-		"response_format": map[string]string{"type": "json_object"},
+		"max_tokens":  1000,
+		"temperature": 0.1,
+	}
+	// response_format=json_object 仅 OpenAI / DeepSeek / Qwen-compatible 支持；
+	// ARK/Doubao 等会拒绝。允许通过 setting 关闭以兼容更多上游。
+	if v, ok := LoadSetting("extract_force_json_object", false).(bool); ok && v {
+		body["response_format"] = map[string]string{"type": "json_object"}
 	}
 
 	bodyBytes, _ := json.Marshal(body)
 
-	// 构造上游 URL（处理 /v1 重复问题）
-	upstreamURL := provider.BaseURL + "/v1/chat/completions"
-	if strings.HasSuffix(provider.BaseURL, "/v1") {
-		upstreamURL = provider.BaseURL + "/chat/completions"
-	}
+	// 构造上游 URL（智能去重）
+	upstreamURL := buildUpstreamURL(provider.BaseURL, "/v1/chat/completions")
 
 	httpReq, err := http.NewRequest("POST", upstreamURL,
 		bytes.NewReader(bodyBytes))
@@ -434,7 +524,7 @@ func callExtractionLLM(prompt string) (string, error) {
 	client := &http.Client{Timeout: time.Duration(extractBatch.TimeoutSec) * time.Second}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("call LLM: %w", err)
+		return "", fmt.Errorf("call LLM (provider=%d %s): %w", provider.ID, provider.Name, err)
 	}
 	defer resp.Body.Close()
 
@@ -444,7 +534,8 @@ func callExtractionLLM(prompt string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("LLM returned status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("LLM returned status %d (provider=%d %s, model=%s): %s",
+			resp.StatusCode, provider.ID, provider.Name, extractBatch.Model, string(respBody))
 	}
 
 	var llmResp struct {

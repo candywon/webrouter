@@ -65,6 +65,7 @@ class ChannelPage {
                 <div class="channel-default-info">
                     <table>
                         <tr><td style="width:120px;color:var(--text-secondary)">Base URL</td><td>${this.escHtml(dc.base_url || '-')}</td></tr>
+                        ${dc.anthropic_base_url ? `<tr><td style="color:var(--text-secondary)">Anthropic 端点</td><td><code>${this.escHtml(dc.anthropic_base_url)}</code></td></tr>` : ''}
                         <tr><td style="color:var(--text-secondary)">API Key</td><td><code>${this.escHtml(dc.api_key_masked || '***')}</code></td></tr>
                         <tr><td style="color:var(--text-secondary)">${I18n.t('common.availableModels')}</td><td>${dc.models && dc.models.length ? dc.models.map(m => `<span class="model-tag">${this.escHtml(m)}</span>`).join('') : I18n.t('common.all')}</td></tr>
                         <tr><td style="color:var(--text-secondary)">${I18n.t('channel.priorityWeight')}</td><td>${dc.priority} / ${dc.weight}</td></tr>
@@ -86,11 +87,13 @@ class ChannelPage {
                 <div class="channel-card ${enabled ? '' : 'channel-disabled'}">
                     <div class="channel-header">
                         <span class="channel-name">${this.escHtml(ch.name)}</span>
-                        ${enabled ? '<span class="badge badge-healthy">${I18n.t("common.enabledStatus")}</span>' : '<span class="badge badge-unknown">${I18n.t("common.disabledStatus")}</span>'}
+                        ${enabled ? `<span class="badge badge-healthy">${I18n.t("common.enabledStatus")}</span>` : `<span class="badge badge-unknown">${I18n.t("common.disabledStatus")}</span>`}
                         <span class="channel-id">#${ch.id}</span>
                     </div>
                     <div class="channel-meta">
                         ${ch.resolved_base_url ? `<span title="Base URL">🌐 ${this.escHtml(ch.resolved_base_url)}</span>` : ''}
+                        ${ch.resolved_anthropic_base_url ? `<span title="Anthropic 端点">🅰 ${this.escHtml(ch.resolved_anthropic_base_url)}</span>` : ''}
+                        ${ch.resolved_api_format === 'anthropic' ? '<span class="badge bg-info" title="生效协议">Anthropic</span>' : ''}
                         ${ch.resolved_priority != null ? `<span title="${I18n.t('common.priority')}">⬆ ${ch.resolved_priority}</span>` : ''}
                         ${ch.resolved_weight != null ? `<span title="${I18n.t('common.weight')}">⚖ ${ch.resolved_weight}</span>` : ''}
                         ${ch.rate_limit_rpm ? `<span title="RPM">⏱ ${ch.rate_limit_rpm}/min</span>` : ''}
@@ -128,10 +131,32 @@ class ChannelPage {
                             <label>${I18n.t('channel.nameRequired')}</label>
                             <input type="text" id="cf-name" required placeholder="${I18n.t('channel.namePlaceholder')}">
                         </div>
-                        <div class="form-group">
-                            <label>${I18n.t('channel.baseUrlInherit')}</label>
-                            <input type="text" id="cf-base-url" placeholder="https://...">
+
+                        <!-- 主端点卡片（留空全部继承 Provider）-->
+                        <div class="endpoint-card" style="border:1px solid var(--border, #ccd);border-radius:6px;padding:12px;margin-bottom:12px;background:var(--card-bg, #fafbfc)">
+                            <div style="margin-bottom:8px"><strong>📡 主端点</strong> <span class="hint" style="margin:0">（留空继承 Provider）</span></div>
+                            <div class="form-group" style="margin-bottom:8px">
+                                <input type="text" id="cf-base-url" placeholder="https://...">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0">
+                                <label style="font-size:0.9em;color:var(--text-secondary)">协议格式</label>
+                                <select id="cf-api-format" onchange="channelPage.onApiFormatChange()">
+                                    <option value="">继承 Provider</option>
+                                    <option value="openai">OpenAI 格式</option>
+                                    <option value="anthropic">Anthropic 格式</option>
+                                </select>
+                                <span class="hint">仅当渠道 URL 与父 Provider 协议不同时才需修改</span>
+                            </div>
                         </div>
+
+                        <!-- 第二端点（可选/继承）-->
+                        <div class="endpoint-card" style="border:1px dashed var(--border, #ccd);border-radius:6px;padding:12px;margin-bottom:12px;background:var(--card-bg-alt, #fafbfc)">
+                            <div style="margin-bottom:8px"><strong>🅰 另加一个 Anthropic URL</strong> <span class="hint" style="margin:0">（可选 / 留空继承 Provider）</span></div>
+                            <div class="form-group" style="margin-bottom:0">
+                                <input type="text" id="cf-anthropic-base-url" placeholder="https://...">
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label>${I18n.t('channel.apiKeyInherit')}</label>
                             <input type="password" id="cf-api-key" placeholder="sk-xxx">
@@ -201,10 +226,26 @@ class ChannelPage {
         this.editingId = null;
         document.getElementById('channel-form-title').textContent = I18n.t("channel.addFormTitle");
         document.getElementById('channel-form').reset();
+        document.getElementById('cf-api-format').value = '';
+        this.onApiFormatChange();
         document.getElementById('cf-enabled').checked = true;
         document.getElementById('channel-form-modal').style.display = 'flex';
         const form = document.getElementById('channel-form');
         form.onsubmit = (e) => { e.preventDefault(); this.submitForm(); };
+    }
+
+    onApiFormatChange() {
+        const fmt = document.getElementById('cf-api-format').value;
+        const anthInput = document.getElementById('cf-anthropic-base-url');
+        if (!anthInput) return;
+        if (fmt === 'anthropic') {
+            anthInput.disabled = true;
+            anthInput.placeholder = '主端点已是 Anthropic 协议，无需再填';
+            anthInput.value = '';
+        } else {
+            anthInput.disabled = false;
+            anthInput.placeholder = 'https://...';
+        }
     }
 
     async editChannel(id) {
@@ -214,7 +255,10 @@ class ChannelPage {
         this.editingId = id;
         document.getElementById('channel-form-title').textContent = I18n.t("channel.editFormTitle");
         document.getElementById('cf-name').value = ch.name || '';
-        document.getElementById('cf-base-url').value = ch.base_url || '';
+        document.getElementById('cf-base-url').value = ch.base_url && ch.base_url !== '(继承Provider)' ? ch.base_url : '';
+        document.getElementById('cf-anthropic-base-url').value = ch.anthropic_base_url || '';
+        document.getElementById('cf-api-format').value = ch.api_format || '';
+        this.onApiFormatChange();
         document.getElementById('cf-api-key').value = ''; // 不回填key
         document.getElementById('cf-models').value = (ch.models && Array.isArray(ch.models)) ? ch.models.join(', ') : (ch.models || '');
         document.getElementById('cf-priority').value = ch.priority || 0;
@@ -240,6 +284,8 @@ class ChannelPage {
         const data = {
             name: document.getElementById('cf-name').value.trim(),
             base_url: document.getElementById('cf-base-url').value.trim(),
+            anthropic_base_url: document.getElementById('cf-anthropic-base-url').value.trim(),
+            api_format: document.getElementById('cf-api-format').value,
             api_key: document.getElementById('cf-api-key').value.trim(),
             models: models,
             priority: parseInt(document.getElementById('cf-priority').value) || 0,

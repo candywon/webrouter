@@ -138,6 +138,13 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3.05 规范化模型名：业界 LLM 模型名约定全小写，
+	// 用户传入大小写混合（如 "DeepSeek-V4-Flash"）时统一归一化以便匹配。
+	if normalized := strings.ToLower(model); normalized != model {
+		body = replaceModelInBody(body, model, normalized)
+		model = normalized
+	}
+
 	// 3.1 模型别名解析（qwen-plus → qwen-plus-2025-07-28）
 	if resolved, ok := ResolveModelAlias(model); ok {
 		LogInfo("Proxy: model alias resolved: %s → %s", model, resolved)
@@ -150,6 +157,10 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("X-Session-Id")
 	if sessionID == "" {
 		sessionID = r.Header.Get("X-Session-ID")
+	}
+	// 客户端未传 session ID 时，用 token ID 自动生成，使记忆功能对无 header 的客户端也可用
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("token-%d", token.ID)
 	}
 
 	smartResult := SmartModelSelect(model, body, token, sessionID)
@@ -180,6 +191,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	sessionID = r.Header.Get("X-Session-Id")
 	if sessionID == "" {
 		sessionID = r.Header.Get("X-Session-ID")
+	}
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("token-%d", token.ID)
 	}
 
 	// 5.1 优化特性预处理（动态后置、Token 压缩、会话压缩）
@@ -215,13 +229,40 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		costOptimalProvider = smartResult.PreferredProvider
 	}
 
+	// 如果请求带 tools/functions：优先路由到协议匹配的 provider（无翻译开销）
+	// 客户端协议判断：X-WR-Anthropic-Native=1 → Anthropic 客户端，否则 OpenAI 客户端
+	// 找不到匹配 provider 时，降级到任意可用 provider 走翻译路径（B 翻译层已支持 tools）
+	preferFormat := ""
+	if requestHasTools(body) {
+		if r.Header.Get("X-WR-Anthropic-Native") == "1" {
+			preferFormat = "anthropic"
+		} else {
+			preferFormat = "openai"
+		}
+	}
+	// selectProvider 封装两阶段选择：先按协议匹配，无候选时去掉协议约束再选
+	selectProvider := func(excl []int) *Provider {
+		if preferFormat != "" {
+			if p := router.SelectProviderWithFormat(model, token, excl, sessionID, preferFormat); p != nil {
+				return p
+			}
+		}
+		return router.SelectProvider(model, token, excl, sessionID)
+	}
+
 	for attempt := 0; attempt <= cfg.MaxFailover; attempt++ {
 		// 选 Provider
 		var provider *Provider
 		if attempt == 0 && costOptimalProvider != nil && !intInSlice(costOptimalProvider.ID, excludeIDs) {
 			provider = costOptimalProvider
+			// 即便 cost_optimal 预选，也优先选协议匹配的（如果存在）
+			if preferFormat != "" && !provider.HasFormat(preferFormat) {
+				if p := router.SelectProviderWithFormat(model, token, excludeIDs, sessionID, preferFormat); p != nil {
+					provider = p
+				}
+			}
 		} else {
-			provider = router.SelectProvider(model, token, excludeIDs, sessionID)
+			provider = selectProvider(excludeIDs)
 		}
 		if provider == nil {
 			// 所有 Provider 已排除，记录最终失败日志
@@ -263,7 +304,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 
 		// 转发（使用清洗后的 body）
 		forwardBody := sanitizeResult.Body
-		resp, result := proxySvc.Forward(provider, endpoint, r, forwardBody, model)
+		resp, result := proxySvc.ForwardSmart(provider, endpoint, r, forwardBody, model)
 
 		// 使用智能重试引擎判断是否需要 failover
 		shouldFail, reason := ShouldFailover(result, token.ID, model, body)
@@ -285,7 +326,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 				retryBody := IncreaseMaxTokens(body)
 				LogInfo("Proxy: truncated response, retrying with increased max_tokens for %s → %s",
 					model, provider.Name)
-				resp, result = proxySvc.Forward(provider, endpoint, r, retryBody, model)
+				resp, result = proxySvc.ForwardSmart(provider, endpoint, r, retryBody, model)
 				if !result.Truncated && result.Error == "" {
 					// 重试成功
 					reqCache.RecordRequestSuccess(token.ID, model, body)
@@ -344,7 +385,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 					if result.UpstreamError.Type == UpstreamErrRateLimited {
 						time.Sleep(time.Duration(retry+1) * 500 * time.Millisecond) // 0.5s, 1s 递增
 					}
-					resp, result = proxySvc.Forward(provider, endpoint, r, forwardBody, model)
+					resp, result = proxySvc.ForwardSmart(provider, endpoint, r, forwardBody, model)
 					shouldRetry, _ := ShouldFailover(result, token.ID, model, body)
 					if !shouldRetry {
 						// 重试成功
@@ -374,6 +415,12 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		reqCache.RecordRequestSuccess(token.ID, model, body)
 		rlog := BuildRequestLog(reqID, token, provider, model, endpoint, clientIP, result, false)
 		meter.RecordRequest(rlog)
+
+		// 原生直通（如 Anthropic 客户端 → Anthropic 上游）：响应不解析，原样转发
+		if result.Passthrough {
+			passthroughResponse(w, resp)
+			return
+		}
 
 		if result.IsStream {
 			// 流式响应：知识捕获暂不支持流式（后续通过压缩阶段捕获）
@@ -946,6 +993,9 @@ func handleBinaryProxy(w http.ResponseWriter, r *http.Request, endpoint string) 
 		sessionID = r.Header.Get("X-Session-ID")
 	}
 
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("token-%d", token.ID)
+	}
 	var excludeIDs []int
 	var lastResult *ProxyResult
 	var selectedProvider *Provider
@@ -1134,98 +1184,190 @@ func handleImageVariations(w http.ResponseWriter, r *http.Request) {
 	handleBinaryProxy(w, r, "/v1/images/variations")
 }
 
-// handleAnthropicMessages Anthropic /v1/messages → 转换为 OpenAI 格式后转发
+// handleAnthropicMessages Anthropic /v1/messages → 复用 handleProxy 流程
+// 通过 X-WR-Anthropic-Native: 1 标记，让 ForwardSmart 知道 body 已经是 Anthropic 格式：
+//   - 上游 ApiFormat="anthropic": 纯直通（保留 thinking blocks）
+//   - 上游 ApiFormat="openai": 在 ForwardSmart 内部翻译 Anthropic→OpenAI 后再转发
 func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte(`{"type":"error","error":{"type":"method_not_allowed","message":"Method not allowed"}}`))
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, `{"error":"cannot read body"}`, http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"type":"error","error":{"type":"invalid_request","message":"cannot read body"}}`))
 		return
 	}
 
-	// 提取模型和流式标记
 	var anthReq struct {
 		Model  string `json:"model"`
 		Stream bool   `json:"stream"`
 	}
 	json.Unmarshal(body, &anthReq)
-	isStream := anthReq.Stream
 
-	// 转换为 OpenAI 格式
-	openAIBody, err := TranslateAnthropicToOpenAI(body)
-	if err != nil {
-		LogWarn("[anthropic] translate failed: %v", err)
-		http.Error(w, fmt.Sprintf(`{"error":"translate failed: %s"}`, err.Error()), http.StatusBadRequest)
+	// 复用 handleProxy 的完整流程；body 保持 Anthropic 格式，ForwardSmart 根据上游协议决定是否翻译
+	openAIR := r.Clone(r.Context())
+	openAIR.Body = io.NopCloser(bytes.NewReader(body))
+	openAIR.ContentLength = int64(len(body))
+	openAIR.Header.Set("Content-Type", "application/json")
+	openAIR.Header.Set("X-WR-Anthropic-Native", "1")
+	// Anthropic SDK 用 x-api-key，转为 Authorization: Bearer
+	if openAIR.Header.Get("Authorization") == "" {
+		if apiKey := openAIR.Header.Get("x-api-key"); apiKey != "" {
+			openAIR.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+	}
+
+	rec := &anthropicRecorder{w: w, header: make(http.Header), nativeFlag: true}
+	handleProxy(rec, openAIR)
+	rec.flushToClient(anthReq.Stream, anthReq.Model)
+}
+
+// anthropicRecorder 捕获 handleProxy 的输出。响应可能是：
+//  - OpenAI 格式（上游为 OpenAI 协议，ForwardSmart 未做响应翻译）→ 需翻译为 Anthropic
+//  - Anthropic 格式（上游为 Anthropic 原生直通）→ 直接透传
+// 通过 sniff 响应内容判断。
+type anthropicRecorder struct {
+	w          http.ResponseWriter
+	statusCode int
+	header     http.Header
+	body       bytes.Buffer
+	nativeFlag bool // 仅作语义提示，实际格式仍按 sniff 决定
+}
+
+func (r *anthropicRecorder) Header() http.Header         { return r.header }
+func (r *anthropicRecorder) Write(b []byte) (int, error) { return r.body.Write(b) }
+func (r *anthropicRecorder) WriteHeader(code int)        { r.statusCode = code }
+func (r *anthropicRecorder) Flush()                      {}
+
+// isAnthropicResponse 嗅探响应 body 是否已是 Anthropic 格式
+func isAnthropicResponse(body []byte, isStream bool) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if isStream {
+		// Anthropic SSE 第一个事件通常是 "event: message_start"
+		head := body
+		if len(head) > 256 {
+			head = head[:256]
+		}
+		s := string(head)
+		return strings.Contains(s, "event: message_start") ||
+			strings.Contains(s, "event: content_block_") ||
+			strings.Contains(s, `"type":"message_start"`)
+	}
+	// 非流式：Anthropic JSON 顶层 type=="message"
+	var probe struct {
+		Type   string `json:"type"`
+		Object string `json:"object"`
+	}
+	if json.Unmarshal(body, &probe) != nil {
+		return false
+	}
+	if probe.Type == "message" {
+		return true
+	}
+	if strings.HasPrefix(probe.Object, "chat.completion") {
+		return false
+	}
+	return false
+}
+
+func (r *anthropicRecorder) flushToClient(isStream bool, model string) {
+	respBody := r.body.Bytes()
+
+	if r.statusCode == 0 {
+		r.statusCode = 200
+	}
+
+	// 上游错误：透传错误体
+	if r.statusCode >= 400 {
+		for k, vs := range r.header {
+			for _, v := range vs {
+				r.w.Header().Add(k, v)
+			}
+		}
+		if r.w.Header().Get("Content-Type") == "" {
+			r.w.Header().Set("Content-Type", "application/json")
+		}
+		r.w.WriteHeader(r.statusCode)
+		r.w.Write(respBody)
 		return
 	}
 
-	// 构建内部请求以复用认证和路由
-	internalReq, _ := http.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(openAIBody))
-	internalReq.Header = r.Header.Clone()
-	internalReq.Header.Set("Content-Type", "application/json")
-
-	// 认证
-	token, authResult := authenticateRequest(internalReq)
-	if authResult != nil && authResult.Error != "" {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, authResult.Error), authResult.StatusCode)
-		return
-	}
-
-	// 解析 model 别名
-	model := anthReq.Model
-	if resolved, ok := ResolveModelAlias(model); ok {
-		model = resolved
-	}
-
-	// 选择 Provider
-	provider := router.SelectProvider(model, token, nil, "")
-	if provider == nil {
-		http.Error(w, `{"error":"no available provider"}`, http.StatusServiceUnavailable)
-		return
-	}
-
-	// 构建上游请求
-	upstreamURL := provider.BaseURL + "/v1/chat/completions"
-	upstreamReq, _ := http.NewRequest("POST", upstreamURL, bytes.NewReader(openAIBody))
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("Authorization", "Bearer "+provider.APIKey)
-
-	client := &http.Client{
-		Timeout: 180 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:    100,
-			IdleConnTimeout: 90 * time.Second,
-		},
-	}
-
-	upstreamResp, err := client.Do(upstreamReq)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"upstream request failed: %s"}`, err.Error()), http.StatusBadGateway)
-		return
-	}
-	defer upstreamResp.Body.Close()
+	alreadyAnthropic := isAnthropicResponse(respBody, isStream)
 
 	if isStream {
-		// 流式响应 → Anthropic SSE 格式
-		StreamAnthropicResponse(w, upstreamResp, model)
+		if alreadyAnthropic {
+			// Anthropic 直通：丢弃 message_stop 之后的重复块（部分上游会重复发送终止三连）
+			cleaned := truncateAfterMessageStop(respBody)
+			for k, vs := range r.header {
+				for _, v := range vs {
+					r.w.Header().Add(k, v)
+				}
+			}
+			r.w.Header().Set("Content-Type", "text/event-stream")
+			r.w.Header().Set("Cache-Control", "no-cache")
+			r.w.Header().Set("Connection", "keep-alive")
+			r.w.WriteHeader(r.statusCode)
+			r.w.Write(cleaned)
+			if f, ok := r.w.(http.Flusher); ok {
+				f.Flush()
+			}
+			return
+		}
+		// OpenAI SSE → Anthropic SSE
+		upstreamResp := &http.Response{
+			StatusCode: r.statusCode,
+			Body:       io.NopCloser(bytes.NewReader(respBody)),
+		}
+		StreamAnthropicResponse(r.w, upstreamResp, model)
 		return
 	}
 
-	// 非流式：读取全部响应并转换
-	respBody, _ := io.ReadAll(upstreamResp.Body)
+	// 非流式
+	for k, vs := range r.header {
+		for _, v := range vs {
+			r.w.Header().Add(k, v)
+		}
+	}
+	r.w.Header().Set("Content-Type", "application/json")
+
+	if alreadyAnthropic {
+		r.w.WriteHeader(r.statusCode)
+		r.w.Write(respBody)
+		return
+	}
+
 	converted, err := TranslateOpenAIToAnthropic(respBody)
 	if err != nil {
 		LogWarn("[anthropic] response translate failed: %v", err)
 		converted = respBody
 	}
+	r.w.WriteHeader(r.statusCode)
+	r.w.Write(converted)
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(upstreamResp.StatusCode)
-	w.Write(converted)
+// truncateAfterMessageStop 截断 SSE 流：保留到第一个 message_stop 事件块（含其后的空行），
+// 丢弃之后的所有内容。避免某些 Anthropic 兼容上游重复发送终止事件。
+func truncateAfterMessageStop(body []byte) []byte {
+	marker := []byte("event: message_stop")
+	idx := bytes.Index(body, marker)
+	if idx < 0 {
+		return body
+	}
+	// 从 marker 起向后找下一个 "\n\n"（事件块边界）
+	rest := body[idx:]
+	endIdx := bytes.Index(rest, []byte("\n\n"))
+	if endIdx < 0 {
+		return body
+	}
+	return body[:idx+endIdx+2]
 }
 
 // handleCohereChat Cohere /v1/chat → 转换为 OpenAI 格式后转发
@@ -1332,6 +1474,54 @@ func extractModel(body []byte) string {
 		return ""
 	}
 	return req.Model
+}
+
+// requestHasTools 检测请求体是否声明了工具（OpenAI 的 "tools"/"functions" 或 Anthropic 的 "tools"）
+// 跨协议翻译目前不会传递 tool_use/tool_calls，带 tools 的请求必须路由到同协议 provider。
+func requestHasTools(body []byte) bool {
+	var probe struct {
+		Tools     json.RawMessage `json:"tools"`
+		Functions json.RawMessage `json:"functions"`
+	}
+	if json.Unmarshal(body, &probe) != nil {
+		return false
+	}
+	hasArray := func(raw json.RawMessage) bool {
+		if len(raw) == 0 {
+			return false
+		}
+		var arr []json.RawMessage
+		if json.Unmarshal(raw, &arr) != nil {
+			return false
+		}
+		return len(arr) > 0
+	}
+	return hasArray(probe.Tools) || hasArray(probe.Functions)
+}
+
+// passthroughResponse 把上游响应原样写给客户端（包括 SSE 流）
+func passthroughResponse(w http.ResponseWriter, resp *http.Response) {
+	defer resp.Body.Close()
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			w.Write(buf[:n])
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
 }
 
 // reloadProviders 重新加载 Provider 列表并刷新路由
