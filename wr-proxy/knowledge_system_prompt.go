@@ -18,6 +18,10 @@ func injectKnowledgeSystemPrompt(body []byte, token *Token) []byte {
 		return body
 	}
 
+	if IsKnowledgePaused() {
+		return body
+	}
+
 	// 检查是否需要注入（仅 RAG + 自定义知识）
 	if !token.RAGEnabled && token.SystemPromptKnowledge == "" {
 		return body

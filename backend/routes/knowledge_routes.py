@@ -3,6 +3,8 @@
 
 """企业知识库 API — 知识列表/搜索/统计/域名管理"""
 import json
+import time
+from functools import wraps
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 from extensions import db
@@ -16,11 +18,126 @@ from models.wr_models import SystemSetting
 knowledge_bp = Blueprint('knowledge', __name__)
 
 
+# ============================================================
+# 暂停状态：knowledge_pause_until
+#   0  = 未暂停
+#   -1 = 永久暂停
+#   >0 = Unix epoch 秒，到期自动恢复
+# ============================================================
+def _pause_state():
+    raw = SystemSetting.get('knowledge_pause_until', 0)
+    try:
+        until = int(raw) if raw is not None else 0
+    except (TypeError, ValueError):
+        until = 0
+    now = int(time.time())
+    if until == -1:
+        return {'paused': True, 'pause_until': -1, 'remaining_days': None, 'permanent': True}
+    if until > 0 and now < until:
+        remaining_seconds = until - now
+        remaining_days = max(1, (remaining_seconds + 86399) // 86400)
+        return {'paused': True, 'pause_until': until, 'remaining_days': remaining_days, 'permanent': False}
+    return {'paused': False, 'pause_until': 0, 'remaining_days': None, 'permanent': False}
+
+
+def require_kb_active(fn):
+    """装饰器：暂停期间返回 423 Locked"""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        st = _pause_state()
+        if st['paused']:
+            return jsonify({
+                'error': 'kb_paused',
+                'pause_until': st['pause_until'],
+                'permanent': st['permanent'],
+                'remaining_days': st['remaining_days'],
+            }), 423
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+# 暂停期间放行的端点（状态查询、暂停/恢复管理、开通确认）
+_PAUSE_BYPASS_ENDPOINTS = {
+    'knowledge.knowledge_status',
+    'knowledge.knowledge_pause_state',
+    'knowledge.knowledge_pause',
+    'knowledge.knowledge_resume',
+    'knowledge.enable_knowledge',
+}
+
+
+@knowledge_bp.before_request
+def _gate_when_paused():
+    if request.endpoint in _PAUSE_BYPASS_ENDPOINTS:
+        return None
+    st = _pause_state()
+    if st['paused']:
+        return jsonify({
+            'error': 'kb_paused',
+            'pause_until': st['pause_until'],
+            'permanent': st['permanent'],
+            'remaining_days': st['remaining_days'],
+        }), 423
+    return None
+
+
 @knowledge_bp.route('/status')
 def knowledge_status():
     """Return whether the Knowledge Base feature has been enabled."""
     enabled = bool(SystemSetting.get('knowledge_enabled', False))
-    return jsonify({'enabled': enabled})
+    st = _pause_state()
+    return jsonify({
+        'enabled': enabled,
+        'paused': st['paused'],
+        'pause_until': st['pause_until'],
+        'permanent': st['permanent'],
+        'remaining_days': st['remaining_days'],
+    })
+
+
+@knowledge_bp.route('/pause_state')
+def knowledge_pause_state():
+    return jsonify(_pause_state())
+
+
+@knowledge_bp.route('/pause', methods=['POST'])
+def knowledge_pause():
+    """暂停知识库：{days: int} 或 {permanent: true}"""
+    if not bool(SystemSetting.get('knowledge_enabled', False)):
+        return jsonify({'error': 'kb_not_enabled'}), 400
+    data = request.get_json(silent=True) or {}
+    if data.get('permanent'):
+        until = -1
+    else:
+        try:
+            days = int(data.get('days', 0))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_days'}), 400
+        if days <= 0 or days > 3650:
+            return jsonify({'error': 'invalid_days'}), 400
+        until = int(time.time()) + days * 86400
+    SystemSetting.set(
+        'knowledge_pause_until',
+        until,
+        value_type='int',
+        description='Knowledge Base pause expiration (epoch seconds; -1=permanent)',
+        category='knowledge',
+        editable=True,
+    )
+    return jsonify(_pause_state())
+
+
+@knowledge_bp.route('/resume', methods=['POST'])
+def knowledge_resume():
+    SystemSetting.set(
+        'knowledge_pause_until',
+        0,
+        value_type='int',
+        description='Knowledge Base pause expiration (epoch seconds; -1=permanent)',
+        category='knowledge',
+        editable=True,
+    )
+    return jsonify(_pause_state())
 
 
 @knowledge_bp.route('/enable', methods=['POST'])

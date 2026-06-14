@@ -17,8 +17,34 @@ var (
 	knowledgeStatsMu sync.Mutex
 )
 
-// IsKnowledgeEnabled 动态读取知识库开关（从 wr_system_settings）
+// IsKnowledgePaused 读取暂停状态：knowledge_pause_until=-1 永久暂停；>0 且未过期则暂停
+func IsKnowledgePaused() bool {
+	v := LoadSetting("knowledge_pause_until", 0)
+	var until int64
+	switch x := v.(type) {
+	case int:
+		until = int64(x)
+	case int64:
+		until = x
+	case float64:
+		until = int64(x)
+	default:
+		return false
+	}
+	if until == -1 {
+		return true
+	}
+	if until > 0 && time.Now().Unix() < until {
+		return true
+	}
+	return false
+}
+
+// IsKnowledgeEnabled 动态读取知识库开关（从 wr_system_settings）；暂停态视作未启用
 func IsKnowledgeEnabled() bool {
+	if IsKnowledgePaused() {
+		return false
+	}
 	v := LoadSetting("knowledge_capture_enabled", false)
 	b, _ := v.(bool)
 	return b
