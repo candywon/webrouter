@@ -289,17 +289,21 @@ FEATURE_TOGGLE_DEFS = [
 ]
 
 # 智能模型选择 — 六维度复杂度默认配置
+# 与 wr-proxy/smart_model.go::setDefaultComplexityConfig 保持对齐
 DEFAULT_COMPLEXITY_CONFIG = {
     "tier_thresholds": {
-        "simple_max": 0.20,
-        "moderate_max": 0.45,
+        "simple_max": 0.15,
+        "moderate_max": 0.30,
+        "high_max": 0.50,
+        "extreme_max": 0.70,
     },
     "input_length": {
         "enabled": True,
         "levels": [
-            {"max_chars": 200, "score": 0.05},
-            {"max_chars": 800, "score": 0.12},
-            {"max_chars": 2000, "score": 0.20},
+            {"max_chars": 200, "score": 0.03},
+            {"max_chars": 800, "score": 0.08},
+            {"max_chars": 2000, "score": 0.14},
+            {"max_chars": 5000, "score": 0.22},
             {"max_chars": 0, "score": 0.30},
         ],
         "description": "Scores by total message length; longer input is treated as more complex",
@@ -308,42 +312,102 @@ DEFAULT_COMPLEXITY_CONFIG = {
         "enabled": True,
         "levels": [
             {"max_msgs": 2, "score": 0.0},
-            {"max_msgs": 5, "score": 0.08},
-            {"max_msgs": 10, "score": 0.15},
-            {"max_msgs": 0, "score": 0.20},
+            {"max_msgs": 5, "score": 0.05},
+            {"max_msgs": 10, "score": 0.10},
+            {"max_msgs": 20, "score": 0.16},
+            {"max_msgs": 0, "score": 0.22},
         ],
         "description": "Scores by conversation turns; more turns are treated as more complex",
     },
     "code_detection": {
         "enabled": True,
-        "score": 0.15,
+        "score": 0.14,
         "keywords": ["```", "def ", "function ", "class ", "import ", "return "],
         "description": "Detects code features such as code blocks and function definitions; matches add complexity score",
     },
     "tools_detection": {
         "enabled": True,
-        "tools_score": 0.20,
-        "functions_score": 0.15,
+        "tools_score": 0.16,
+        "functions_score": 0.12,
         "description": "Detects tools/functions fields; tool usage indicates a more complex task",
     },
     "reasoning_keywords": {
         "enabled": True,
-        "score": 0.12,
+        "score": 0.14,
         "keywords": [
+            "分析", "推理", "证明", "计算", "推导",
             "explain", "analyze", "reason", "prove", "calculate",
             "derive", "compare", "evaluate", "critique",
-            "why", "cause", "principle", "logic",
-            "steps", "plan", "strategy", "design",
+            "为什么", "原因", "原理", "逻辑",
+            "步骤", "方案", "策略", "设计",
         ],
         "description": "Adds complexity score when the last user message contains reasoning or analysis keywords",
     },
     "system_prompt": {
         "enabled": True,
         "threshold_chars": 500,
-        "score": 0.08,
+        "score": 0.06,
         "description": "Adds complexity score when the system message exceeds the configured character threshold",
     },
 }
+
+
+def migrate_complexity_config(setting):
+    """增量补齐旧 smart_complexity_config 记录中的缺失字段。
+
+    旧版本：tier_thresholds 只有 simple_max/moderate_max；input_length/multi_turn 各 4 档。
+    新版本：四阈值 + 5 档。本函数只补不覆盖，保留用户已改的字段。
+    返回 True 表示发生了改动。
+    """
+    try:
+        cfg = json.loads(setting.value) if isinstance(setting.value, str) else (setting.value or {})
+    except Exception:
+        cfg = {}
+
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    changed = False
+
+    tier = cfg.get('tier_thresholds') or {}
+    if not isinstance(tier, dict):
+        tier = {}
+    for k, v in DEFAULT_COMPLEXITY_CONFIG['tier_thresholds'].items():
+        if k not in tier:
+            tier[k] = v
+            changed = True
+    cfg['tier_thresholds'] = tier
+
+    # 单调性兜底：若 high/extreme 落后于 moderate/high，按默认值递推
+    try:
+        if tier['high_max'] <= tier['moderate_max']:
+            tier['high_max'] = max(tier['moderate_max'] + 0.1, DEFAULT_COMPLEXITY_CONFIG['tier_thresholds']['high_max'])
+            changed = True
+        if tier['extreme_max'] <= tier['high_max']:
+            tier['extreme_max'] = max(tier['high_max'] + 0.1, DEFAULT_COMPLEXITY_CONFIG['tier_thresholds']['extreme_max'])
+            changed = True
+    except Exception:
+        pass
+
+    # input_length / multi_turn：若是旧 4 档，且最后一档是 max=0（兜底档），
+    # 在它前面插入新档把 4 档扩成 5 档。
+    for dim_key, field in (('input_length', 'max_chars'), ('multi_turn', 'max_msgs')):
+        dim = cfg.get(dim_key)
+        default_dim = DEFAULT_COMPLEXITY_CONFIG[dim_key]
+        if not isinstance(dim, dict):
+            cfg[dim_key] = json.loads(json.dumps(default_dim))
+            changed = True
+            continue
+        levels = dim.get('levels')
+        if not isinstance(levels, list) or len(levels) < len(default_dim['levels']):
+            # 简单粗暴：若条数不足，整体回退到默认值（用户极少改 levels 数量）
+            dim['levels'] = json.loads(json.dumps(default_dim['levels']))
+            if 'enabled' not in dim:
+                dim['enabled'] = True
+            changed = True
+
+    setting.value = json.dumps(cfg, ensure_ascii=False)
+    return changed
 
 
 @settings_bp.route('/seed-features', methods=['POST'])
@@ -377,6 +441,11 @@ def seed_features():
         )
         db.session.add(s)
         created.append('smart_complexity_config')
+    else:
+        # 增量迁移：旧版本只有 simple_max/moderate_max 两个阈值 + 4 档 levels，
+        # 这里把缺失的 high_max/extreme_max 与第 5 档补回，保留用户已改字段。
+        if migrate_complexity_config(existing_cc):
+            created.append('smart_complexity_config (migrated)')
 
     try:
         db.session.commit()

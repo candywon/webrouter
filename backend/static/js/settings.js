@@ -603,23 +603,31 @@ class SettingsPage {
         if (!s) return '';
 
         const cfg = s.value || {};
-        const tier = cfg.tier_thresholds || { simple_max: 0.20, moderate_max: 0.45 };
+        const tier = cfg.tier_thresholds || { simple_max: 0.15, moderate_max: 0.30, high_max: 0.50, extreme_max: 0.70 };
 
-        // 分级阈值栏
+        // 分级阈值栏 — 4 阈值 5 档：simple/moderate/high/complex/extreme → economy/standard/enhanced/premium/flagship
+        const tierBands = [
+            { key: 'simple_max',   value: tier.simple_max,   labelKey: 'settings.simpleToEconomy' },
+            { key: 'moderate_max', value: tier.moderate_max, labelKey: 'settings.moderateToStandard' },
+            { key: 'high_max',     value: tier.high_max,     labelKey: 'settings.highToEnhanced' },
+            { key: 'extreme_max',  value: tier.extreme_max,  labelKey: 'settings.complexToPremium' },
+        ];
+        const tierInputs = tierBands.map(b => `
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+                <input type="number" step="0.01" min="0" max="1" value="${b.value}"
+                    onchange="settingsPage.updateComplexityTier('${b.key}', this.value)"
+                    style="width:64px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
+                <span>${I18n.t(b.labelKey)}</span>
+            </span>
+        `).join('<span style="margin:0 6px;color:var(--text-muted);">│</span>');
+
         const tierHtml = `
-        <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg-primary);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <span style="font-weight:600;color:var(--accent);">${I18n.t('settings.tierThresholds')}</span>
-            <span style="color:var(--text-muted);font-size:13px;">
-                <input type="number" step="0.01" min="0" max="1" value="${tier.simple_max}"
-                    onchange="settingsPage.updateComplexityTier('simple_max', this.value)"
-                    style="width:64px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
-                <span style="margin:0 4px;">${I18n.t('settings.simpleToEconomy')}</span>
-                &nbsp;│&nbsp;
-                <input type="number" step="0.01" min="0" max="1" value="${tier.moderate_max}"
-                    onchange="settingsPage.updateComplexityTier('moderate_max', this.value)"
-                    style="width:64px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;text-align:center;">
-                <span style="margin:0 4px;">${I18n.t('settings.moderateToStandard')}</span>
-                &nbsp;≥&nbsp;<span style="font-weight:500;">${tier.moderate_max}</span>&nbsp;→ premium
+            <span style="color:var(--text-muted);font-size:13px;display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;">
+                ${tierInputs}
+                <span style="margin:0 4px;color:var(--text-muted);">│</span>
+                <span>≥&nbsp;<span style="font-weight:500;">${tier.extreme_max}</span>&nbsp;→ ${I18n.t('settings.extremeToFlagship')}</span>
             </span>
         </div>`;
 
@@ -658,17 +666,19 @@ class SettingsPage {
         ];
 
         const inputLen = cfg.input_length || { enabled: true, levels: [
-            { max_chars: 200, score: 0.05 }, { max_chars: 800, score: 0.12 },
-            { max_chars: 2000, score: 0.20 }, { max_chars: 0, score: 0.30 },
+            { max_chars: 200, score: 0.03 }, { max_chars: 800, score: 0.08 },
+            { max_chars: 2000, score: 0.14 }, { max_chars: 5000, score: 0.22 },
+            { max_chars: 0, score: 0.30 },
         ]};
         const multiTurn = cfg.multi_turn || { enabled: true, levels: [
-            { max_msgs: 2, score: 0.0 }, { max_msgs: 5, score: 0.08 },
-            { max_msgs: 10, score: 0.15 }, { max_msgs: 0, score: 0.20 },
+            { max_msgs: 2, score: 0.0 }, { max_msgs: 5, score: 0.05 },
+            { max_msgs: 10, score: 0.10 }, { max_msgs: 20, score: 0.16 },
+            { max_msgs: 0, score: 0.22 },
         ]};
-        const codeDet = cfg.code_detection || { enabled: true, score: 0.15, keywords: ['```', 'def ', 'function ', 'class ', 'import ', 'return '] };
-        const toolsDet = cfg.tools_detection || { enabled: true, tools_score: 0.20, functions_score: 0.15 };
-        const reasonDet = cfg.reasoning_keywords || { enabled: true, score: 0.12, keywords: ['explain', 'analyze', 'reason', 'prove', 'calculate', 'derive', 'compare', 'evaluate', 'critique', 'why', 'cause', 'principle', 'logic', 'steps', 'plan', 'strategy', 'design'] };
-        const sysPrompt = cfg.system_prompt || { enabled: true, threshold_chars: 500, score: 0.08 };
+        const codeDet = cfg.code_detection || { enabled: true, score: 0.14, keywords: ['```', 'def ', 'function ', 'class ', 'import ', 'return '] };
+        const toolsDet = cfg.tools_detection || { enabled: true, tools_score: 0.16, functions_score: 0.12 };
+        const reasonDet = cfg.reasoning_keywords || { enabled: true, score: 0.14, keywords: ['分析','推理','证明','计算','推导','explain','analyze','reason','prove','calculate','derive','compare','evaluate','critique','为什么','原因','原理','逻辑','步骤','方案','策略','设计'] };
+        const sysPrompt = cfg.system_prompt || { enabled: true, threshold_chars: 500, score: 0.06 };
         const dimConfigs = {
             input_length: inputLen, multi_turn: multiTurn,
             code_detection: codeDet, tools_detection: toolsDet,
@@ -807,27 +817,75 @@ class SettingsPage {
     async saveComplexityConfig() {
         const s = this.settings.find(x => x.key === 'smart_complexity_config');
         if (!s) return;
+        const err = this.validateComplexityConfig(s.value);
+        if (err) {
+            showToast(err, 'error');
+            return;
+        }
         await this.saveSetting('smart_complexity_config', s.value);
         await this.loadSettings();
         showToast(I18n.t('settings.complexitySaved'));
     }
 
+    // 校验复杂度配置：阈值递增、score ∈ [0,1]、levels max_chars/max_msgs 单调（0=兜底档允许在末位）
+    validateComplexityConfig(cfg) {
+        if (!cfg || typeof cfg !== 'object') return I18n.t('settings.complexityInvalid');
+        const t = cfg.tier_thresholds || {};
+        const order = ['simple_max', 'moderate_max', 'high_max', 'extreme_max'];
+        let prev = 0;
+        for (const k of order) {
+            const v = Number(t[k]);
+            if (!isFinite(v) || v < 0 || v > 1) return I18n.t('settings.complexityTierRange').replace('{key}', k);
+            if (v <= prev) return I18n.t('settings.complexityTierMonotonic').replace('{key}', k);
+            prev = v;
+        }
+        for (const [dimKey, field] of [['input_length','max_chars'], ['multi_turn','max_msgs']]) {
+            const dim = cfg[dimKey];
+            if (!dim || !Array.isArray(dim.levels)) continue;
+            let lastVal = -1;
+            for (let i = 0; i < dim.levels.length; i++) {
+                const lv = dim.levels[i] || {};
+                const cur = Number(lv[field]);
+                const sc = Number(lv.score);
+                if (!isFinite(sc) || sc < 0 || sc > 1) return I18n.t('settings.complexityScoreRange').replace('{dim}', dimKey);
+                if (cur === 0 && i === dim.levels.length - 1) break; // 兜底档
+                if (!(cur > lastVal)) return I18n.t('settings.complexityLevelMonotonic').replace('{dim}', dimKey);
+                lastVal = cur;
+            }
+        }
+        for (const dimKey of ['code_detection','reasoning_keywords']) {
+            const sc = Number((cfg[dimKey] || {}).score);
+            if (!isFinite(sc) || sc < 0 || sc > 1) return I18n.t('settings.complexityScoreRange').replace('{dim}', dimKey);
+        }
+        const td = cfg.tools_detection || {};
+        for (const f of ['tools_score','functions_score']) {
+            const sc = Number(td[f]);
+            if (!isFinite(sc) || sc < 0 || sc > 1) return I18n.t('settings.complexityScoreRange').replace('{dim}', 'tools_detection');
+        }
+        const sp = cfg.system_prompt || {};
+        if (!isFinite(Number(sp.score)) || sp.score < 0 || sp.score > 1) return I18n.t('settings.complexityScoreRange').replace('{dim}', 'system_prompt');
+        if (!isFinite(Number(sp.threshold_chars)) || sp.threshold_chars < 0) return I18n.t('settings.complexityScoreRange').replace('{dim}', 'system_prompt');
+        return null;
+    }
+
     async resetComplexityConfig() {
         if (!confirm(I18n.t('settings.confirmResetComplexity'))) return;
         const defaults = {
-            "tier_thresholds": { "simple_max": 0.20, "moderate_max": 0.45 },
+            "tier_thresholds": { "simple_max": 0.15, "moderate_max": 0.30, "high_max": 0.50, "extreme_max": 0.70 },
             "input_length": { "enabled": true, "levels": [
-                {"max_chars": 200, "score": 0.05}, {"max_chars": 800, "score": 0.12},
-                {"max_chars": 2000, "score": 0.20}, {"max_chars": 0, "score": 0.30}
+                {"max_chars": 200, "score": 0.03}, {"max_chars": 800, "score": 0.08},
+                {"max_chars": 2000, "score": 0.14}, {"max_chars": 5000, "score": 0.22},
+                {"max_chars": 0, "score": 0.30}
             ]},
             "multi_turn": { "enabled": true, "levels": [
-                {"max_msgs": 2, "score": 0.0}, {"max_msgs": 5, "score": 0.08},
-                {"max_msgs": 10, "score": 0.15}, {"max_msgs": 0, "score": 0.20}
+                {"max_msgs": 2, "score": 0.0}, {"max_msgs": 5, "score": 0.05},
+                {"max_msgs": 10, "score": 0.10}, {"max_msgs": 20, "score": 0.16},
+                {"max_msgs": 0, "score": 0.22}
             ]},
-            "code_detection": { "enabled": true, "score": 0.15, "keywords": ["```", "def ", "function ", "class ", "import ", "return "] },
-            "tools_detection": { "enabled": true, "tools_score": 0.20, "functions_score": 0.15 },
-            "reasoning_keywords": { "enabled": true, "score": 0.12, "keywords": ["explain", "analyze", "reason", "prove", "calculate", "derive", "compare", "evaluate", "critique", "why", "cause", "principle", "logic", "steps", "plan", "strategy", "design"] },
-            "system_prompt": { "enabled": true, "threshold_chars": 500, "score": 0.08 },
+            "code_detection": { "enabled": true, "score": 0.14, "keywords": ["```", "def ", "function ", "class ", "import ", "return "] },
+            "tools_detection": { "enabled": true, "tools_score": 0.16, "functions_score": 0.12 },
+            "reasoning_keywords": { "enabled": true, "score": 0.14, "keywords": ["分析","推理","证明","计算","推导","explain","analyze","reason","prove","calculate","derive","compare","evaluate","critique","为什么","原因","原理","逻辑","步骤","方案","策略","设计"] },
+            "system_prompt": { "enabled": true, "threshold_chars": 500, "score": 0.06 },
         };
         await this.saveSetting('smart_complexity_config', defaults);
         await this.loadSettings();
