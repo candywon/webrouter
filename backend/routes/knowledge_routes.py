@@ -155,6 +155,18 @@ def enable_knowledge():
         category='knowledge',
         editable=True,
     )
+
+    # Notify wr-proxy to pick up the new setting immediately
+    try:
+        import requests as _requests
+        import os
+        from flask import current_app
+        proxy_url = SystemSetting.get('proxy_url') or os.environ.get(
+            'WR_PROXY_URL', f"http://localhost:{current_app.config.get('PROXY_PORT', 5051)}")
+        _requests.post(f"{proxy_url}/admin/reload", timeout=5)
+    except Exception:
+        pass
+
     return jsonify({'enabled': True})
 
 

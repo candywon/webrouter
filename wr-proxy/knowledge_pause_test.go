@@ -73,7 +73,7 @@ func TestIsKnowledgeEnabled_PausedOverride(t *testing.T) {
 	// 先开启 capture 开关
 	if _, err := db.Exec(
 		`INSERT INTO wr_system_settings (key, value, value_type) VALUES (?, ?, ?)`,
-		"knowledge_capture_enabled", "true", "bool",
+		"knowledge_enabled", "true", "bool",
 	); err != nil {
 		t.Fatalf("insert capture enabled: %v", err)
 	}

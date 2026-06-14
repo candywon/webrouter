@@ -99,7 +99,7 @@ func main() {
 	if knowledgeEnabled {
 		// 首次启动时如果 env 已开，确保 DB 设置同步
 		if !IsKnowledgeEnabled() {
-			// SetSetting("knowledge_capture_enabled", true)
+			db.Exec(`INSERT OR REPLACE INTO wr_system_settings (key, value, value_type, description, category, editable) VALUES (?, ?, ?, ?, ?, ?)`, "knowledge_enabled", "true", "bool", "Enable the Knowledge Base module", "knowledge", 1)
 		}
 	}
 	InitKnowledge()

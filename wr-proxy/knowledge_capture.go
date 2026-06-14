@@ -45,7 +45,7 @@ func IsKnowledgeEnabled() bool {
 	if IsKnowledgePaused() {
 		return false
 	}
-	v := LoadSetting("knowledge_capture_enabled", false)
+	v := LoadSetting("knowledge_enabled", false)
 	b, _ := v.(bool)
 	return b
 }

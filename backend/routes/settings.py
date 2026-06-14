@@ -407,7 +407,8 @@ def seed_features():
     # 清理已废弃的 seed 键（早期版本有但运行时从不读取，留在表里只会误导）
     obsolete_keys = ['health_check_interval', 'alert_cooldown', 'timezone',
                      'quota_warn_threshold', 'quota_critical_threshold',
-                     'prediction_days', 'idle_conn_timeout', 'max_idle_conns']
+                     'prediction_days', 'idle_conn_timeout', 'max_idle_conns',
+                     'knowledge_capture_enabled']
     removed = []
     for k in obsolete_keys:
         row = SystemSetting.query.filter_by(key=k).first()
