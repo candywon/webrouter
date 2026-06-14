@@ -28,18 +28,10 @@ def get_settings():
         'proxy_url': lambda: f"http://localhost:{app.config.get('PROXY_PORT', 5051)}",
         'gateway_url': lambda: f"http://localhost:{app.config.get('PROXY_PORT', 5051)}",
         'proxy_enabled': lambda: True,
-        'health_check_interval': lambda: app.config.get('HEALTH_CHECK_INTERVAL', 300),
-        'alert_cooldown': lambda: app.config.get('ALERT_COOLDOWN', 300),
-        'timezone': lambda: app.config.get('TZ', 'Asia/Shanghai'),
         'routing_strategy': lambda: app.config.get('ROUTING_STRATEGY', 'smart'),
         'default_timeout': lambda: app.config.get('DEFAULT_TIMEOUT', 60),
         'max_retry_count': lambda: app.config.get('MAX_RETRY_COUNT', 2),
         'max_failover': lambda: app.config.get('MAX_FAILOVER', 3),
-        'quota_warn_threshold': lambda: app.config.get('QUOTA_WARN_THRESHOLD', 0.2),
-        'quota_critical_threshold': lambda: app.config.get('QUOTA_CRITICAL_THRESHOLD', 0.05),
-        'prediction_days': lambda: app.config.get('PREDICTION_DAYS', 7),
-        'idle_conn_timeout': lambda: app.config.get('IDLE_CONN_TIMEOUT', 90),
-        'max_idle_conns': lambda: app.config.get('MAX_IDLE_CONNS', 100),
         'log_retention_days': lambda: 30,
         'health_test_configs': lambda: [],
         # wr-proxy 优化特性开关
@@ -178,10 +170,8 @@ def update_single_setting(key):
 @settings_bp.route('/<string:key>', methods=['DELETE'], strict_slashes=False)
 def delete_setting(key):
     """删除自定义设置项（种子设置不可删）"""
-    seed_keys = ['proxy_enabled', 'proxy_url', 'gateway_url', 'health_check_interval', 'alert_cooldown', 'timezone',
+    seed_keys = ['proxy_enabled', 'proxy_url', 'gateway_url',
                  'routing_strategy', 'default_timeout', 'max_retry_count', 'max_failover',
-                 'quota_warn_threshold', 'quota_critical_threshold', 'prediction_days',
-                 'idle_conn_timeout', 'max_idle_conns',
                  'feature_dynamic_content_last', 'feature_token_compression', 'feature_session_compression',
                  'smart_complexity_config']
 
@@ -414,6 +404,17 @@ def migrate_complexity_config(setting):
 def seed_features():
     """初始化 wr-proxy 优化特性开关 + 复杂度配置（创建 DB 记录）"""
     created = []
+    # 清理已废弃的 seed 键（早期版本有但运行时从不读取，留在表里只会误导）
+    obsolete_keys = ['health_check_interval', 'alert_cooldown', 'timezone',
+                     'quota_warn_threshold', 'quota_critical_threshold',
+                     'prediction_days', 'idle_conn_timeout', 'max_idle_conns']
+    removed = []
+    for k in obsolete_keys:
+        row = SystemSetting.query.filter_by(key=k).first()
+        if row:
+            db.session.delete(row)
+            removed.append(k)
+
     for defn in FEATURE_TOGGLE_DEFS:
         existing = SystemSetting.query.filter_by(key=defn['key']).first()
         if not existing:
@@ -452,7 +453,7 @@ def seed_features():
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': get_message('db_commit_failed', request).format(e=str(e))}), 500
-    return jsonify({'message': get_message('settings_initialized', request).format(len=len(created)), 'created': created})
+    return jsonify({'message': get_message('settings_initialized', request).format(len=len(created)), 'created': created, 'removed': removed})
 
 
 @settings_bp.route('/restore', methods=['POST'])
