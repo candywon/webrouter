@@ -12,7 +12,7 @@ description: 几分钟内让 WebRouter 运行起来
 ## 一键安装
 
 ```bash
-git clone https://github.com/<org>/webrouter.git
+git clone https://github.com/candywon/webrouter.git
 cd webrouter
 bash deploy/install.sh
 ```

@@ -17,7 +17,7 @@ description: Detailed installation instructions for WebRouter
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<org>/webrouter.git
+git clone https://github.com/candywon/webrouter.git
 cd webrouter
 ```
 

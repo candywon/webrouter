@@ -12,7 +12,7 @@ Don't want to install anything? Visit the **[live demo](https://demo.webrouter.t
 ## One-Click Install
 
 ```bash
-git clone https://github.com/<org>/webrouter.git
+git clone https://github.com/candywon/webrouter.git
 cd webrouter
 bash deploy/install.sh
 ```

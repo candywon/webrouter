@@ -224,11 +224,11 @@ webrouter-ce (BSL 1.1 → Apache-2.0, 公开仓库)
 
 | 仓库 | 可见性 | 协议 |
 |------|--------|------|
-| `github.com/<org>/webrouter` | 公开 | BSL 1.1 → Apache-2.0 |
-| `github.com/<org>/webrouter-docs` | 公开 | CC-BY-4.0 |
-| `github.com/<org>/webrouter-helm` | 公开 | Apache-2.0 |
-| `github.com/<org>/webrouter-ee`（私有）| 内部 | 专有 |
-| `github.com/<org>/webrouter-cloud`（私有）| 内部 | 专有 |
+| `github.com/candywon/webrouter` | 公开 | BSL 1.1 → Apache-2.0 |
+| `github.com/candywon/webrouter-docs` | 公开 | CC-BY-4.0 |
+| `github.com/candywon/webrouter-helm` | 公开 | Apache-2.0 |
+| `github.com/candywon/webrouter-ee`（私有）| 内部 | 专有 |
+| `github.com/candywon/webrouter-cloud`（私有）| 内部 | 专有 |
 
 ### 4.3 防绕过措施
 

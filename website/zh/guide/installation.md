@@ -17,7 +17,7 @@ description: WebRouter 详细安装说明
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/<org>/webrouter.git
+git clone https://github.com/candywon/webrouter.git
 cd webrouter
 ```
 

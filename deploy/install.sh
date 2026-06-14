@@ -108,8 +108,8 @@ if [ -f "$SCRIPT_DIR/../backend/app.py" ]; then
 else
     if [ ! -f "$INSTALL_DIR/backend/app.py" ]; then
         warn "从 GitHub 下载 WebRouter..."
-        curl -fsSL "https://github.com/user/webrouter/archive/refs/heads/main.tar.gz" | tar xz --strip-components=1 2>/dev/null || \
-            error "下载失败，请手动下载: https://github.com/user/webrouter"
+        curl -fsSL "https://github.com/candywon/webrouter/archive/refs/heads/main.tar.gz" | tar xz --strip-components=1 2>/dev/null || \
+            error "下载失败，请手动下载: https://github.com/candywon/webrouter"
     fi
 fi
 

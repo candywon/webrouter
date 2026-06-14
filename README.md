@@ -17,8 +17,8 @@
 <h1 align="center">WebRouter</h1>
 
 <p align="center">
-  <strong>Unified AI API Gateway</strong> — Manage all your LLM providers in one place.<br/>
-  One API key → OpenAI, Anthropic, Google, DeepSeek, Qwen, and more.
+  <strong>More Than a Proxy — Your AI Backend</strong><br/>
+  Unify 15+ LLM providers behind one API key. Built-in session memory, knowledge base (RAG), team management, cost tracking, and health monitoring. Self-hosted with one Docker command.
 </p>
 
 <p align="center">
@@ -42,9 +42,13 @@
 
 ## Why WebRouter?
 
-Managing multiple AI API providers is painful — scattered keys, no visibility into costs, no failover when a provider goes down. WebRouter gives you a **single control plane** for all your LLM traffic.
+**Other AI gateways just forward requests. WebRouter is a full-stack AI backend.**
+
+Managing multiple AI providers is painful — scattered keys, no cost visibility, no failover, no memory, no team controls. WebRouter gives you a **single control plane** for all your LLM traffic — plus the application-layer features most gateways don't bother with.
 
 - **Tired of hardcoding provider URLs?** → One gateway endpoint, auto-routed to the best provider
+- **Need your AI to remember conversations?** → Built-in session memory, not a stateless proxy
+- **Want your AI to know your docs?** → Built-in RAG knowledge base, no separate vector DB needed
 - **Worried about provider outages?** → Automatic health checks, cooldowns, and failover
 - **No idea how much you're spending?** → Per-model cost tracking, quotas, and billing reports
 - **Sharing API keys across the team?** → Token management with per-member quotas and model whitelists
@@ -106,7 +110,7 @@ Don't want to install anything? Try the live demo at **[demo.webrouter.tech](htt
 ### Install & Run
 
 ```bash
-git clone https://github.com/<org>/webrouter.git
+git clone https://github.com/candywon/webrouter.git
 cd webrouter
 bash deploy/install.sh
 ```
