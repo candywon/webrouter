@@ -12,10 +12,12 @@ class SettingsPage {
         this.filterCategory = '';
         this.editingKey = null;
         this.providers = [];
+        this.kb = null;
     }
 
     async load() {
         await this.loadProviders();
+        await this.loadKbStatus();
         await this.loadSettings();
         // 自动初始化 wr-proxy 优化特性开关
         const hasFeature = this.settings.some(s => s.key === 'feature_dynamic_content_last');
@@ -35,6 +37,15 @@ class SettingsPage {
             this.providers = (data.providers || []).filter(p => p.enabled);
         } catch (e) {
             this.providers = [];
+        }
+    }
+
+    async loadKbStatus() {
+        try {
+            const res = await fetch('/api/knowledge/status');
+            this.kb = await res.json();
+        } catch (e) {
+            this.kb = null;
         }
     }
 
@@ -172,6 +183,11 @@ class SettingsPage {
         const healthSetting = this.settings.find(s => s.key === 'health_test_configs');
         const alertSetting = this.settings.find(s => s.key === 'alert_smtp_host');
 
+        // 暂停知识库（仅 KB 已开通时显示，紧贴 wr-proxy 特性之前）
+        if (this.kb && this.kb.enabled) {
+            html += this.renderKbPauseCard();
+        }
+
         // wr-proxy 优化特性开关
         html += this.renderFeatureToggles();
 
@@ -288,6 +304,90 @@ class SettingsPage {
         }
 
         return html;
+    }
+
+    // 渲染暂停知识库卡片
+    renderKbPauseCard() {
+        const kb = this.kb || {};
+        const paused = !!kb.paused;
+        const permanent = !!kb.permanent;
+        const remainingDays = kb.remaining_days;
+
+        let badgeText, badgeColor, body;
+        if (!paused) {
+            badgeText = I18n.t('settings.kbPauseRunning');
+            badgeColor = 'var(--success)';
+            body = `
+                <p style="color:var(--text-muted);font-size:13px;margin:0 0 12px 0;">${I18n.t('settings.kbPauseHint')}</p>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                    <label style="font-size:13px;color:var(--text-secondary);">${I18n.t('settings.kbPauseDays')}</label>
+                    <input id="kb-pause-days" type="number" min="1" max="3650" value="7"
+                           style="width:90px;padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:14px;">
+                    <button class="btn-primary btn-sm" onclick="settingsPage.pauseKb(false)">${I18n.t('settings.kbPauseDaysBtn')}</button>
+                    <button class="btn-secondary btn-sm" onclick="settingsPage.pauseKb(true)" style="margin-left:auto;">${I18n.t('settings.kbPausePermanent')}</button>
+                </div>`;
+        } else {
+            const remainText = permanent
+                ? I18n.t('settings.kbPausePermanentLabel')
+                : I18n.t('settings.kbPauseRemaining', { days: remainingDays });
+            badgeText = I18n.t('settings.kbPausePaused');
+            badgeColor = 'var(--warning, #f59e0b)';
+            body = `
+                <p style="color:var(--text-secondary);font-size:13px;margin:0 0 12px 0;">${remainText}</p>
+                <button class="btn-primary btn-sm" onclick="settingsPage.resumeKb()">${I18n.t('settings.kbPauseResume')}</button>`;
+        }
+
+        return `
+        <div class="card" style="border-left:3px solid ${badgeColor};">
+            <div class="card-header">
+                <span class="card-title">${I18n.t('settings.kbPauseTitle')}</span>
+                <span style="margin-left:auto;font-size:12px;color:${badgeColor};">${badgeText}</span>
+            </div>
+            <div style="padding:16px;">
+                ${body}
+            </div>
+        </div>`;
+    }
+
+    async pauseKb(permanent) {
+        let payload;
+        if (permanent) {
+            if (!confirm(I18n.t('settings.kbPausePermanentConfirm'))) return;
+            payload = { permanent: true };
+        } else {
+            const inp = document.getElementById('kb-pause-days');
+            const days = parseInt(inp ? inp.value : 0, 10);
+            if (!days || days <= 0) {
+                showToast(I18n.t('settings.kbPauseInvalidDays'), 'error');
+                return;
+            }
+            payload = { days };
+        }
+        try {
+            const res = await fetch('/api/knowledge/pause', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            showToast(I18n.t('settings.kbPauseDone'));
+            await this.loadKbStatus();
+            this.render();
+        } catch (e) {
+            showToast(I18n.t('settings.kbPauseFailed') + (e.message || ''), 'error');
+        }
+    }
+
+    async resumeKb() {
+        try {
+            const res = await fetch('/api/knowledge/resume', { method: 'POST' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            showToast(I18n.t('settings.kbResumeDone'));
+            await this.loadKbStatus();
+            this.render();
+        } catch (e) {
+            showToast(I18n.t('settings.kbResumeFailed') + (e.message || ''), 'error');
+        }
     }
 
     // 渲染 wr-proxy 优化特性开关卡片

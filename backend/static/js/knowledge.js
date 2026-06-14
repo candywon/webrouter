@@ -5,6 +5,10 @@
 const KnowledgePage = {
   activeTab: 'stats',
   _enabled: null, // null = 未检查, true/false
+  _paused: false,
+  _pauseUntil: 0,
+  _permanent: false,
+  _remainingDays: null,
 
   async load() {
     // 先检查知识库是否已开通
@@ -12,8 +16,13 @@ const KnowledgePage = {
       const res = await fetch('/api/knowledge/status');
       const data = await res.json();
       this._enabled = data.enabled;
+      this._paused = !!data.paused;
+      this._pauseUntil = data.pause_until || 0;
+      this._permanent = !!data.permanent;
+      this._remainingDays = data.remaining_days;
     } catch (e) {
       this._enabled = false;
+      this._paused = false;
     }
 
     if (!this._enabled) {
@@ -21,8 +30,35 @@ const KnowledgePage = {
       return;
     }
 
+    if (this._paused) {
+      this.renderPaused();
+      return;
+    }
+
     this.render();
     this.loadStats();
+  },
+
+  renderPaused() {
+    const el = document.getElementById('knowledge-page-content');
+    const remainText = this._permanent
+      ? I18n.t('knowledge.pausedPermanent')
+      : I18n.t('knowledge.pausedRemaining', { days: this._remainingDays });
+    el.innerHTML = `
+      <div class="page-header">
+        <span class="page-title">${I18n.t('knowledge.enterpriseKnowledge')}</span>
+      </div>
+      <div class="empty-state" style="padding:60px 20px;text-align:center;">
+        <div class="icon" style="font-size:64px;margin-bottom:20px;">⏸️</div>
+        <h2 style="margin-bottom:12px;color:var(--text-primary);">${I18n.t('knowledge.pausedTitle')}</h2>
+        <p style="color:var(--text-secondary);max-width:480px;margin:0 auto 8px;line-height:1.6;">${remainText}</p>
+        <p style="color:var(--text-muted);font-size:13px;max-width:480px;margin:0 auto 24px;">
+          ${I18n.t('knowledge.pausedHint')}
+        </p>
+        <button class="btn-primary" style="font-size:15px;padding:10px 32px;"
+                onclick="location.hash = '#/settings'">${I18n.t('knowledge.goToSettings')}</button>
+      </div>
+    `;
   },
 
   renderOnboarding() {
