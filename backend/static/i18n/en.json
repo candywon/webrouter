@@ -956,7 +956,7 @@
   "settings.general": "General Settings",
   "settings.generalCat": "📋 General",
   "settings.healthTestConfig": "🔍 Vendor Health Test Config",
-  "settings.healthTestHint": "Used for direct Provider health checks. Matches test endpoint and request body by domain in base_url.",
+  "settings.healthTestHint": "Used for direct Provider health checks. Matches test endpoint and request body by domain in base_url. Defaults already cover OpenAI / Anthropic / DeepSeek / Qwen / Zhipu — most users never need to touch this. Only add a rule when you onboard a vendor whose endpoint path is non-standard (so the generic fallback to /v1/models or /v1/chat/completions doesn't work).",
   "settings.hitScore": "Hit Score",
   "settings.hitScoreLabel": "Hit Score",
   "settings.initFailed": "Initialization failed: ",

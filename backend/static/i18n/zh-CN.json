@@ -956,7 +956,7 @@
   "settings.general": "通用设置",
   "settings.generalCat": "📋 通用",
   "settings.healthTestConfig": "🔍 厂商健康测试配置",
-  "settings.healthTestHint": "直连 Provider 健康检测时使用，按 base_url 中的域名匹配测试端点和请求体。",
+  "settings.healthTestHint": "直连 Provider 健康检测时使用，按 base_url 中的域名匹配测试端点和请求体。默认已覆盖 OpenAI / Anthropic / DeepSeek / 通义千问 / 智谱 5 家主流厂商，普通场景无需调整；只有当你接入了 endpoint 路径非标的新厂商（generic fallback 走 /v1/models 或 /v1/chat/completions 都打不通）时才需要在此添加规则。",
   "settings.hitScore": "命中得分",
   "settings.hitScoreLabel": "命中得分",
   "settings.initFailed": "初始化失败: ",

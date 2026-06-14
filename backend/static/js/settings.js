@@ -212,43 +212,49 @@ class SettingsPage {
             </div>`;
         }
 
-        // 厂商健康测试配置
+        // 厂商健康测试配置（高级，默认折叠）
         if (healthSetting) {
             const configs = Array.isArray(healthSetting.value) ? healthSetting.value : [];
             html += `
             <div class="card">
-                <div class="card-header">
-                    <span class="card-title">${I18n.t('settings.healthTestConfig')}</span>
-                    <button class="btn-primary btn-sm" onclick="settingsPage.addHealthConfig()">${I18n.t('settings.addVendor')}</button>
-                </div>
-                <div style="padding:16px;">
-                    <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">${I18n.t('settings.healthTestHint')}</p>
-                    <table>
-                        <thead><tr>
-                            <th>${I18n.t('settings.vendorName')}</th><th>${I18n.t('settings.domainMatch')}</th><th>${I18n.t('settings.testEndpoint')}</th><th>${I18n.t('settings.testBody')}</th><th>${I18n.t('common.actions')}</th>
-                        </tr></thead>
-                        <tbody>
-                            ${configs.map((cfg, i) => `
-                            <tr>
-                                <td><input type="text" value="${this.escHtml(cfg.name || '')}"
-                                           onchange="settingsPage.updateHealthConfig(${i}, 'name', this.value)"
-                                           style="width:100px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;"></td>
-                                <td><input type="text" value="${this.escHtml(cfg.domain || '')}"
-                                           onchange="settingsPage.updateHealthConfig(${i}, 'domain', this.value)"
-                                           style="width:140px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;"></td>
-                                <td><input type="text" value="${this.escHtml(cfg.endpoint || '')}"
-                                           onchange="settingsPage.updateHealthConfig(${i}, 'endpoint', this.value)"
-                                           style="width:180px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;"></td>
-                                <td><input type="text" value="${this.escHtml(cfg.body || '')}"
-                                           onchange="settingsPage.updateHealthConfig(${i}, 'body', this.value)"
-                                           style="width:300px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:11px;font-family:monospace;"></td>
-                                <td><button class="btn-icon" onclick="settingsPage.removeHealthConfig(${i})" title="${I18n.t('common.delete')}">🗑️</button></td>
-                            </tr>`).join('')}
-                        </tbody>
-                    </table>
-                    <button class="btn-primary" onclick="settingsPage.saveHealthConfigs()" style="margin-top:12px;">${I18n.t('settings.saveAll')}</button>
-                    <button class="btn-secondary" onclick="settingsPage.resetHealthConfigs()" style="margin-top:12px;margin-left:8px;">${I18n.t('settings.restoreDefault')}</button>
-                </div>
+                <details>
+                    <summary style="display:flex;align-items:center;padding:12px 16px;cursor:pointer;list-style:none;border-bottom:1px solid var(--border);">
+                        <span class="card-title">${I18n.t('settings.healthTestConfig')}</span>
+                        <span style="margin-left:8px;padding:2px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;font-size:11px;color:var(--text-muted);">${I18n.t('settings.advanced')}</span>
+                        <span style="margin-left:auto;font-size:12px;color:var(--text-muted);">▾</span>
+                    </summary>
+                    <div style="padding:16px;">
+                        <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px;">${I18n.t('settings.healthTestHint')}</p>
+                        <div style="margin-bottom:12px;">
+                            <button class="btn-primary btn-sm" onclick="settingsPage.addHealthConfig()">${I18n.t('settings.addVendor')}</button>
+                        </div>
+                        <table>
+                            <thead><tr>
+                                <th>${I18n.t('settings.vendorName')}</th><th>${I18n.t('settings.domainMatch')}</th><th>${I18n.t('settings.testEndpoint')}</th><th>${I18n.t('settings.testBody')}</th><th>${I18n.t('common.actions')}</th>
+                            </tr></thead>
+                            <tbody>
+                                ${configs.map((cfg, i) => `
+                                <tr>
+                                    <td><input type="text" value="${this.escHtml(cfg.name || '')}"
+                                               onchange="settingsPage.updateHealthConfig(${i}, 'name', this.value)"
+                                               style="width:100px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;"></td>
+                                    <td><input type="text" value="${this.escHtml(cfg.domain || '')}"
+                                               onchange="settingsPage.updateHealthConfig(${i}, 'domain', this.value)"
+                                               style="width:140px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;"></td>
+                                    <td><input type="text" value="${this.escHtml(cfg.endpoint || '')}"
+                                               onchange="settingsPage.updateHealthConfig(${i}, 'endpoint', this.value)"
+                                               style="width:180px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;"></td>
+                                    <td><input type="text" value="${this.escHtml(cfg.body || '')}"
+                                               onchange="settingsPage.updateHealthConfig(${i}, 'body', this.value)"
+                                               style="width:300px;padding:4px 8px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:11px;font-family:monospace;"></td>
+                                    <td><button class="btn-icon" onclick="settingsPage.removeHealthConfig(${i})" title="${I18n.t('common.delete')}">🗑️</button></td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                        <button class="btn-primary" onclick="settingsPage.saveHealthConfigs()" style="margin-top:12px;">${I18n.t('settings.saveAll')}</button>
+                        <button class="btn-secondary" onclick="settingsPage.resetHealthConfigs()" style="margin-top:12px;margin-left:8px;">${I18n.t('settings.restoreDefault')}</button>
+                    </div>
+                </details>
             </div>`;
         }
 
